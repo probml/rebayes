@@ -10,6 +10,7 @@ import flax.linen as nn
 from chex import dataclass
 from typing import Callable
 from functools import partial
+from jax_tqdm import scan_tqdm
 from jaxtyping import Float, Array, PyTree
 from jax.flatten_util import ravel_pytree
 
@@ -54,14 +55,17 @@ def log_joint(
     logprob = logp_prior + logp_obs
     return logprob
 
-
-def inference_loop(rng_key, kernel, initial_state, num_samples):
-    def one_step(state, rng_key):
-        state, _ = kernel(rng_key, state)
+def inference_loop(rng_key, kernel, initial_state, num_samples, tqdm=True):
+    def one_step(state, num_step):
+        key = jax.random.fold_in(rng_key, num_step)
+        state, _ = kernel(key, state)
         return state, state
+    
+    if tqdm:
+        one_step = scan_tqdm(num_samples)(one_step)
 
-    keys = jax.random.split(rng_key, num_samples)
-    _, states = jax.lax.scan(one_step, initial_state, keys)
+    steps = jnp.arange(num_samples)
+    _, states = jax.lax.scan(one_step, initial_state, steps)
 
     return states
 
@@ -76,6 +80,7 @@ def inference(
     y: Float[Array, "num_obs"],
     num_warmup: int,
     num_steps: int,
+    tqdm: bool = True,
 ):
     key_warmup, key_train = jax.random.split(key)
     potential = partial(
@@ -85,6 +90,6 @@ def inference(
 
     adapt = blackjax.window_adaptation(blackjax.nuts, potential, num_warmup)
     final_state, kernel, _ = adapt.run(key_warmup, params_init)
-    states = inference_loop(key_train, kernel, final_state, num_steps)
+    states = inference_loop(key_train, kernel, final_state, num_steps, tqdm)
 
     return states
