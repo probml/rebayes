@@ -8,10 +8,10 @@ import blackjax
 import jax.numpy as jnp
 import flax.linen as nn
 from chex import dataclass
-from typing import Callable, Union, List
 from tqdm.auto import tqdm
 from functools import partial
 from jax_tqdm import scan_tqdm
+from typing import Callable, Union, List
 from jaxtyping import Float, Array, PyTree
 from jax.flatten_util import ravel_pytree
 
@@ -100,10 +100,38 @@ def inference(
 class RebayesHMC:
     def __init__(self, apply_fn, priors, log_joint, num_samples, num_warmup):
         self.apply_fn = apply_fn
-        self.log_joint = log_joint
         self.priors = priors
-        self.num_warmup = num_warmup
+        self.log_joint = log_joint
         self.num_samples = num_samples
+        self.num_warmup = num_warmup
+    
+
+    @partial(jax.jit, static_argnums=(0,))
+    def eval(self, bel, X):
+        """
+        Evaluate the model at the given parameters
+        """
+        yhat_samples = jax.vmap(self.apply_fn, (0, None))(bel, X)
+        return yhat_samples
+
+    def predict_obs(self, bel, X):
+        """
+        Estimate posterior predictive
+        """
+        yhat_samples = self.eval(bel, X)
+        yhat = yhat_samples.mean(axis=0)
+        return yhat
+    
+    def predict_state(self, bel, X):
+        return bel
+
+    def update_state(self, bel, X, y, key, tqdm=False):
+        state = inference(
+            key, self.apply_fn, self.log_joint, bel, self.priors,
+            X, y, self.num_warmup, self.num_samples,
+            tqdm=tqdm
+        )
+        return state.position
 
     def scan(
         self,
@@ -123,12 +151,10 @@ class RebayesHMC:
             X_eval = X[:n_eval]
             y_eval = y[:n_eval]
 
-            states = inference(
-                key, self.apply_fn, self.log_joint, params_init, self.priors,
-                X_eval, y_eval, self.num_warmup, self.num_samples,
-                tqdm=False
-            )
+            bel_update = self.update_state(params_init, X_eval, y_eval, key)
+            params_hist[n_eval] = bel_update
 
-            params_hist[n_eval] = states.position
+            if callback is not None:
+                callback(bel_update, n_eval)
         
         return params_hist
