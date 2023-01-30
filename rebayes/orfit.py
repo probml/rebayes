@@ -7,15 +7,15 @@ Retrieved from https://arxiv.org/abs/2207.13853
 """
 
 import time
+from functools import partial
 
 import jax.numpy as jnp
-from jax import jacrev
-from jax import vmap
+from jax import jacrev, vmap, jit
 from jax.lax import scan
 from jaxtyping import Float, Array
 from typing import Callable, NamedTuple
 import chex
-# from jax_tqdm import scan_tqdm #TODO: Figure out why this fails in GH Workflow and add back in
+from jax_tqdm import scan_tqdm
 
 from dynamax.nonlinear_gaussian_ssm.models import FnStateAndInputToEmission
 
@@ -40,6 +40,7 @@ class ORFitParams(NamedTuple):
     apply_function: FnStateAndInputToEmission
     loss_function: FnStateInputAndOutputToLoss
     memory_size: int
+    sv_threshold: float = 0.0
 
 
 class PosteriorORFitFiltered(NamedTuple):
@@ -49,7 +50,7 @@ class PosteriorORFitFiltered(NamedTuple):
     filtered_bases: Float[Array, "ntime state_dim memory_size"]
 
 
-def _orfit_condition_on(m, U, Sigma, loss_fn, apply_fn, x, y):
+def _orfit_condition_on(m, U, Sigma, loss_fn, apply_fn, x, y, sv_threshold):
     """Condition on the emission using orfit
 
     Args:
@@ -60,6 +61,7 @@ def _orfit_condition_on(m, U, Sigma, loss_fn, apply_fn, x, y):
         apply_fn (Callable): Apply function.
         x (D_in): Control input.
         y (D_obs): Emission.
+        sv_threshold (float): Threshold for singular values.
 
     Returns:
         m_cond (D_hid): Posterior mean.
@@ -77,8 +79,8 @@ def _orfit_condition_on(m, U, Sigma, loss_fn, apply_fn, x, y):
 
     # Update the U matrix
     u = _normalize(v_prime)
-    U_cond = jnp.where(Sigma.min() > u @ v_prime, U, U.at[:, Sigma.argmin()].set(u))
-    Sigma_cond = jnp.where(Sigma.min() > u @ v_prime, Sigma, Sigma.at[Sigma.argmin()].set(u.T @ v_prime))
+    U_cond = jnp.where(Sigma.min() > u @ v_prime or u @ v_prime < sv_threshold, U, U.at[:, Sigma.argmin()].set(u))
+    Sigma_cond = jnp.where(Sigma.min() > u @ v_prime or u @ v_prime < sv_threshold, Sigma, Sigma.at[Sigma.argmin()].set(u.T @ v_prime))
 
     # Update the parameters
     eta = _stable_division((f_fn(m) - y), (v.T @ g_tilde))
@@ -103,7 +105,7 @@ def orthogonal_recursive_fitting(
         filtered_posterior: posterior object.
     """
     # Initialize parameters
-    initial_mean, apply_fn, loss_fn, memory_limit = model_params
+    initial_mean, apply_fn, loss_fn, memory_limit, sv_threshold = model_params
     U, Sigma = jnp.zeros((len(initial_mean), memory_limit)), jnp.zeros((memory_limit,))
 
     def _step(carry, t):
@@ -113,7 +115,7 @@ def orthogonal_recursive_fitting(
         x, y = inputs[t], emissions[t]
 
         # Condition on the emission
-        filtered_params, filtered_U, filtered_Sigma = _orfit_condition_on(params, U, Sigma, loss_fn, apply_fn, x, y)
+        filtered_params, filtered_U, filtered_Sigma = _orfit_condition_on(params, U, Sigma, loss_fn, apply_fn, x, y, sv_threshold)
 
         return (filtered_params, filtered_U, filtered_Sigma), (filtered_params, filtered_U)
     
@@ -146,6 +148,7 @@ class RebayesORFit:
     def initialize(self):
         return ORFitBel(mean=self.mu0, basis=self.U0, sigma=self.Sigma0)
 
+    partial(jit, static_argnums=(0,))
     def update(self, bel, u, y):
         m, U, Sigma = bel.mean, bel.basis, bel.sigma # prior predictive for hidden state
         m_cond, U_cond, Sigma_cond = self.update_fn(m, U, Sigma, self.loss_fn, self.apply_fn, u, y)
@@ -154,7 +157,7 @@ class RebayesORFit:
     def scan(self, X, Y, callback=None):
         num_timesteps = X.shape[0]
         
-        # @scan_tqdm(num_timesteps)
+        @scan_tqdm(num_timesteps)
         def step(bel, t):
             bel = self.update(bel, X[t], Y[t])
             out = None
