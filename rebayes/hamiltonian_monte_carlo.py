@@ -8,7 +8,8 @@ import blackjax
 import jax.numpy as jnp
 import flax.linen as nn
 from chex import dataclass
-from typing import Callable
+from typing import Callable, Union, List
+from tqdm.auto import tqdm
 from functools import partial
 from jax_tqdm import scan_tqdm
 from jaxtyping import Float, Array, PyTree
@@ -55,6 +56,7 @@ def log_joint(
     logprob = logp_prior + logp_obs
     return logprob
 
+
 def inference_loop(rng_key, kernel, initial_state, num_samples, tqdm=True):
     def one_step(state, num_step):
         key = jax.random.fold_in(rng_key, num_step)
@@ -93,3 +95,40 @@ def inference(
     states = inference_loop(key_train, kernel, final_state, num_steps, tqdm)
 
     return states
+
+
+class RebayesHMC:
+    def __init__(self, apply_fn, priors, log_joint, num_samples, num_warmup):
+        self.apply_fn = apply_fn
+        self.log_joint = log_joint
+        self.priors = priors
+        self.num_warmup = num_warmup
+        self.num_samples = num_samples
+
+    def scan(
+        self,
+        key: jax.random.PRNGKey,
+        params_init: nn.FrozenDict,
+        X: Float[Array, "ntime ..."],
+        y: Float[Array, "ntime emission_dim"],
+        eval_steps: Union[List, None] = None,
+        callback: Callable = None,
+    ):
+        num_samples = len(y)
+        if eval_steps is None:
+            eval_steps = list(range(num_samples))
+
+        params_hist = {} 
+        for n_eval in tqdm(eval_steps):
+            X_eval = X[:n_eval]
+            y_eval = y[:n_eval]
+
+            states = inference(
+                key, self.apply_fn, self.log_joint, params_init, self.priors,
+                X_eval, y_eval, self.num_warmup, self.num_samples,
+                tqdm=False
+            )
+
+            params_hist[n_eval] = states.position
+        
+        return params_hist
