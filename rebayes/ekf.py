@@ -4,6 +4,8 @@ from tensorflow_probability.substrates.jax.distributions import MultivariateNorm
 import chex
 from typing import Callable
 
+from jax_tqdm import scan_tqdm
+
 from dynamax.generalized_gaussian_ssm.models import ParamsGGSSM
 from rebayes.diagonal_inference import _fully_decoupled_ekf_condition_on
 from rebayes.diagonal_inference import _variational_diagonal_ekf_condition_on
@@ -30,12 +32,12 @@ class RebayesEKF:
             Q = ssm_params.dynamics_covariance
         elif method == 'vdekf':
             self.update_fn = _variational_diagonal_ekf_condition_on
-            Sigma0 = _take_diagonal(ssm_params.initial_covariance)
-            Q = _take_diagonal(ssm_params.dynamics_covariance)
+            Sigma0 = ssm_params.initial_cov_diag
+            Q = ssm_params.dynamics_cov_diag
         elif method == 'fdekf':
             self.update_fn = _fully_decoupled_ekf_condition_on
-            Sigma0 = _take_diagonal(ssm_params.initial_covariance)
-            Q = _take_diagonal(ssm_params.dynamics_covariance)
+            Sigma0 = ssm_params.initial_cov_diag
+            Q = ssm_params.dynamics_cov_diag
         else:
             raise ValueError('unknown method ', method)
         self.mu0 = ssm_params.initial_mean
@@ -54,8 +56,11 @@ class RebayesEKF:
 
     def scan(self, X, Y, callback=None):
         num_timesteps = X.shape[0]
+
+        @scan_tqdm(num_timesteps)
         def step(bel, t):
             bel = self.update(bel, X[t], Y[t])
+            out = None
             if callback is not None:
                 out = callback(bel, t, X[t], Y[t])
             return bel, out
