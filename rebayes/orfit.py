@@ -79,9 +79,16 @@ def _orfit_condition_on(m, U, Sigma, loss_fn, apply_fn, x, y, sv_threshold):
 
     # Update the U matrix
     u = _normalize(v_prime)
-    U_cond = jnp.where(Sigma.min() > u @ v_prime or u @ v_prime < sv_threshold, U, U.at[:, Sigma.argmin()].set(u))
-    Sigma_cond = jnp.where(Sigma.min() > u @ v_prime or u @ v_prime < sv_threshold, Sigma, Sigma.at[Sigma.argmin()].set(u.T @ v_prime))
-
+    U_cond = jnp.where(
+        Sigma.min() < u @ v_prime, 
+        jnp.where(sv_threshold < u @ v_prime, U.at[:, Sigma.argmin()].set(u), U),
+        U
+    )
+    Sigma_cond = jnp.where(
+        Sigma.min() < u @ v_prime,
+        jnp.where(sv_threshold < u @ v_prime, Sigma.at[Sigma.argmin()].set(u.T @ v_prime), Sigma),
+        Sigma,
+    )
     # Update the parameters
     eta = _stable_division((f_fn(m) - y), (v.T @ g_tilde))
     m_cond = m - eta * g_tilde
@@ -140,6 +147,7 @@ class RebayesORFit:
         self.update_fn = _orfit_condition_on
         self.mu0 = orfit_params.initial_mean
         self.m = orfit_params.memory_size
+        self.sv_threshold = orfit_params.sv_threshold
         self.U0 = jnp.zeros((len(self.mu0), self.m))
         self.Sigma0 = jnp.zeros((self.m,))
         self.apply_fn = orfit_params.apply_function
@@ -151,7 +159,7 @@ class RebayesORFit:
     partial(jit, static_argnums=(0,))
     def update(self, bel, u, y):
         m, U, Sigma = bel.mean, bel.basis, bel.sigma # prior predictive for hidden state
-        m_cond, U_cond, Sigma_cond = self.update_fn(m, U, Sigma, self.loss_fn, self.apply_fn, u, y)
+        m_cond, U_cond, Sigma_cond = self.update_fn(m, U, Sigma, self.loss_fn, self.apply_fn, u, y, self.sv_threshold)
         return ORFitBel(mean=m_cond, basis=U_cond, sigma=Sigma_cond)
 
     def scan(self, X, Y, callback=None):
