@@ -125,13 +125,16 @@ class RebayesHMC:
     def predict_state(self, bel, X):
         return bel
 
-    def update_state(self, bel, X, y, key, tqdm=False):
+    def update_state(self, bel, X, y, key, tqdm=False, return_state=False):
         state = inference(
             key, self.apply_fn, self.log_joint, bel, self.priors,
             X, y, self.num_warmup, self.num_samples,
             tqdm=tqdm
         )
-        return state.position
+        if return_state:
+            return state
+        else:
+            return state.position
 
     def scan(
         self,
