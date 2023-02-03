@@ -3,9 +3,9 @@ import numpy as np
 import jax.numpy as jnp
 import time
 
-from dynamax.utils import datasets
-from dynamax.rebayes.utils import get_mlp_flattened_params
-from dynamax.rebayes.orfit import ORFitParams, orthogonal_recursive_fitting, RebayesORFit
+from rebayes.utils import datasets
+from rebayes.utils.utils import get_mlp_flattened_params
+from rebayes.orfit import ORFitParams, orthogonal_recursive_fitting, RebayesORFit
 from dynamax.generalized_gaussian_ssm.models import ParamsGGSSM
 from dynamax.generalized_gaussian_ssm.inference import EKFIntegrals, conditional_moments_gaussian_filter
 
@@ -95,7 +95,7 @@ def test_rebayes_orfit_loop():
 
     # Run Infinite-memory ORFit
     orfit_params = setup_orfit(n_train)
-    estimator = RebayesORFit(orfit_params)
+    estimator = RebayesORFit(orfit_params, method='orfit')
     orfit_before_time = time.time()
     bel = estimator.initialize()
     for i in range(n_train):
@@ -120,7 +120,7 @@ def test_rebayes_orfit_scan():
 
     # Run Infinite-memory ORFit
     orfit_params = setup_orfit(n_train)
-    estimator = RebayesORFit(orfit_params)
+    estimator = RebayesORFit(orfit_params, method='orfit')
     def callback(bel, t, x, y):
         return bel.mean
     orfit_before_time = time.time()
