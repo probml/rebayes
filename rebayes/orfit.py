@@ -145,9 +145,9 @@ def _generalized_orfit_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x
     R = jnp.atleast_2d(Cov_Y(m))
     H = _jacrev_2d(m_Y, m)
     A = jnp.linalg.cholesky(jnp.linalg.pinv(R))
-    W_tilde = jnp.hstack([Sigma * U, H.T @ A])
+    W_tilde = jnp.hstack([Sigma * U, (H.T @ A).squeeze()])
     S = eta*jnp.eye(W_tilde.shape[1]) + W_tilde.T @ W_tilde
-    K = (jnp.eye(len(m)) - W_tilde @ jnp.linalg.pinv(S) @ W_tilde.T) @ H.T @ A @ A.T
+    K = (H.T @ A) @ A.T - W_tilde @ (jnp.linalg.pinv(S) @ (W_tilde.T @ ((H.T @ A) @ A.T)))
 
     m_cond = m + K/eta @ (y - yhat)
     U_tilde = (H.T - U @ (U.T @ H.T)) @ A
@@ -315,7 +315,7 @@ class RebayesORFit:
     def initialize(self):
         return ORFitBel(mean=self.mu0, basis=self.U0, sigma=self.Sigma0)
 
-    partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,))
     def update(self, bel, u, y):
         m, U, Sigma = bel.mean, bel.basis, bel.sigma # prior predictive for hidden state
         if self.method == 'orfit':
