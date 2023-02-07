@@ -49,6 +49,7 @@ class RebayesEKF:
     def initialize(self):
         return GaussianBel(mean=self.mu0, cov=self.Sigma0)
 
+    @partial(jit, static_argnums=(0,))
     def update(self, bel, u, y):
         m, P = bel.mean, bel.cov + self.Q # prior predictive for hidden state
         mu, Sigma = self.update_fn(m, P, self.mean_Y, self.cov_Y, u, y, num_iter=1)
