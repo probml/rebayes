@@ -1,7 +1,7 @@
 from functools import partial
 
 from jax import numpy as jnp
-from jax import lax, jacrev, vmap
+from jax import lax, jacrev, vmap, jit
 from tensorflow_probability.substrates.jax.distributions import MultivariateNormalDiag as MVN
 import chex
 from typing import Callable
