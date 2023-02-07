@@ -1,9 +1,10 @@
+from functools import partial
+
 from jax import numpy as jnp
 from jax import lax, jacrev, vmap
 from tensorflow_probability.substrates.jax.distributions import MultivariateNormalDiag as MVN
 import chex
 from typing import Callable
-
 from jax_tqdm import scan_tqdm
 
 from dynamax.generalized_gaussian_ssm.models import ParamsGGSSM
