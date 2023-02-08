@@ -134,3 +134,37 @@ def train_step_fifo(
     state = state.apply_gradients(grads=grads)
     return loss, state
     
+
+def train_fifo(
+    buffer_size: int,
+    state: TrainState,
+    X: Float[Array, "num_obs dim_obs"],
+    y: Float[Array, "num_obs"],
+    loss: Callable[[PyTree, Float[Array, "num_obs dim_obs"], Float[Array, "num_obs"], Callable], float],
+    X_test: Union[None, Float[Array, "num_obs_test dim_obs"]] = None,
+    y_test: Union[None, Float[Array, "num_obs_test"]] = None,
+    loss_test_fn: Callable = None,
+    n_inner: int = 1,
+):
+    num_obs = X.shape[0]
+    loss_grad = jax.value_and_grad(loss, 0)
+
+    def epoch_step(state, t):
+        ixs = get_fifo_batches(t, buffer_size)
+        for _ in range(n_inner):
+            loss_train, state = train_step_fifo(X, y, ixs, state, loss_grad)
+
+        if (X_test is not None) and (y_test is not None):
+            loss_test = loss_test_fn(state.params, X_test, y_test, state.apply_fn)
+        else:
+            loss_test = None
+
+        losses = {
+            "train": loss_train,
+            "test": loss_test,
+        } 
+        return state, losses
+    
+    steps = jnp.arange(num_obs)
+    state, losses = jax.lax.scan(epoch_step, state, steps)
+    return state, losses
