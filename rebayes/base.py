@@ -113,7 +113,8 @@ class Rebayes(ABC):
         self,
         X: Float[Array, "ntime input_dim"],
         Y: Float[Array, "ntime emission_dim"],
-        callback=None
+        callback=None,
+        bel=None
     ) -> Tuple[Gaussian, Any]:
         """Apply filtering to entire sequence of data. Return final belief state and outputs from callback."""
         num_timesteps = X.shape[0]
@@ -127,8 +128,9 @@ class Rebayes(ABC):
             if callback is not None:
                 out = callback(pred_obs, bel, t, X[t], Y[t])
             return bel, out
-
-        carry = self.init_bel()
+        carry = bel
+        if bel is None:
+            carry = self.init_bel()
         bel, outputs = scan(step, carry, jnp.arange(num_timesteps))
         return bel, outputs
     
