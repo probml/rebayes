@@ -1,9 +1,10 @@
+from functools import partial
+
 from jax import numpy as jnp
-from jax import lax, jacrev, vmap
+from jax import lax, jacrev, vmap, jit
 from tensorflow_probability.substrates.jax.distributions import MultivariateNormalDiag as MVN
 import chex
 from typing import Callable
-
 from jax_tqdm import scan_tqdm
 
 from dynamax.generalized_gaussian_ssm.models import ParamsGGSSM
@@ -49,6 +50,7 @@ class RebayesEKF:
     def initialize(self):
         return GaussianBel(mean=self.mu0, cov=self.Sigma0)
 
+    @partial(jit, static_argnums=(0,))
     def update(self, bel, u, y):
         m, P = bel.mean, bel.cov + self.Q # prior predictive for hidden state
         mu, Sigma = self.update_fn(m, P, self.mean_Y, self.cov_Y, u, y, num_iter=1)
