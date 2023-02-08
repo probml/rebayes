@@ -35,14 +35,10 @@ def setup_orfit(memory_size):
     model_dims = [input_dim, *hidden_dims, output_dim]
     _, flat_params, _, apply_fn = get_mlp_flattened_params(model_dims)
 
-    # L2 loss
-    loss_fn = lambda w, x, y: (apply_fn(w, x) - y)**2
-
     # Define ORFit parameters
     orfit_params = ORFitParams(
         initial_mean=flat_params,
         apply_function=apply_fn,
-        loss_function=loss_fn,
         memory_size=memory_size,
     )
     return orfit_params

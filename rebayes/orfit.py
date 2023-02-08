@@ -21,9 +21,6 @@ from dynamax.nonlinear_gaussian_ssm.models import FnStateAndInputToEmission
 from dynamax.generalized_gaussian_ssm.models import FnStateAndInputToEmission2
 
 
-FnStateInputAndOutputToLoss = Callable[[Float[Array, "state_dim"], Float[Array, "input_dim"], Float[Array, "output_dim"]], Float[Array, ""]]
-
-
 # Helper functions
 _jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
 _stable_division = lambda a, b: jnp.where(b.any(), a / b, jnp.zeros(shape=a.shape))
@@ -40,7 +37,6 @@ class ORFitParams(NamedTuple):
     """
     initial_mean: Float[Array, "state_dim"]
     apply_function: FnStateAndInputToEmission
-    loss_function: FnStateInputAndOutputToLoss
     memory_size: int
     sv_threshold: float = 0.0
 
@@ -73,14 +69,13 @@ class GeneralizedPosteriorORFitFiltered(NamedTuple):
     filtered_sigmas: Float[Array, "ntime memory_size"]
 
 
-def _orfit_condition_on(m, U, Sigma, loss_fn, apply_fn, x, y, sv_threshold):
+def _orfit_condition_on(m, U, Sigma, apply_fn, x, y, sv_threshold):
     """Condition on the emission using orfit
 
     Args:
         m (D_hid,): Prior mean.
         U (D_hid, D_mem,): Prior basis.
         Sigma (D_mem,): Prior singular values.
-        loss_fn (Callable): Loss function.
         apply_fn (Callable): Apply function.
         x (D_in,): Control input.
         y (D_obs,): Emission.
@@ -91,13 +86,10 @@ def _orfit_condition_on(m, U, Sigma, loss_fn, apply_fn, x, y, sv_threshold):
         U_cond (D_hid, D_mem,): Posterior basis.
         Sigma_cond (D_mem,): Posterior singular values.
     """    
-    l_fn = lambda w: loss_fn(w, x, y)
     f_fn = lambda w: apply_fn(w, x)
 
     # Compute Jacobians and project out the orthogonal components
-    g = jacrev(l_fn)(m).squeeze()
     v = jacrev(f_fn)(m).squeeze()
-    g_tilde = g - _project_to_columns(U, g)
     v_prime = v - _project_to_columns(U, v)
 
     # Update the U matrix
@@ -113,8 +105,7 @@ def _orfit_condition_on(m, U, Sigma, loss_fn, apply_fn, x, y, sv_threshold):
         Sigma,
     )
     # Update the parameters
-    eta = _stable_division((f_fn(m) - y), (v.T @ g_tilde))
-    m_cond = m - eta * g_tilde
+    m_cond = m - _stable_division((f_fn(m) - y) * v_prime, v.T @ v_prime)
 
     return m_cond, U_cond, Sigma_cond
 
@@ -209,7 +200,7 @@ def orthogonal_recursive_fitting(
         filtered_posterior: Posterior object.
     """
     # Initialize parameters
-    initial_mean, apply_fn, loss_fn, memory_limit, sv_threshold = model_params
+    initial_mean, apply_fn, memory_limit, sv_threshold = model_params
     U, Sigma = jnp.zeros((len(initial_mean), memory_limit)), jnp.zeros((memory_limit,))
 
     def _step(carry, t):
@@ -219,7 +210,7 @@ def orthogonal_recursive_fitting(
         x, y = inputs[t], emissions[t]
 
         # Condition on the emission
-        filtered_params, filtered_U, filtered_Sigma = _orfit_condition_on(params, U, Sigma, loss_fn, apply_fn, x, y, sv_threshold)
+        filtered_params, filtered_U, filtered_Sigma = _orfit_condition_on(params, U, Sigma, apply_fn, x, y, sv_threshold)
 
         return (filtered_params, filtered_U, filtered_Sigma), (filtered_params, filtered_U)
     
@@ -296,11 +287,11 @@ class RebayesORFit:
             self.method = method
             self.update_fn = _orfit_condition_on
             self.apply_fn = orfit_params.apply_function
-            self.loss_fn = orfit_params.loss_function
         elif method == 'generalized_orfit':
             self.method = method
             self.eta = orfit_params.initial_precision
             self.update_fn = _generalized_orfit_condition_on
+            self.predict_fn = _generalized_orfit_predict
             self.gamma = orfit_params.dynamics_decay
             self.q = orfit_params.dynamics_noise
             self.f = orfit_params.emission_mean_function
@@ -320,9 +311,10 @@ class RebayesORFit:
     def update(self, bel, u, y):
         m, U, Sigma = bel.mean, bel.basis, bel.sigma # prior predictive for hidden state
         if self.method == 'orfit':
-            m_cond, U_cond, Sigma_cond = self.update_fn(m, U, Sigma, self.loss_fn, self.apply_fn, u, y, self.sv_threshold)    
+            m_cond, U_cond, Sigma_cond = self.update_fn(m, U, Sigma, self.apply_fn, u, y, self.sv_threshold)    
         elif self.method == 'generalized_orfit':
-            m_cond, U_cond, Sigma_cond = self.update_fn(m, U, Sigma, self.eta, self.f, self.r, u, y, self.sv_threshold)
+            m_pred, Sigma_pred = self.predict_fn(m, Sigma, self.gamma, self.q)
+            m_cond, U_cond, Sigma_cond = self.update_fn(m_pred, U, Sigma_pred, self.eta, self.f, self.r, u, y, self.sv_threshold)
         return ORFitBel(mean=m_cond, basis=U_cond, sigma=Sigma_cond)
 
     def scan(self, X, Y, callback=None):
