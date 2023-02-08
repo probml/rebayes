@@ -301,6 +301,7 @@ class RebayesORFit:
             self.method = method
             self.eta = orfit_params.initial_precision
             self.update_fn = _generalized_orfit_condition_on
+            self.predict_fn = _generalized_orfit_predict
             self.gamma = orfit_params.dynamics_decay
             self.q = orfit_params.dynamics_noise
             self.f = orfit_params.emission_mean_function
@@ -322,7 +323,8 @@ class RebayesORFit:
         if self.method == 'orfit':
             m_cond, U_cond, Sigma_cond = self.update_fn(m, U, Sigma, self.loss_fn, self.apply_fn, u, y, self.sv_threshold)    
         elif self.method == 'generalized_orfit':
-            m_cond, U_cond, Sigma_cond = self.update_fn(m, U, Sigma, self.eta, self.f, self.r, u, y, self.sv_threshold)
+            m_pred, Sigma_pred = self.predict_fn(m, Sigma, self.gamma, self.q)
+            m_cond, U_cond, Sigma_cond = self.update_fn(m_pred, U, Sigma_pred, self.eta, self.f, self.r, u, y, self.sv_threshold)
         return ORFitBel(mean=m_cond, basis=U_cond, sigma=Sigma_cond)
 
     def scan(self, X, Y, callback=None):
