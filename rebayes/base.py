@@ -1,9 +1,9 @@
 from abc import ABC
 from abc import abstractmethod
-import time
+from functools import partial
 
 import jax.numpy as jnp
-from jax import jacrev, jacfwd, vmap
+from jax import jacrev, jit
 from jax.lax import scan
 from jaxtyping import Float, Array
 from typing import Callable, NamedTuple, Union, Tuple, Any
@@ -65,6 +65,7 @@ class Rebayes(ABC):
     def init_bel(self):
         return Gaussian(mean=self.params.initial_mean, cov=self.params.initial_covariance)
 
+    @partial(jit, static_argnums=(0,))
     def predict_state(
         self,
         bel: Gaussian
@@ -79,6 +80,7 @@ class Rebayes(ABC):
         pred_cov = F @ P @ F.T + Q
         return Gaussian(mean=pred_mean, cov=pred_cov)
 
+    @partial(jit, static_argnums=(0,))
     def predict_obs(
         self,
         bel: Gaussian,
