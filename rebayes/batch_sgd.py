@@ -1,8 +1,8 @@
 import jax
 import jax.numpy as jnp
 from functools import partial
-from typing import Callable, Tuple
-from jaxtyping import Float, Int, Array
+from typing import Callable, Tuple, Union
+from jaxtyping import Float, Int, Array, PyTree
 from flax.training.train_state import TrainState
 
 @partial(jax.jit, static_argnames=("applyfn",))
@@ -70,6 +70,38 @@ def train_epoch(
     return loss_epoch, state
 
 
+def train_full(
+    key: jax.random.PRNGKey,
+    num_epochs: int,
+    batch_size: int,
+    state: TrainState,
+    X: Float[Array, "num_obs dim_obs"],
+    y: Float[Array, "num_obs"],
+    loss: Callable[[PyTree, Float[Array, "num_obs dim_obs"], Float[Array, "num_obs"], Callable], float],
+    X_test: Union[None, Float[Array, "num_obs_test dim_obs"]] = None,
+    y_test: Union[None, Float[Array, "num_obs_test"]] = None,
+):
+    loss_grad = jax.value_and_grad(loss, 0)
+
+    def epoch_step(state, t):
+        keyt = jax.random.fold_in(key, t)
+        loss_train, state = train_epoch(keyt, batch_size, state, X, y, loss_grad)
+
+        if (X_test is not None) and (y_test is not None):
+            loss_test = loss(state.params, X_test, y_test, state.apply_fn)
+        else:
+            loss_test = None
+
+        losses = {
+            "train": loss_train,
+            "test": loss_test,
+        } 
+        return state, losses
+    steps = jnp.arange(num_epochs)
+    state, losses = jax.lax.scan(epoch_step, state, steps)
+    return state, losses
+
+
 @partial(jax.jit, static_argnames=("buffer_size",))
 def get_fifo_batches(ix, buffer_size):
     ix_lookback = (ix - buffer_size) + 1
@@ -101,3 +133,4 @@ def train_step_fifo(
     loss, grads = loss_grad(state.params, X, y, ixs, state.apply_fn)
     state = state.apply_gradients(grads=grads)
     return loss, state
+    
