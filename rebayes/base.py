@@ -8,7 +8,7 @@ from jax.lax import scan
 from jaxtyping import Float, Array
 from typing import Callable, NamedTuple, Union, Tuple, Any
 import chex
-# from jax_tqdm import scan_tqdm #TODO: Figure out why this fails in GH Workflow and add back in
+from jax_tqdm import scan_tqdm
 
 _jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
 
@@ -42,7 +42,7 @@ Belief = Gaussian # Can be over-ridden by other representations (e.g., MCMC samp
 class RebayesParams(NamedTuple):
     initial_mean: Float[Array, "state_dim"]
     initial_covariance: CovMat
-    dynamics_weights: Float[Array, "state_dim state_dim"]
+    dynamics_weights: CovMat
     dynamics_covariance: CovMat
     #emission_function: FnStateAndInputToEmission
     #emission_covariance: CovMat
@@ -67,10 +67,9 @@ class Rebayes(ABC):
 
     def predict_state(
         self,
-        bel: Gaussian,
-        u: Float[Array, "input_dim"]
+        bel: Gaussian
     ) -> Gaussian:
-        """Given bel(t-1|t-1) = p(z(t-1) | D(1:t-1)), return bel(t|t-1) = p(z(t) | u(t), D(1:t-1)).
+        """Given bel(t-1|t-1) = p(z(t-1) | D(1:t-1)), return bel(t|t-1) = p(z(t) | z(t-1), D(1:t-1)).
         This is cheap, since the dyanmics model is linear-Gaussian.
         """
         m, P = bel.mean, bel.cov 
@@ -108,8 +107,6 @@ class Rebayes(ABC):
         """Return bel(t|t) = p(z(t) | u(t), y(t), D(1:t-1)) using bel(t|t-1)"""
         raise NotImplementedError
 
-
-
     def scan(
         self,
         X: Float[Array, "ntime input_dim"],
@@ -118,10 +115,11 @@ class Rebayes(ABC):
     ) -> Tuple[Gaussian, Any]:
         """Apply filtering to entire sequence of data. Return final belief state and outputs from callback."""
         num_timesteps = X.shape[0]
-        # @scan_tqdm(num_timesteps)
+        
+        @scan_tqdm(num_timesteps)
         def step(bel, t):
             pred_obs = self.predict_obs(bel, X[t])
-            bel = self.predict_state(bel, X[t])
+            bel = self.predict_state(bel)
             bel = self.update_state(bel, X[t], Y[t])
             out = None
             if callback is not None:
