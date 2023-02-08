@@ -8,6 +8,7 @@ from rebayes.utils.utils import get_mlp_flattened_params
 from rebayes.orfit import ORFitParams, orthogonal_recursive_fitting, RebayesORFit
 from dynamax.generalized_gaussian_ssm.models import ParamsGGSSM
 from dynamax.generalized_gaussian_ssm.inference import EKFIntegrals, conditional_moments_gaussian_filter
+from rebayes.base import RebayesParams
 
 
 def allclose(u, v):
@@ -36,12 +37,18 @@ def setup_orfit(memory_size):
     _, flat_params, _, apply_fn = get_mlp_flattened_params(model_dims)
 
     # Define ORFit parameters
-    orfit_params = ORFitParams(
+    model_params = RebayesParams(
         initial_mean=flat_params,
-        apply_function=apply_fn,
+        initial_covariance=None,
+        dynamics_weights=None,
+        dynamics_covariance=None,
+        emission_mean_function=apply_fn,
+        emission_cov_function=None,
+    ) 
+    orfit_params = ORFitParams(
         memory_size=memory_size,
     )
-    return orfit_params
+    return model_params, orfit_params
 
 
 def setup_kf():
@@ -68,9 +75,9 @@ def test_orfit():
     X_train, y_train = load_rmnist_data(n_train)
 
     # Run Infinite-memory ORFit
-    orfit_params = setup_orfit(n_train)
+    model_params, orfit_params = setup_orfit(n_train)
     orfit_before_time = time.time()
-    orfit_posterior = orthogonal_recursive_fitting(orfit_params, y_train, X_train)
+    orfit_posterior = orthogonal_recursive_fitting(model_params, orfit_params, y_train, X_train)
     orfit_after_time = time.time()
     # print(f"ORFit took {orfit_after_time - orfit_before_time} seconds.")
 
@@ -90,8 +97,8 @@ def test_rebayes_orfit_loop():
     X_train, y_train = load_rmnist_data(n_train)
 
     # Run Infinite-memory ORFit
-    orfit_params = setup_orfit(n_train)
-    estimator = RebayesORFit(orfit_params, method='orfit')
+    model_params, orfit_params = setup_orfit(n_train)
+    estimator = RebayesORFit(model_params, orfit_params, method='orfit')
     orfit_before_time = time.time()
     bel = estimator.initialize()
     for i in range(n_train):
@@ -115,8 +122,8 @@ def test_rebayes_orfit_scan():
     X_train, y_train = load_rmnist_data(n_train)
 
     # Run Infinite-memory ORFit
-    orfit_params = setup_orfit(n_train)
-    estimator = RebayesORFit(orfit_params, method='orfit')
+    model_params, orfit_params = setup_orfit(n_train)
+    estimator = RebayesORFit(model_params, orfit_params, method='orfit')
     def callback(bel, t, x, y):
         return bel.mean
     orfit_before_time = time.time()
@@ -132,3 +139,6 @@ def test_rebayes_orfit_scan():
     # print(f"Kalman Filter took {kf_after_time - kf_before_time} seconds.")
 
     assert allclose(bel.mean, kf_posterior.filtered_means[-1])
+
+
+test_rebayes_orfit_loop()

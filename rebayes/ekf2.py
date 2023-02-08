@@ -2,7 +2,7 @@ from jax import numpy as jnp
 from jax import lax, jacrev, jacfwd, vmap
 from tensorflow_probability.substrates.jax.distributions import MultivariateNormalDiag as MVN
 
-from dynamax.rebayes.base import *
+from rebayes.base import Rebayes, RebayesParams, Gaussian
 
 _take_diagonal = lambda x: jnp.diag(x) if len(x.shape) == 2 else x
 _jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))

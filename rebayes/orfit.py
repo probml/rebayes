@@ -17,8 +17,7 @@ from typing import Callable, NamedTuple
 import chex
 from jax_tqdm import scan_tqdm
 
-from dynamax.nonlinear_gaussian_ssm.models import FnStateAndInputToEmission
-from dynamax.generalized_gaussian_ssm.models import FnStateAndInputToEmission2
+from rebayes.base import RebayesParams, Rebayes, Gaussian
 
 
 # Helper functions
@@ -32,26 +31,31 @@ _project_to_columns = lambda A, x: \
     jnp.where(A.any(), vmap(_project, (1, None))(A, x).sum(axis=0), jnp.zeros(shape=x.shape))
 
 
+@chex.dataclass
+class ORFitBel:
+    mean: chex.Array
+    basis: chex.Array
+    sigma: chex.Array
+
+
 class ORFitParams(NamedTuple):
     """Lightweight container for ORFit parameters.
     """
-    initial_mean: Float[Array, "state_dim"]
-    apply_function: FnStateAndInputToEmission
     memory_size: int
     sv_threshold: float = 0.0
 
 
-class GeneralizedORFitParams(NamedTuple):
-    """Lightweight container for ORFit parameters.
-    """
-    initial_mean: Float[Array, "state_dim"]
-    initial_precision: float
-    dynamics_decay: float
-    dynamics_noise: float
-    emission_mean_function: FnStateAndInputToEmission
-    emission_cov_function: FnStateAndInputToEmission2
-    memory_size: int
-    sv_threshold: float = 0.0
+# class GeneralizedORFitParams(NamedTuple):
+#     """Lightweight container for ORFit parameters.
+#     """
+#     initial_mean: Float[Array, "state_dim"]
+#     initial_precision: float
+#     dynamics_decay: float
+#     dynamics_noise: float
+#     emission_mean_function: FnStateAndInputToEmission
+#     emission_cov_function: FnStateAndInputToEmission2
+#     memory_size: int
+#     sv_threshold: float = 0.0
 
 
 class PosteriorORFitFiltered(NamedTuple):
@@ -59,14 +63,15 @@ class PosteriorORFitFiltered(NamedTuple):
     """
     filtered_means: Float[Array, "ntime state_dim"]
     filtered_bases: Float[Array, "ntime state_dim memory_size"]
+    filtered_sigmas: Float[Array, "ntime memory_size"] = None
 
 
-class GeneralizedPosteriorORFitFiltered(NamedTuple):
-    """Marginals of the Gaussian filtering posterior.
-    """
-    filtered_means: Float[Array, "ntime state_dim"]
-    filtered_bases: Float[Array, "ntime state_dim memory_size"]
-    filtered_sigmas: Float[Array, "ntime memory_size"]
+# class GeneralizedPosteriorORFitFiltered(NamedTuple):
+#     """Marginals of the Gaussian filtering posterior.
+#     """
+#     filtered_means: Float[Array, "ntime state_dim"]
+#     filtered_bases: Float[Array, "ntime state_dim memory_size"]
+#     filtered_sigmas: Float[Array, "ntime memory_size"]
 
 
 def _orfit_condition_on(m, U, Sigma, apply_fn, x, y, sv_threshold):
@@ -185,14 +190,17 @@ def _generalized_orfit_predict(m, Sigma, gamma, q):
 
 
 def orthogonal_recursive_fitting(
-    model_params: ORFitParams,
+    model_params: RebayesParams,
+    inf_params: ORFitParams,
     emissions: Float[Array, "ntime emission_dim"],
     inputs: Float[Array, "ntime input_dim"]
 ) -> PosteriorORFitFiltered:
     """Vectorized implementation of Orthogonal Recursive Fitting (ORFit) algorithm.
 
     Args:
-        model_params (ORFitParams): Model parameters.
+        model_params (RebayesParams): Model parameters.
+        inf_params (ORFitParams): Inference parameters that specify the 
+            memory buffer size and singular value threshold.
         emissions (Float[Array]): Array of observations.
         inputs (Float[Array]): Array of inputs.
 
@@ -200,7 +208,8 @@ def orthogonal_recursive_fitting(
         filtered_posterior: Posterior object.
     """
     # Initialize parameters
-    initial_mean, apply_fn, memory_limit, sv_threshold = model_params
+    initial_mean, apply_fn = model_params.initial_mean, model_params.emission_mean_function
+    memory_limit, sv_threshold = inf_params
     U, Sigma = jnp.zeros((len(initial_mean), memory_limit)), jnp.zeros((memory_limit,))
 
     def _step(carry, t):
@@ -223,14 +232,17 @@ def orthogonal_recursive_fitting(
 
 
 def generalized_orthogonal_recursive_fitting(
-    model_params: GeneralizedORFitParams,
+    model_params: RebayesParams,
+    inf_params: ORFitParams,
     emissions: Float[Array, "ntime emission_dim"],
     inputs: Float[Array, "ntime input_dim"]
-) -> GeneralizedPosteriorORFitFiltered:
+) -> PosteriorORFitFiltered:
     """Generalized orthogonal recursive fitting algorithm.
 
     Args:
-        model_params (GeneralizedORFitParams): Model parameters.
+        model_params (RebayesParams): Model parameters.
+        inf_params (ORFitParams): Inference parameters that specify the 
+            memory buffer size and singular value threshold.
         emissions (Float[Array]): Array of observations.
         inputs (Float[Array]): Array of inputs.
 
@@ -238,10 +250,14 @@ def generalized_orthogonal_recursive_fitting(
         filtered_posterior: Posterior object.
     """
     # Initialize parameters
+    initial_mean, initial_cov = model_params.initial_mean, model_params.initial_covariance
+    assert isinstance(initial_cov, float) and initial_cov > 0, "Initial covariance must be a positive scalar."
+    eta = 1/initial_cov
+
     m_Y, Cov_Y = model_params.emission_mean_function, model_params.emission_cov_function
-    gamma, q, m = model_params.dynamics_decay, model_params.dynamics_noise, model_params.memory_size
-    sv_threshold = model_params.sv_threshold
-    initial_mean, eta = model_params.initial_mean, model_params.initial_precision
+    gamma, q = model_params.dynamics_weights, model_params.dynamics_covariance
+    assert isinstance(gamma, float) and isinstance(q, float), "Dynamics decay and noise terms must be scalars."
+    m, sv_threshold = inf_params
     U, Sigma = jnp.zeros((len(initial_mean), m)), jnp.zeros((m,))
 
     def _step(carry, t):
@@ -261,7 +277,7 @@ def generalized_orthogonal_recursive_fitting(
     # Run ORFit
     carry = (initial_mean, U, Sigma)
     _, (filtered_means, filtered_bases, filtered_Sigmas) = scan(_step, carry, jnp.arange(len(inputs)))
-    filtered_posterior = GeneralizedPosteriorORFitFiltered(
+    filtered_posterior = PosteriorORFitFiltered(
         filtered_means=filtered_means, 
         filtered_bases=filtered_bases,
         filtered_sigmas=filtered_Sigmas,
@@ -270,64 +286,84 @@ def generalized_orthogonal_recursive_fitting(
     return filtered_posterior
 
 
-@chex.dataclass
-class ORFitBel:
-    mean: chex.Array
-    basis: chex.Array
-    sigma: chex.Array
-
-
-class RebayesORFit:
+class RebayesORFit(Rebayes):
     def __init__(
         self,
+        model_params: RebayesParams,
         orfit_params: ORFitParams,
         method: str,
     ):
+        self.method = method
         if method == 'orfit':
-            self.method = method
-            self.update_fn = _orfit_condition_on
-            self.apply_fn = orfit_params.apply_function
-        elif method == 'generalized_orfit':
-            self.method = method
-            self.eta = orfit_params.initial_precision
-            self.update_fn = _generalized_orfit_condition_on
-            self.predict_fn = _generalized_orfit_predict
-            self.gamma = orfit_params.dynamics_decay
-            self.q = orfit_params.dynamics_noise
-            self.f = orfit_params.emission_mean_function
-            self.r = orfit_params.emission_cov_function
+            pass
+        if method == 'generalized_orfit':
+            initial_cov = model_params.initial_covariance
+            assert isinstance(initial_cov, float) and initial_cov > 0, "Initial covariance must be a positive scalar."
+            self.eta = 1/initial_cov
+            self.gamma, self.q = model_params.dynamics_weights, model_params.dynamics_covariance
+            assert isinstance(self.gamma, float) and isinstance(self.q, float), "Dynamics decay and noise terms must be scalars."
         else:
             raise ValueError(f"Unknown method {method}.")
-        self.mu0 = orfit_params.initial_mean
-        self.m = orfit_params.memory_size
-        self.sv_threshold = orfit_params.sv_threshold
-        self.U0 = jnp.zeros((len(self.mu0), self.m))
+        self.model_params = model_params
+        self.m, self.sv_threshold = orfit_params
+        self.U0 = jnp.zeros((len(model_params.initial_mean), self.m))
         self.Sigma0 = jnp.zeros((self.m,))
 
-    def initialize(self):
-        return ORFitBel(mean=self.mu0, basis=self.U0, sigma=self.Sigma0)
+    def init_bel(self):
+        return ORFitBel(mean=self.model_params.initial_mean, basis=self.U0, sigma=self.Sigma0)
+    
+    @partial(jit, static_argnums=(0,))
+    def predict_state(self, bel):
+        m, U, Sigma = bel.mean, bel.basis, bel.sigma
+        if self.method == 'orfit':
+            return bel
+        elif self.method == 'generalized_orfit':
+            m_pred, Sigma_pred = _generalized_orfit_predict(m, Sigma, self.gamma, self.q)
+            U_pred = U
+
+        return ORFitBel(mean=m_pred, basis=U_pred, sigma=Sigma_pred)
 
     @partial(jit, static_argnums=(0,))
-    def update(self, bel, u, y):
-        m, U, Sigma = bel.mean, bel.basis, bel.sigma # prior predictive for hidden state
+    def predict_obs(self, bel, u):
+        m, U = bel.mean, bel.basis
+        m_Y = lambda z: self.params.emission_mean_function(z, u)
+        Cov_Y = lambda z: self.params.emission_cov_function(z, u)
+        
+        y_pred = jnp.atleast_1d(m_Y(m))
+        H =  _jacrev_2d(m_Y, m)
+        Sigma_obs = H @ H.T - (H @ U) @ (H @ U).T
+
+        if self.method == 'generalized_orfit':
+            R = jnp.atleast_2d(Cov_Y(m))
+            Sigma_obs += R
+        
+        return Gaussian(mean=y_pred, cov=Sigma_obs)
+
+    @partial(jit, static_argnums=(0,))
+    def update_state(self, bel, u, y):
+        m, U, Sigma = bel.mean, bel.basis, bel.sigma
         if self.method == 'orfit':
-            m_cond, U_cond, Sigma_cond = self.update_fn(m, U, Sigma, self.apply_fn, u, y, self.sv_threshold)    
+            m_cond, U_cond, Sigma_cond = _orfit_condition_on(
+                m, U, Sigma, self.model_params.emission_mean_function, u, y, self.sv_threshold
+            )
         elif self.method == 'generalized_orfit':
-            m_pred, Sigma_pred = self.predict_fn(m, Sigma, self.gamma, self.q)
-            m_cond, U_cond, Sigma_cond = self.update_fn(m_pred, U, Sigma_pred, self.eta, self.f, self.r, u, y, self.sv_threshold)
+            m_cond, U_cond, Sigma_cond = _generalized_orfit_condition_on(
+                m, U, Sigma, self.eta, self.model_params.emission_mean_function, 
+                self.model_params.emission_cov_function, u, y, self.sv_threshold
+            )
         return ORFitBel(mean=m_cond, basis=U_cond, sigma=Sigma_cond)
 
-    def scan(self, X, Y, callback=None):
-        num_timesteps = X.shape[0]
+    # def scan(self, X, Y, callback=None):
+    #     num_timesteps = X.shape[0]
         
-        @scan_tqdm(num_timesteps)
-        def step(bel, t):
-            bel = self.update(bel, X[t], Y[t])
-            out = None
-            if callback is not None:
-                out = callback(bel, t, X[t], Y[t])
-            return bel, out
+    #     @scan_tqdm(num_timesteps)
+    #     def step(bel, t):
+    #         bel = self.update(bel, X[t], Y[t])
+    #         out = None
+    #         if callback is not None:
+    #             out = callback(bel, t, X[t], Y[t])
+    #         return bel, out
 
-        carry = self.initialize()
-        bel, outputs = scan(step, carry, jnp.arange(num_timesteps))
-        return bel, outputs
+    #     carry = self.initialize()
+    #     bel, outputs = scan(step, carry, jnp.arange(num_timesteps))
+    #     return bel, outputs
