@@ -100,9 +100,9 @@ def test_rebayes_orfit_loop():
     model_params, orfit_params = setup_orfit(n_train)
     estimator = RebayesORFit(model_params, orfit_params, method='orfit')
     orfit_before_time = time.time()
-    bel = estimator.initialize()
+    bel = estimator.init_bel()
     for i in range(n_train):
-        bel = estimator.update(bel, X_train[i], y_train[i])
+        bel = estimator.update_state(bel, X_train[i], y_train[i])
     orfit_after_time = time.time()
     print(f"Looped ORFit took {orfit_after_time - orfit_before_time} seconds.")
 
@@ -124,7 +124,7 @@ def test_rebayes_orfit_scan():
     # Run Infinite-memory ORFit
     model_params, orfit_params = setup_orfit(n_train)
     estimator = RebayesORFit(model_params, orfit_params, method='orfit')
-    def callback(bel, t, x, y):
+    def callback(pred_obs, bel, t, x, y):
         return bel.mean
     orfit_before_time = time.time()
     bel, outputs = estimator.scan(X_train, y_train, callback)
@@ -139,6 +139,3 @@ def test_rebayes_orfit_scan():
     # print(f"Kalman Filter took {kf_after_time - kf_before_time} seconds.")
 
     assert allclose(bel.mean, kf_posterior.filtered_means[-1])
-
-
-test_rebayes_orfit_loop()

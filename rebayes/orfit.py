@@ -296,7 +296,7 @@ class RebayesORFit(Rebayes):
         self.method = method
         if method == 'orfit':
             pass
-        if method == 'generalized_orfit':
+        elif method == 'generalized_orfit':
             initial_cov = model_params.initial_covariance
             assert isinstance(initial_cov, float) and initial_cov > 0, "Initial covariance must be a positive scalar."
             self.eta = 1/initial_cov
@@ -326,8 +326,8 @@ class RebayesORFit(Rebayes):
     @partial(jit, static_argnums=(0,))
     def predict_obs(self, bel, u):
         m, U = bel.mean, bel.basis
-        m_Y = lambda z: self.params.emission_mean_function(z, u)
-        Cov_Y = lambda z: self.params.emission_cov_function(z, u)
+        m_Y = lambda z: self.model_params.emission_mean_function(z, u)
+        Cov_Y = lambda z: self.model_params.emission_cov_function(z, u)
         
         y_pred = jnp.atleast_1d(m_Y(m))
         H =  _jacrev_2d(m_Y, m)
@@ -352,18 +352,3 @@ class RebayesORFit(Rebayes):
                 self.model_params.emission_cov_function, u, y, self.sv_threshold
             )
         return ORFitBel(mean=m_cond, basis=U_cond, sigma=Sigma_cond)
-
-    # def scan(self, X, Y, callback=None):
-    #     num_timesteps = X.shape[0]
-        
-    #     @scan_tqdm(num_timesteps)
-    #     def step(bel, t):
-    #         bel = self.update(bel, X[t], Y[t])
-    #         out = None
-    #         if callback is not None:
-    #             out = callback(bel, t, X[t], Y[t])
-    #         return bel, out
-
-    #     carry = self.initialize()
-    #     bel, outputs = scan(step, carry, jnp.arange(num_timesteps))
-    #     return bel, outputs
