@@ -102,69 +102,80 @@ def train_full(
     return state, losses
 
 
-@partial(jax.jit, static_argnames=("buffer_size",))
-def get_fifo_batches(ix, buffer_size):
-    ix_lookback = (ix - buffer_size) + 1
-    batches = jnp.arange(buffer_size) + ix_lookback
-    return batches
-
-
-@partial(jax.jit, static_argnames=("applyfn",))
-def lossfn_fifo(params, X, y, ixs, applyfn):
-    X_batch, y_batch = X[ixs], y[ixs]
-    counter = (ixs >= 0)
-    
-    yhat = applyfn(params, X_batch).ravel()
-    loss = (y_batch - yhat) ** 2
-    loss = (loss * counter).sum() / counter.sum()
-    return loss
-    
-
-@partial(jax.jit, static_argnames=("loss_grad",))
-def train_step_fifo(
-    X: Float[Array, "num_obs dim_obs"],
-    y: Float[Array, "num_obs dim_obs"],
-    ixs: Int[Array, "batch_len"],
-    state: TrainState,
-    loss_grad: Callable,
-) -> Tuple[float, TrainState]:
+class ReFifoSGD:
     """
+    Recursive FIFO SGD.
     """
-    loss, grads = loss_grad(state.params, X, y, ixs, state.apply_fn)
-    state = state.apply_gradients(grads=grads)
-    return loss, state
+    def __init__(self, buffer_size, lossfn, n_inner=1):
+        self.buffer_size = buffer_size
+        self.lossfn = lossfn
+        self.loss_grad = jax.value_and_grad(self.lossfn, 0)
+        self.n_inner = n_inner
     
 
-def train_fifo(
-    buffer_size: int,
-    state: TrainState,
-    X: Float[Array, "num_obs dim_obs"],
-    y: Float[Array, "num_obs"],
-    loss: Callable[[PyTree, Float[Array, "num_obs dim_obs"], Float[Array, "num_obs"], Callable], float],
-    X_test: Union[None, Float[Array, "num_obs_test dim_obs"]] = None,
-    y_test: Union[None, Float[Array, "num_obs_test"]] = None,
-    loss_test_fn: Callable = None,
-    n_inner: int = 1,
-):
-    num_obs = X.shape[0]
-    loss_grad = jax.value_and_grad(loss, 0)
+    def predict_obs(self, bel, X):
+        yhat = bel.apply_fn(bel.params, X)
+        return yhat
 
-    def epoch_step(state, t):
-        ixs = get_fifo_batches(t, buffer_size)
-        for _ in range(n_inner):
-            loss_train, state = train_step_fifo(X, y, ixs, state, loss_grad)
+    def predict_state(self, bel, X):
+        return bel
+    
+    @partial(jax.jit, static_argnums=(0,))
+    def _get_fifo_batches(self, ix):
+        ix_lookback = (ix - self.buffer_size) + 1
+        batches = jnp.arange(self.buffer_size) + ix_lookback
+        return batches
 
-        if (X_test is not None) and (y_test is not None):
-            loss_test = loss_test_fn(state.params, X_test, y_test, state.apply_fn)
-        else:
-            loss_test = None
+    
+    @partial(jax.jit, static_argnums=(0,))
+    def _train_step(
+        self,
+        X: Float[Array, "num_obs dim_obs"],
+        y: Float[Array, "num_obs dim_obs"],
+        ixs: Int[Array, "batch_len"],
+        state: TrainState,
+    ) -> Tuple[float, TrainState]:
+        """
+        """
+        loss, grads = self.loss_grad(state.params, X, y, ixs, state.apply_fn)
+        state = state.apply_gradients(grads=grads)
+        return loss, state
 
-        losses = {
-            "train": loss_train,
-            "test": loss_test,
-        } 
+    @partial(jax.jit, static_argnums=(0,))
+    def update_state(self, bel, X, y, ixs):
+        def partial_step(_, bel):
+            loss_train, bel = self._train_step(X, y, ixs, bel)
+            return bel
+        bel = jax.lax.fori_loop(0, self.n_inner - 1, partial_step, bel)
+        loss, bel = self._train_step(X, y, ixs, bel)
+        return loss, bel
+    
+    def scan(
+        self,
+        state: TrainState,
+        X: Float[Array, "num_obs dim_obs"],
+        y: Float[Array, "num_obs"],
+        X_test: Union[None, Float[Array, "num_obs_test dim_obs"]] = None,
+        y_test: Union[None, Float[Array, "num_obs_test"]] = None,
+        loss_test_fn: Callable = None,
+    ):
+        num_obs = X.shape[0]
+
+        def epoch_step(state, t):
+            ixs = self._get_fifo_batches(t)
+            loss_train, state = self.update_state(state, X, y, ixs)
+
+            if (X_test is not None) and (y_test is not None):
+                loss_test = loss_test_fn(state.params, X_test, y_test, state.apply_fn)
+            else:
+                loss_test = None
+
+            losses = {
+                "train": loss_train,
+                "test": loss_test,
+            } 
+            return state, losses
+        
+        steps = jnp.arange(num_obs)
+        state, losses = jax.lax.scan(epoch_step, state, steps)
         return state, losses
-    
-    steps = jnp.arange(num_obs)
-    state, losses = jax.lax.scan(epoch_step, state, steps)
-    return state, losses
