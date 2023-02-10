@@ -110,7 +110,7 @@ def _generalized_orfit_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x
     L = jnp.linalg.cholesky(R)
     A = jnp.linalg.lstsq(L, jnp.eye(L.shape[0]))[0].T
     H = _jacrev_2d(m_Y, m)
-    W_tilde = jnp.hstack([Sigma * U, (H.T @ A).squeeze()])
+    W_tilde = jnp.hstack([Sigma * U, (H.T @ A).reshape(U.shape[0], -1)])
     S = eta*jnp.eye(W_tilde.shape[1]) + W_tilde.T @ W_tilde
     K = (H.T @ A) @ A.T - W_tilde @ (jnp.linalg.pinv(S) @ (W_tilde.T @ ((H.T @ A) @ A.T)))
 
