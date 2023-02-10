@@ -11,7 +11,7 @@ buffer:
 2. Random buffer: we replace a random datapoint in the buffer
     with the new datapoint.
 
-
+[1] Nguyen, C., Li, Y., Bui, T., & Turner, R.. (2017). Variational Continual Learning.
 [2] Farquhar, S., Osborne, M., & Gal, Y. (2019).
     Radial Bayesian Neural Networks: Beyond Discrete Support
     In Large-Scale Bayesian Deep Learning. doi:10.48550/ARXIV.1907.00865
@@ -48,6 +48,7 @@ class VCLState(TrainState):
     """
     buffer_size: int
     num_obs: int
+    num_params: int # Half the number of parameters
     buffer_X: Float[Array, "buffer_size dim_features"]
     buffer_y: Float[Array, "buffer_size dim_output"]
     counter: Int[Array, "buffer_size"]
@@ -66,6 +67,12 @@ class VCLState(TrainState):
         std = jnp.log(1 + jnp.exp(rho))
         weight = mean + std * eps
         return weight
+
+    def _sample_norm_params(self):
+        key = jax.random.fold_in(self.key, self.step)
+        eps = jax.random.normal(key, (self.num_params,))
+        params_sample = jax.tree_map(self._transform, eps, self.params)
+        return params_sample
     
     def _sample_rbnn_params(self, scale=1.0):
         """
@@ -76,12 +83,11 @@ class VCLState(TrainState):
         """
         key = jax.random.fold_in(self.key, self.step)
         key_eps, key_rho = jax.random.split(key)
-        num_params = len(get_leaves(state.mean))
 
         # The radial dimension.
         r = jax.random.normal(key_rho) * scale
 
-        eps = jax.random.normal(key_eps, (num_params,))
+        eps = jax.random.normal(key_eps, (self.num_params,))
         eps = eps / jnp.linalg.norm(eps) * r
         eps = self.reconstruct_fn(eps)
 
@@ -110,6 +116,9 @@ class VCLState(TrainState):
         Here, params refers to the parameters of the
         variational distribution for non-coreset datapoint.
         """
+        # Half the number of parameters: we assume
+        # a mean-field variational distribution.
+        num_params = len(get_leaves(params)) // 2
         opt_state = tx.init(params)
         buffer_X = jnp.empty((buffer_size, dim_features))
         buffer_y = jnp.empty((buffer_size, dim_output))
@@ -118,6 +127,7 @@ class VCLState(TrainState):
         return cls(
             step=0,
             num_obs=0,
+            num_params=num_params,
             apply_fn=apply_fn,
             params=params,
             tx=tx,
