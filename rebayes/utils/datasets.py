@@ -2,14 +2,15 @@
 Prepcocessing and data augmentation for the datasets.
 """
 import os
+import jax
 import torchvision
 import numpy as np
+import jax.numpy as jnp
+import jax.random as jr
+from jax import vmap
 from augly import image
 from typing import Tuple, Union
 from multiprocessing import Pool
-import jax.random as jr
-import jax.numpy as jnp
-from jax import vmap
 
 class DataAugmentationFactory:
     """
@@ -127,9 +128,15 @@ def load_rotated_mnist(
     minangle: int = 0,
     maxangle: int = 180,
     n_processes: Union[int, None] = 1,
+    num_train: int = 10_000,
+    seed: int = 314,
+    sort_by_angle: bool = False,
 ):
     """
     """
+    if seed is not None:
+        np.random.seed(seed)
+
     if n_processes is None:
         n_processes = max(1, os.cpu_count() - 2)
 
@@ -147,12 +154,47 @@ def load_rotated_mnist(
     X_train, y_train = X[:n_train], y[:n_train]
     X_test, y_test = X[n_train:], y[n_train:]
 
+    X_train = jnp.array(X_train)
+    y_train = jnp.array(y_train)
+
+    if num_train is not None:
+        X_train = X_train[:num_train]
+        y_train = y_train[:num_train]
+
+    if sort_by_angle:
+        ix_sort = jnp.argsort(y_train)
+        X_train = X_train[ix_sort]
+        y_train = y_train[ix_sort]
+
     train = (X_train, y_train)
     test = (X_test, y_test)
+
     return train, test
 
 
-def load_1d_synthetic_dataset(n_train=100, n_test=100, key=0, sort_data=True):
+def load_classification_mnist(
+     root: str = "./data",
+     num_train: int = 10_000,   
+):
+    train, test = load_mnist(root=root)
+
+    X, y = train
+    X_test, y_test = test
+
+    X = jnp.array(X)[:num_train].reshape(-1, 28 ** 2)
+    y = jnp.array(y)[:num_train]
+    y_ohe = jax.nn.one_hot(y, 10)
+
+    X_test = jnp.array(X_test).reshape(-1, 28 ** 2)
+    y_test = jnp.array(y_test)
+    y_ohe_test = jax.nn.one_hot(y_test, 10)
+
+    train = (X, y_ohe)
+    test = (X_test, y_ohe_test)
+    return train, test
+
+
+def load_1d_synthetic_dataset(n_train=100, n_test=100, key=0, trenches=False, sort_data=False):
     if isinstance(key, int):
         key = jr.PRNGKey(key)
     key1, key2, subkey1, subkey2, key_shuffle = jr.split(key, 5)
@@ -176,16 +218,17 @@ def load_1d_synthetic_dataset(n_train=100, n_test=100, key=0, sort_data=True):
     X_test = (X_test - X_test.mean()) / X_test.std()
     y_test = (y_test - y_test.mean()) / y_test.std()
 
-    sorted_idx = jnp.argsort(X_train.squeeze())
-    train_idx = jnp.concatenate([
-        sorted_idx[:n_train//2], sorted_idx[2*n_train - n_train//2:]
-    ])
+    if trenches:
+        sorted_idx = jnp.argsort(X_train.squeeze())
+        train_idx = jnp.concatenate([
+            sorted_idx[:n_train//2], sorted_idx[2*n_train - n_train//2:]
+        ])
 
-    X_train, y_train = X_train[train_idx], y_train[train_idx]
+        X_train, y_train = X_train[train_idx], y_train[train_idx]
 
     if not sort_data:
         n_train = len(X_train)
-        ixs = jr.choice(key_shuffle, shape=(n_train,), a=n_train)
+        ixs = jr.choice(key_shuffle, shape=(n_train,), a=n_train, replace=False)
         X_train = X_train[ixs]
         y_train = y_train[ixs]
 
