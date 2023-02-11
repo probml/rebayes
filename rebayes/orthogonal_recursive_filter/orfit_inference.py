@@ -117,10 +117,10 @@ def _generalized_orfit_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x
     K = (H.T @ A) @ A.T - W_tilde @ (jnp.linalg.pinv(S) @ (W_tilde.T @ ((H.T @ A) @ A.T)))
 
     m_cond = m + K/eta @ (y - yhat)
-    U_tilde = (H.T - U @ (U.T @ H.T)) @ A
 
     def _update_basis(carry, i):
         U, Sigma = carry
+        U_tilde = (H.T - U @ (U.T @ H.T)) @ A
         v = U_tilde[:, i]
         u = _normalize(v)
         U_cond = jnp.where(
@@ -135,7 +135,7 @@ def _generalized_orfit_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x
         )
         return (U_cond, Sigma_cond), (U_cond, Sigma_cond)
 
-    (U_cond, Sigma_cond), _ = scan(_update_basis, (U, Sigma), jnp.arange(U_tilde.shape[1]))
+    (U_cond, Sigma_cond), _ = scan(_update_basis, (U, Sigma), jnp.arange(yhat.shape[0]))
 
     return m_cond, U_cond, Sigma_cond
 
