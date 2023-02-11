@@ -128,7 +128,7 @@ def load_rotated_mnist(
     minangle: int = 0,
     maxangle: int = 180,
     n_processes: Union[int, None] = 1,
-    num_train: int = 1000,
+    num_train: int = 10_000,
     seed: int = 314,
     sort_by_angle: bool = False,
 ):
@@ -174,7 +174,7 @@ def load_rotated_mnist(
 
 def load_classification_mnist(
      root: str = "./data",
-     num_train: int = 5000,   
+     num_train: int = 10_000,   
 ):
     train, test = load_mnist(root=root)
 
