@@ -29,6 +29,8 @@ class PosteriorORFitFiltered(NamedTuple):
     filtered_means: Float[Array, "ntime state_dim"]
     filtered_bases: Float[Array, "ntime state_dim memory_size"]
     filtered_sigmas: Float[Array, "ntime memory_size"] = None
+    filtered_covariances: Float[Array, "ntime state_dim state_dim"] = None
+    filtered_taus: float = None
 
 
 # Helper functions
@@ -138,6 +140,94 @@ def _generalized_orfit_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x
     return m_cond, U_cond, Sigma_cond
 
 
+def _generalized_orfit_condition_on_with_adaptive_observation_variance(m, U, Sigma, eta, y_cond_mean, x, y, sv_threshold):
+    """Condition step of the ORFit algorithm.
+
+    Args:
+        m (D_hid,): Prior mean.
+        U (D_hid, D_mem,): Prior basis.
+        Sigma (D_mem,): Prior singular values.
+        eta (float): Prior precision. 
+        y_cond_mean (Callable): Conditional emission mean function.
+        y_cond_cov (Callable): Conditional emission covariance function.
+        x (D_in,): Control input.
+        y (D_obs,): Emission.
+        sv_threshold (float): Threshold for singular values.
+
+    Returns:
+        m_cond (D_hid,): Posterior mean.
+        U_cond (D_hid, D_mem,): Posterior basis.
+        Sigma_cond (D_mem,): Posterior singular values.
+        yhat (D_obs,): Emission mean.
+    """
+    m_Y = lambda w: y_cond_mean(w, x)
+    
+    yhat = jnp.atleast_1d(m_Y(m))
+    H = _jacrev_2d(m_Y, m)
+    W_tilde = jnp.hstack([Sigma * U, (H.T).reshape(U.shape[0], -1)])
+    S = eta*jnp.eye(W_tilde.shape[1]) + W_tilde.T @ W_tilde
+    K = H.T - W_tilde @ (jnp.linalg.pinv(S) @ (W_tilde.T @ H.T))
+
+    m_cond = m + K/eta @ (y - yhat)
+    U_tilde = H.T - U @ (U.T @ H.T)
+
+    def _update_basis(carry, i):
+        U, Sigma = carry
+        v = U_tilde[:, i]
+        u = _normalize(v)
+        U_cond = jnp.where(
+            Sigma.min() < u @ v, 
+            jnp.where(sv_threshold < u @ v, U.at[:, Sigma.argmin()].set(u), U),
+            U
+        )
+        Sigma_cond = jnp.where(
+            Sigma.min() < u @ v,
+            jnp.where(sv_threshold < u @ v, Sigma.at[Sigma.argmin()].set(u.T @ v), Sigma),
+            Sigma,
+        )
+        return (U_cond, Sigma_cond), (U_cond, Sigma_cond)
+
+    (U_cond, Sigma_cond), _ = scan(_update_basis, (U, Sigma), jnp.arange(U_tilde.shape[1]))
+
+    return m_cond, U_cond, Sigma_cond
+
+
+def _generalized_orfit_marginalize(m, U, Sigma, eta, y_cond_mean, x, y, nu, rho):
+    """Marginalization step of the Generalized ORFit algorithm.
+
+    Args:
+        m (D_hid,): Prior mean.
+        U (D_hid, D_mem,): Prior basis.
+        Sigma (D_mem,): Prior singular values.
+        eta (float): Prior precision.
+        y_cond_mean (Callable): Conditional emission mean function.
+        x (D_in,): Control input.
+        y (D_obs,): Emission.
+        nu (float): Student's t-distribution degrees of freedom.
+        rho (float): Student's t-distribution scale parameter.
+
+    Returns:
+        nu (float): Posterior Student's t-distribution degrees of freedom.
+        rho (float): Posterior Student's t-distribution scale parameter.
+        tau (float): Posterior mean of precision.
+    """
+    m_Y = lambda w: y_cond_mean(w, x)
+    
+    yhat = jnp.atleast_1d(m_Y(m))
+    H = _jacrev_2d(m_Y, m)
+    W_tilde = jnp.hstack([Sigma * U, (H.T).reshape(U.shape[0], -1)])
+    S = eta*jnp.eye(W_tilde.shape[1]) + W_tilde.T @ W_tilde
+    K = H.T - W_tilde @ (jnp.linalg.pinv(S) @ (W_tilde.T @ H.T))
+
+    # Marginalize
+    HSHT = 1/eta * H @ K
+    nu = nu + y.shape[0]
+    rho = rho + (y - yhat).T @ (jnp.eye(y.shape[0]) + HSHT) @ (y - yhat)
+    tau = _stable_division(rho, nu)
+
+    return nu, rho, tau
+
+
 def _generalized_orfit_predict(m, Sigma, gamma, q):
     """Predict step of the ORFit algorithm.
 
@@ -221,12 +311,15 @@ def generalized_orthogonal_recursive_fitting(
     initial_mean, initial_cov = model_params.initial_mean, model_params.initial_covariance
     assert isinstance(initial_cov, float) and initial_cov > 0, "Initial covariance must be a positive scalar."
     eta = 1/initial_cov
-
-    m_Y, Cov_Y = model_params.emission_mean_function, model_params.emission_cov_function
-    gamma, q = model_params.dynamics_weights, model_params.dynamics_covariance
-    assert isinstance(gamma, float) and isinstance(q, float), "Dynamics decay and noise terms must be scalars."
     m, sv_threshold = inf_params
     U, Sigma = jnp.zeros((len(initial_mean), m)), jnp.zeros((m,))
+
+    m_Y, Cov_Y = model_params.emission_mean_function, model_params.emission_cov_function
+    gamma = model_params.dynamics_weights
+    assert isinstance(gamma, float), "Dynamics decay term must be a scalar."
+    
+    # Steady-state constraint
+    q = (1 - gamma**2) / eta
 
     def _step(carry, t):
         mean, U, Sigma = carry
@@ -249,6 +342,72 @@ def generalized_orthogonal_recursive_fitting(
         filtered_means=filtered_means, 
         filtered_bases=filtered_bases,
         filtered_sigmas=filtered_Sigmas,
+    )
+
+    return filtered_posterior
+
+
+def generalized_orthogonal_recursive_fitting_with_adaptive_observation_variance(
+    model_params: RebayesParams,
+    inf_params: ORFitParams,
+    emissions: Float[Array, "ntime emission_dim"],
+    inputs: Float[Array, "ntime input_dim"]
+) -> PosteriorORFitFiltered:
+    """Generalized orthogonal recursive fitting algorithm.
+
+    Args:
+        model_params (RebayesParams): Model parameters.
+        inf_params (ORFitParams): Inference parameters that specify the 
+            memory buffer size and singular value threshold.
+        emissions (Float[Array]): Array of observations.
+        inputs (Float[Array]): Array of inputs.
+
+    Returns:
+        filtered_posterior: Posterior object.
+    """
+    # Initialize parameters
+    initial_mean, initial_cov = model_params.initial_mean, model_params.initial_covariance
+    assert isinstance(initial_cov, float) and initial_cov > 0, "Initial covariance must be a positive scalar."
+    eta = 1/initial_cov
+    m, sv_threshold = inf_params
+    U, Sigma = jnp.zeros((len(initial_mean), m)), jnp.zeros((m,))
+
+    m_Y = model_params.emission_mean_function
+    gamma = model_params.dynamics_weights
+    assert isinstance(gamma, float), "Dynamics decay and noise terms must be scalars."
+    nu, rho = 0, 0
+
+    # Steady-state constraint
+    q = (1 - gamma**2) / eta
+
+    def _step(carry, t):
+        mean, U, Sigma, nu, rho = carry
+
+        # Get input and emission and compute Jacobians
+        x, y = inputs[t], emissions[t]
+
+        # Condition on the emission
+        filtered_mean, filtered_U, filtered_Sigma = \
+            _generalized_orfit_condition_on_with_adaptive_observation_variance(
+                mean, U, Sigma, eta, m_Y, x, y, sv_threshold
+            )
+
+        # Predict the next state
+        pred_mean, pred_Sigma = _generalized_orfit_predict(filtered_mean, filtered_Sigma, gamma, q)
+
+        # Marginalize
+        nu, rho, tau = _generalized_orfit_marginalize(pred_mean, filtered_U, pred_Sigma, eta, m_Y, x, y, nu, rho)
+
+        return (pred_mean, filtered_U, pred_Sigma, nu, rho), (filtered_mean, filtered_U, filtered_Sigma, tau)
+    
+    # Run ORFit
+    carry = (initial_mean, U, Sigma, nu, rho)
+    _, (filtered_means, filtered_bases, filtered_Sigmas, filtered_taus) = scan(_step, carry, jnp.arange(len(inputs)))
+    filtered_posterior = PosteriorORFitFiltered(
+        filtered_means=filtered_means, 
+        filtered_bases=filtered_bases,
+        filtered_sigmas=filtered_Sigmas,
+        filtered_taus=filtered_taus,
     )
 
     return filtered_posterior
