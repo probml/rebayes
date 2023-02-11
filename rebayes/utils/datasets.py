@@ -2,6 +2,7 @@
 Prepcocessing and data augmentation for the datasets.
 """
 import os
+import jax
 import torchvision
 import numpy as np
 import jax.numpy as jnp
@@ -168,6 +169,28 @@ def load_rotated_mnist(
     train = (X_train, y_train)
     test = (X_test, y_test)
 
+    return train, test
+
+
+def load_classification_mnist(
+     root: str = "./data",
+     num_train: int = 5000,   
+):
+    train, test = load_mnist(root=root)
+
+    X, y = train
+    X_test, y_test = test
+
+    X = jnp.array(X)[:num_train].reshape(-1, 28 ** 2)
+    y = jnp.array(y)[:num_train]
+    y_ohe = jax.nn.one_hot(y, 10)
+
+    X_test = jnp.array(X_test).reshape(-1, 28 ** 2)
+    y_test = jnp.array(y_test)
+    y_ohe_test = jax.nn.one_hot(y_test, 10)
+
+    train = (X, y_ohe)
+    test = (X_test, y_ohe_test)
     return train, test
 
 
