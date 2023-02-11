@@ -115,7 +115,7 @@ class Rebayes(ABC):
         Y: Float[Array, "ntime emission_dim"],
         callback=None,
         bel=None,
-        pb=True,
+        progress_bar=True,
         **kwargs
     ) -> Tuple[Gaussian, Any]:
         """Apply filtering to entire sequence of data. Return final belief state and outputs from callback."""
@@ -133,7 +133,7 @@ class Rebayes(ABC):
         if bel is None:
             carry = self.init_bel()
 
-        if pb:
+        if progress_bar:
             step = scan_tqdm(num_timesteps)(step)
 
         bel, outputs = scan(step, carry, jnp.arange(num_timesteps))

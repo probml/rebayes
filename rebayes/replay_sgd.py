@@ -64,7 +64,9 @@ class FSGD(Rebayes):
         self.lossfn = lossfn
         self.loss_grad = jax.value_and_grad(self.lossfn, 0)
         self.n_inner = n_inner
-    
+
+    def init_bel(self):
+        raise NotImplementedError
 
     def predict_obs(self, bel, X):
         yhat = bel.apply_fn(bel.params, X)
