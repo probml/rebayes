@@ -16,7 +16,7 @@ from jaxtyping import Float, Array
 from rebayes.base import RebayesParams
 
 
-class LofiParams(NamedTuple):
+class LoFiParams(NamedTuple):
     """Lightweight container for ORFit parameters.
     """
     memory_size: int
@@ -249,7 +249,7 @@ def _lofi_predict(m, Sigma, gamma, q):
 
 def orthogonal_recursive_fitting(
     model_params: RebayesParams,
-    inf_params: LofiParams,
+    inf_params: LoFiParams,
     emissions: Float[Array, "ntime emission_dim"],
     inputs: Float[Array, "ntime input_dim"]
 ) -> PosteriorLoFiFiltered:
@@ -257,7 +257,7 @@ def orthogonal_recursive_fitting(
 
     Args:
         model_params (RebayesParams): Model parameters.
-        inf_params (LofiParams): Inference parameters that specify the 
+        inf_params (LoFiParams): Inference parameters that specify the 
             memory buffer size and singular value threshold.
         emissions (Float[Array]): Array of observations.
         inputs (Float[Array]): Array of inputs.
@@ -291,7 +291,7 @@ def orthogonal_recursive_fitting(
 
 def low_rank_filter(
     model_params: RebayesParams,
-    inf_params: LofiParams,
+    inf_params: LoFiParams,
     emissions: Float[Array, "ntime emission_dim"],
     inputs: Float[Array, "ntime input_dim"]
 ) -> PosteriorLoFiFiltered:
@@ -299,7 +299,7 @@ def low_rank_filter(
 
     Args:
         model_params (RebayesParams): Model parameters.
-        inf_params (LofiParams): Inference parameters that specify the 
+        inf_params (LoFiParams): Inference parameters that specify the 
             memory buffer size and singular value threshold.
         emissions (Float[Array]): Array of observations.
         inputs (Float[Array]): Array of inputs.
@@ -349,7 +349,7 @@ def low_rank_filter(
 
 def low_rank_filter_with_adaptive_observation_variance(
     model_params: RebayesParams,
-    inf_params: LofiParams,
+    inf_params: LoFiParams,
     emissions: Float[Array, "ntime emission_dim"],
     inputs: Float[Array, "ntime input_dim"]
 ) -> PosteriorLoFiFiltered:
@@ -357,7 +357,7 @@ def low_rank_filter_with_adaptive_observation_variance(
 
     Args:
         model_params (RebayesParams): Model parameters.
-        inf_params (LofiParams): Inference parameters that specify the 
+        inf_params (LoFiParams): Inference parameters that specify the 
             memory buffer size and singular value threshold.
         emissions (Float[Array]): Array of observations.
         inputs (Float[Array]): Array of inputs.

@@ -7,7 +7,7 @@ import chex
 from rebayes.base import RebayesParams, Rebayes, Gaussian
 from rebayes.low_rank_filter.lofi_inference import (
     _jacrev_2d,
-    LofiParams,
+    LoFiParams,
     _orfit_condition_on,
     _lofi_condition_on,
     _lofi_predict,
@@ -30,7 +30,7 @@ class RebayesLoFi(Rebayes):
     def __init__(
         self,
         model_params: RebayesParams,
-        orfit_params: LofiParams,
+        orfit_params: LoFiParams,
         method: str,
     ):
         self.method = method

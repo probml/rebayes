@@ -6,7 +6,7 @@ import time
 from rebayes.utils import datasets
 from rebayes.utils.utils import get_mlp_flattened_params
 from rebayes.low_rank_filter.lofi import RebayesLoFi
-from rebayes.low_rank_filter.lofi_inference import LofiParams, orthogonal_recursive_fitting
+from rebayes.low_rank_filter.lofi_inference import LoFiParams, orthogonal_recursive_fitting
 from dynamax.generalized_gaussian_ssm.models import ParamsGGSSM
 from dynamax.generalized_gaussian_ssm.inference import EKFIntegrals, conditional_moments_gaussian_filter
 from rebayes.base import RebayesParams
@@ -46,7 +46,7 @@ def setup_orfit(memory_size):
         emission_mean_function=apply_fn,
         emission_cov_function=None,
     ) 
-    orfit_params = LofiParams(
+    orfit_params = LoFiParams(
         memory_size=memory_size,
     )
     return model_params, orfit_params
