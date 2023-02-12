@@ -169,10 +169,10 @@ def _generalized_orfit_condition_on_with_adaptive_observation_variance(m, U, Sig
     K = H.T - W_tilde @ (jnp.linalg.pinv(S) @ (W_tilde.T @ H.T))
 
     m_cond = m + K/eta @ (y - yhat)
-    U_tilde = H.T - U @ (U.T @ H.T)
 
     def _update_basis(carry, i):
         U, Sigma = carry
+        U_tilde = H.T - U @ (U.T @ H.T)
         v = U_tilde[:, i]
         u = _normalize(v)
         U_cond = jnp.where(
@@ -187,7 +187,7 @@ def _generalized_orfit_condition_on_with_adaptive_observation_variance(m, U, Sig
         )
         return (U_cond, Sigma_cond), (U_cond, Sigma_cond)
 
-    (U_cond, Sigma_cond), _ = scan(_update_basis, (U, Sigma), jnp.arange(U_tilde.shape[1]))
+    (U_cond, Sigma_cond), _ = scan(_update_basis, (U, Sigma), jnp.arange(yhat.shape[0]))
 
     return m_cond, U_cond, Sigma_cond
 
@@ -221,9 +221,9 @@ def _generalized_orfit_marginalize(m, U, Sigma, eta, y_cond_mean, x, y, nu, rho)
 
     # Marginalize
     HSHT = 1/eta * H @ K
-    nu = nu + y.shape[0]
-    rho = rho + (y - yhat).T @ (jnp.eye(y.shape[0]) + HSHT) @ (y - yhat)
-    tau = _stable_division(rho, nu)
+    nu += yhat.shape[0]
+    rho += (y - yhat).T @ (jnp.eye(yhat.shape[0]) + HSHT) @ (y - yhat)
+    tau = rho/nu
 
     return nu, rho, tau
 

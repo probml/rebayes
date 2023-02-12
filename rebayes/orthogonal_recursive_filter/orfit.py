@@ -18,7 +18,9 @@ from rebayes.orthogonal_recursive_filter.orfit_inference import (
     ORFitParams,
     _orfit_condition_on,
     _generalized_orfit_condition_on,
-    _generalized_orfit_predict
+    _generalized_orfit_predict,
+    _generalized_orfit_condition_on_with_adaptive_observation_variance,
+    _generalized_orfit_marginalize,
 )
 
 
@@ -27,6 +29,9 @@ class ORFitBel:
     mean: chex.Array
     basis: chex.Array
     sigma: chex.Array
+    nu: float = None
+    rho: float = None
+    tau: float = None
 
 
 class RebayesORFit(Rebayes):
@@ -39,12 +44,15 @@ class RebayesORFit(Rebayes):
         self.method = method
         if method == 'orfit':
             pass
-        elif method == 'generalized_orfit':
+        elif method == 'generalized_orfit' or method == 'generalized_orfit_adaptive_obs_var':
             initial_cov = model_params.initial_covariance
             assert isinstance(initial_cov, float) and initial_cov > 0, "Initial covariance must be a positive scalar."
             self.eta = 1/initial_cov
-            self.gamma, self.q = model_params.dynamics_weights, model_params.dynamics_covariance
-            assert isinstance(self.gamma, float) and isinstance(self.q, float), "Dynamics decay and noise terms must be scalars."
+            self.gamma = model_params.dynamics_weights
+            assert isinstance(self.gamma, float), "Dynamics decay term must be a scalar."
+            self.q = (1 - self.gamma**2) / self.eta
+            if method == 'generalized_orfit_adaptive_obs_var':
+                self.nu, self.rho, self.tau = 0.0, 0.0, 0.0
         else:
             raise ValueError(f"Unknown method {method}.")
         self.model_params = model_params
@@ -53,18 +61,21 @@ class RebayesORFit(Rebayes):
         self.Sigma0 = jnp.zeros((self.m,))
 
     def init_bel(self):
-        return ORFitBel(mean=self.model_params.initial_mean, basis=self.U0, sigma=self.Sigma0)
+        return ORFitBel(
+            mean=self.model_params.initial_mean, basis=self.U0, sigma=self.Sigma0, 
+            nu=self.nu, rho=self.rho, tau=self.tau
+        )
     
     @partial(jit, static_argnums=(0,))
     def predict_state(self, bel):
-        m, U, Sigma = bel.mean, bel.basis, bel.sigma
+        m, U, Sigma, nu, rho, tau = bel.mean, bel.basis, bel.sigma, bel.nu, bel.rho, bel.tau
         if self.method == 'orfit':
             return bel
-        elif self.method == 'generalized_orfit':
+        else:
             m_pred, Sigma_pred = _generalized_orfit_predict(m, Sigma, self.gamma, self.q)
             U_pred = U
 
-        return ORFitBel(mean=m_pred, basis=U_pred, sigma=Sigma_pred)
+        return ORFitBel(mean=m_pred, basis=U_pred, sigma=Sigma_pred, nu=nu, rho=rho, tau=tau)
 
     @partial(jit, static_argnums=(0,))
     def predict_obs(self, bel, u):
@@ -80,11 +91,11 @@ class RebayesORFit(Rebayes):
             R = jnp.atleast_2d(Cov_Y(m))
             Sigma_obs += R
         
-        return Gaussian(mean=y_pred, cov=Sigma_obs)
+        return Gaussian(mean=y_pred, cov=Sigma_obs) # TODO: regression/classification separation (reg:mean / var, class: dist)
 
     @partial(jit, static_argnums=(0,))
     def update_state(self, bel, u, y):
-        m, U, Sigma = bel.mean, bel.basis, bel.sigma
+        m, U, Sigma, nu, rho = bel.mean, bel.basis, bel.sigma, bel.nu, bel.rho
         if self.method == 'orfit':
             m_cond, U_cond, Sigma_cond = _orfit_condition_on(
                 m, U, Sigma, self.model_params.emission_mean_function, u, y, self.sv_threshold
@@ -94,4 +105,11 @@ class RebayesORFit(Rebayes):
                 m, U, Sigma, self.eta, self.model_params.emission_mean_function, 
                 self.model_params.emission_cov_function, u, y, self.sv_threshold
             )
-        return ORFitBel(mean=m_cond, basis=U_cond, sigma=Sigma_cond)
+        elif self.method == 'generalized_orfit_adaptive_obs_var':
+            m_cond, U_cond, Sigma_cond = _generalized_orfit_condition_on_with_adaptive_observation_variance(
+                m, U, Sigma, self.eta, self.model_params.emission_mean_function, u, y, self.sv_threshold
+            )
+            nu, rho, tau = _generalized_orfit_marginalize(
+                m_cond, U_cond, Sigma_cond, self.eta, self.model_params.emission_mean_function, u, y, nu, rho
+            )    
+        return ORFitBel(mean=m_cond, basis=U_cond, sigma=Sigma_cond, nu=nu, rho=rho, tau=tau)
