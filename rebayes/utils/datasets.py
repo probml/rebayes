@@ -232,5 +232,8 @@ def load_1d_synthetic_dataset(n_train=100, n_test=100, key=0, trenches=False, so
         ixs = jr.choice(key_shuffle, shape=(n_train,), a=n_train, replace=False)
         X_train = X_train[ixs]
         y_train = y_train[ixs]
+    else:
+        sorted_idx = jnp.argsort(X_train.squeeze())
+        X_train, y_train = X_train[sorted_idx], y_train[sorted_idx]
 
     return (X_train, y_train), (X_test, y_test)
