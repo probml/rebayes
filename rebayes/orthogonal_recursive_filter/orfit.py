@@ -42,6 +42,7 @@ class RebayesORFit(Rebayes):
         method: str,
     ):
         self.method = method
+        self.nu, self.rho, self.tau = None, None, None
         if method == 'orfit':
             pass
         elif method == 'generalized_orfit' or method == 'generalized_orfit_adaptive_obs_var':
@@ -95,7 +96,7 @@ class RebayesORFit(Rebayes):
 
     @partial(jit, static_argnums=(0,))
     def update_state(self, bel, u, y):
-        m, U, Sigma, nu, rho = bel.mean, bel.basis, bel.sigma, bel.nu, bel.rho
+        m, U, Sigma, nu, rho, tau = bel.mean, bel.basis, bel.sigma, bel.nu, bel.rho, bel.tau
         if self.method == 'orfit':
             m_cond, U_cond, Sigma_cond = _orfit_condition_on(
                 m, U, Sigma, self.model_params.emission_mean_function, u, y, self.sv_threshold
