@@ -13,6 +13,10 @@ class FifoTrainState(TrainState):
     buffer_y: Float[Array, "buffer_size dim_output"]
     counter: Int[Array, "buffer_size"]
 
+    @property
+    def mean(self):
+        return self.params
+
     def _update_buffer(self, step, buffer, item):
         ix_buffer = step % self.buffer_size
         buffer = buffer.at[ix_buffer].set(item)
