@@ -21,22 +21,22 @@ class FifoTrainState(TrainState):
         ix_buffer = step % self.buffer_size
         buffer = buffer.at[ix_buffer].set(item)
         return buffer
-    
-    
+ 
+ 
     def apply_buffers(self, X, y):
         n_count = self.num_obs
         buffer_X = self._update_buffer(n_count, self.buffer_X, X)
         buffer_y = self._update_buffer(n_count, self.buffer_y, y)
         counter = self._update_buffer(n_count, self.counter, 1.0)
-        
+ 
         return self.replace(
             num_obs=n_count + 1,
             buffer_X=buffer_X,
             buffer_y=buffer_y,
             counter=counter,
         )
-        
-        
+ 
+ 
     @classmethod
     def create(cls, *, apply_fn, params, tx,
                buffer_size, dim_features, dim_output, **kwargs):
@@ -44,7 +44,7 @@ class FifoTrainState(TrainState):
         buffer_X = jnp.empty((buffer_size, dim_features))
         buffer_y = jnp.empty((buffer_size, dim_output))
         counter = jnp.zeros(buffer_size)
-        
+ 
         return cls(
             step=0,
             num_obs=0,
@@ -78,7 +78,7 @@ class FSGD(Rebayes):
 
     def predict_state(self, bel):
         return bel
-    
+ 
     @partial(jax.jit, static_argnums=(0,))
     def _train_step(
         self,
@@ -102,4 +102,4 @@ class FSGD(Rebayes):
         # Do not count inner steps as part of the outer step
         _, bel = self._train_step(bel)
         return bel
-    
+ 
