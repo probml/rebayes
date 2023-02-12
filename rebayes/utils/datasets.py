@@ -199,7 +199,8 @@ def load_1d_synthetic_dataset(n_train=100, n_test=100, key=0, trenches=False, so
         key = jr.PRNGKey(key)
     key1, key2, subkey1, subkey2, key_shuffle = jr.split(key, 5)
 
-    X_train = jr.uniform(key1, shape=(2*n_train, 1), minval=0.0, maxval=0.5)
+    n_train_sample = 2 * n_train if trenches else n_train 
+    X_train = jr.uniform(key1, shape=(n_train_sample, 1), minval=0.0, maxval=0.5)
     X_test = jr.uniform(key2, shape=(n_test, 1), minval=0.0, maxval=0.5)
     
     def generating_function(key, x):
