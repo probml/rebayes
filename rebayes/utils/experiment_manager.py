@@ -161,13 +161,7 @@ class ExpManager(ABC):
     def plot_results(self, ax, result_dict, title, legend_loc=None):
         """Plot results."""
         for key, val in result_dict.items():
-            ax.plot(val['rmse'], color=val['color'], ls=val['ls'], label=key)
-            ax.fill_between(
-                jnp.arange(val['rmse'].shape[0]),
-                val['rmse'] - 10*val['rmse_std'],
-                val['rmse'] + 10*val['rmse_std'],
-                alpha=0.1, color=val['color']
-            )
+            ax.plot(val['rmse'], label=key)
 
         if legend_loc is not None:
             ax.legend(loc=legend_loc)
