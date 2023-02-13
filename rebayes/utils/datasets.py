@@ -5,12 +5,14 @@ import os
 import jax
 import torchvision
 import numpy as np
+import pandas as pd
 import jax.numpy as jnp
 import jax.random as jr
 from jax import vmap
 from augly import image
-from typing import Tuple, Union
+from typing import Union
 from multiprocessing import Pool
+
 
 class DataAugmentationFactory:
     """
@@ -237,3 +239,94 @@ def load_1d_synthetic_dataset(n_train=100, n_test=100, key=0, trenches=False, so
         X_train, y_train = X_train[sorted_idx], y_train[sorted_idx]
 
     return (X_train, y_train), (X_test, y_test)
+
+
+def normalise_dataset(data, target_variable, frac_train, seed):
+    """
+    Randomise a dataframe, normalise by column and transform to jax arrays
+    """
+    data = data.sample(frac=1.0, replace=False, random_state=seed)
+
+    n_train = round(len(data) * frac_train)
+    
+    X_train = data.drop(columns=[target_variable]).iloc[:n_train].values
+    y_train = data[target_variable].iloc[:n_train].values
+
+    X_test = data.drop(columns=[target_variable]).iloc[n_train:].values
+    y_test = data[target_variable].iloc[n_train:].values
+
+    mean = X_train.mean(axis=0)
+    std = X_train.std(axis=0)
+    std = jnp.maximum(std, 1e-8)
+
+    mean_y = y_train.mean()
+    std_y = y_train.std()
+
+    X_train = (X_train - mean) / std
+    X_test = (X_test - mean) / std
+
+    y_train = (y_train - mean_y) / std_y
+    y_test = (y_test - mean_y) / std_y
+
+    # Convert to jax arrays
+    X_train = jnp.array(X_train)
+    y_train = jnp.array(y_train)
+    X_test = jnp.array(X_test)
+    y_test = jnp.array(y_test)
+
+    train = (X_train, y_train)
+    test = (X_test, y_test)
+    return train, test
+
+
+
+def load_uci_wine_regression(color="all", frac_train=0.8, include_color=False, seed=314, normalise=True):
+    """
+    https://archive.ics.uci.edu/ml/datasets/wine+quality
+    """
+    target_variable = "quality"
+    url_base = "https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-{color}.csv"
+
+    match color:
+        case "red" | "white":
+            colorv = 0 if color == "red" else 1
+            url = url_base.format(color=color)
+            data = (
+                pd.read_csv(url, sep=";")
+                .assign(color=colorv)
+            )
+        case "all":
+            data_red = load_uci_wine_regression(color="red", include_color=True, normalise=False)
+            data_white = load_uci_wine_regression(color="white", include_color=True, normalise=False)
+            data = pd.concat([data_red, data_white], axis=0)
+
+    if not include_color:
+        data = data.drop(columns=["color"])
+    
+    if normalise:
+        data = normalise_dataset(data, target_variable, frac_train, seed)
+    
+    return data
+
+
+def load_uci_naval():
+    ...
+
+def load_uci_naval():
+    ...
+
+
+def load_uci_kin8nm():
+    ...
+
+
+def load_uci_power():
+    ...
+
+
+def load_uci_protein():
+    ...
+
+
+def load_uci_spam():
+    ...
