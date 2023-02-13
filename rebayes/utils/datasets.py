@@ -21,7 +21,7 @@ class DataAugmentationFactory:
     """
     def __init__(self, processor):
         self.processor = processor
-    
+
     def __call__(self, img, configs, n_processes=90):
         return self.process_multiple_multiprocessing(img, configs, n_processes)
 
@@ -45,14 +45,14 @@ class DataAugmentationFactory:
         Each image is processed according to a configuration.
         """
         X_out = []
-                    
+
         for X, configuration in zip(X_batch, configurations):
             X_processed = self.process_single(X, **configuration)
             X_out.append(X_processed)
-            
+
         X_out = np.stack(X_out, axis=0)
         return X_out
-    
+
     def process_multiple_multiprocessing(self, X_dataset, configurations, n_processes):
         """
         Process elements in a numpy array in parallel.
@@ -79,7 +79,7 @@ class DataAugmentationFactory:
         config_split = np.array_split(configurations, n_processes)
         elements = zip(dataset_proc, config_split)
 
-        with Pool(processes=n_processes) as pool:    
+        with Pool(processes=n_processes) as pool:
             dataset_proc = pool.starmap(self.process_multiple, elements)
             dataset_proc = np.concatenate(dataset_proc, axis=0)
         pool.join()
@@ -112,7 +112,7 @@ def rotate_mnist(X, angle):
     size_pad = (28 - size_im) // 2
     size_pad_mod = (28 - size_im) % 2
     X_shift = np.pad(X_shift, (size_pad, size_pad + size_pad_mod))
-    
+
     return X_shift
 
 def generate_rotated_images(images, n_processes, minangle=0, maxangle=180):
@@ -148,7 +148,7 @@ def load_rotated_mnist(
     if target_digit is not None:
         X_train = X_train[labels_train == target_digit]
         X_test = X_test[labels_test == target_digit]
-    
+
     n_train = len(X_train)
     X = np.concatenate([X_train, X_test], axis=0)
     (X, y) = generate_rotated_images(X, n_processes, minangle=minangle, maxangle=maxangle)
@@ -176,7 +176,7 @@ def load_rotated_mnist(
 
 def load_classification_mnist(
      root: str = "./data",
-     num_train: int = 10_000,   
+     num_train: int = 10_000,
 ):
     train, test = load_mnist(root=root)
 
@@ -201,15 +201,15 @@ def load_1d_synthetic_dataset(n_train=100, n_test=100, key=0, trenches=False, so
         key = jr.PRNGKey(key)
     key1, key2, subkey1, subkey2, key_shuffle = jr.split(key, 5)
 
-    n_train_sample = 2 * n_train if trenches else n_train 
+    n_train_sample = 2 * n_train if trenches else n_train
     X_train = jr.uniform(key1, shape=(n_train_sample, 1), minval=0.0, maxval=0.5)
     X_test = jr.uniform(key2, shape=(n_test, 1), minval=0.0, maxval=0.5)
-    
+
     def generating_function(key, x):
         epsilons = jr.normal(key, shape=(3,))*0.02
-        return (x + 0.3*jnp.sin(2*jnp.pi*(x+epsilons[0])) + 
+        return (x + 0.3*jnp.sin(2*jnp.pi*(x+epsilons[0])) +
                 0.3*jnp.sin(4*jnp.pi*(x+epsilons[1])) + epsilons[2])
-    
+
     keys_train = jr.split(subkey1, X_train.shape[0])
     keys_test = jr.split(subkey2, X_test.shape[0])
     y_train = vmap(generating_function)(keys_train, X_train)
@@ -248,7 +248,7 @@ def normalise_dataset(data, target_variable, frac_train, seed):
     data = data.sample(frac=1.0, replace=False, random_state=seed)
 
     n_train = round(len(data) * frac_train)
-    
+
     X_train = data.drop(columns=[target_variable]).iloc[:n_train].values
     y_train = data[target_variable].iloc[:n_train].values
 
@@ -302,10 +302,10 @@ def load_uci_wine_regression(color="all", frac_train=0.8, include_color=False, s
 
     if not include_color:
         data = data.drop(columns=["color"])
-    
+
     if normalise:
         data = normalise_dataset(data, target_variable, frac_train, seed)
-    
+
     return data
 
 
