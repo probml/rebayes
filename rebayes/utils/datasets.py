@@ -308,18 +308,19 @@ def load_uci_wine_regression(color="all", frac_train=0.8, include_color=False, s
     target_variable = "quality"
     url_base = "https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-{color}.csv"
 
-    match color:
-        case "red" | "white":
-            colorv = 0 if color == "red" else 1
-            url = url_base.format(color=color)
-            data = (
-                pd.read_csv(url, sep=";")
-                .assign(color=colorv)
-            )
-        case "all":
-            data_red = load_uci_wine_regression(color="red", include_color=True, normalise=False)
-            data_white = load_uci_wine_regression(color="white", include_color=True, normalise=False)
-            data = pd.concat([data_red, data_white], axis=0)
+
+    if (color == "red") | (color == "white"):
+        colorv = 0 if color == "red" else 1
+        url = url_base.format(color=color)
+        data = (
+            pd.read_csv(url, sep=";")
+            .assign(color=colorv)
+        )
+    elif color == "all":
+        data_red = load_uci_wine_regression(color="red", include_color=True, normalise=False)
+        data_white = load_uci_wine_regression(color="white", include_color=True, normalise=False)
+
+        data = pd.concat([data_red, data_white], axis=0)
 
     if not include_color:
         data = data.drop(columns=["color"])
