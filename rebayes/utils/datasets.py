@@ -406,8 +406,19 @@ def load_uci_power(frac_train=0.8, seed=314):
     return data
 
 
-def load_uci_protein():
-    ...
+def load_uci_protein(frac_train=0.8, seed=314):
+    """
+    https://github.com/yaringal/DropoutUncertaintyExps/tree/master/UCI_Datasets/protein-tertiary-structure
+    """
+    target_variable = 9
+    url = (
+        "https://raw.githubusercontent.com/yaringal/"
+        "DropoutUncertaintyExps/master/UCI_Datasets/"
+        "protein-tertiary-structure/data/data.txt"
+    )
+    data = pd.read_csv(url, header=None, sep=" ")
+    data = normalise_dataset(data, target_variable, frac_train, seed)
+    return data
 
 
 def load_uci_spam(frac_train=0.8, seed=314):
