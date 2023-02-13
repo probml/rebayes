@@ -166,8 +166,6 @@ class ExpManager(ABC):
         if legend_loc is not None:
             ax.legend(loc=legend_loc)
         ax.grid()
-        ax.set_xlim(0, 100)
-        ax.set_ylim(0, 125)
         ax.set_xlabel('Training Steps (samples)')
         ax.set_ylabel('RMSE (deg)')
         ax.set_title(title)
