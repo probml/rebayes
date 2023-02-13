@@ -135,6 +135,7 @@ def load_rotated_mnist(
     maxangle: int = 180,
     n_processes: Union[int, None] = 1,
     num_train: int = 5_000,
+    frac_train: Union[float, None] = None,
     seed: int = 314,
     sort_by_angle: bool = False,
     normalise: bool = True,
@@ -158,15 +159,21 @@ def load_rotated_mnist(
         X_train = X_train[map_train]
         X_test = X_test[map_test]
 
-    n_train = len(X_train)
     X = np.concatenate([X_train, X_test], axis=0)
     (X, y) = generate_rotated_images(X, n_processes, minangle=minangle, maxangle=maxangle)
 
-    X_train, y_train = X[:n_train], y[:n_train]
-    X_test, y_test = X[n_train:], y[n_train:]
+    X = jnp.array(X)
+    y = jnp.array(y)
 
-    X_train = jnp.array(X_train)
-    y_train = jnp.array(y_train)
+    if (frac_train is None) and (num_train is None):
+        raise ValueError("Either frac_train or num_train must be specified.")
+    elif (frac_train is not None) and (num_train is not None):
+        raise ValueError("Only one of frac_train or num_train can be specified.")
+    elif frac_train is not None:
+        num_train = round(frac_train * len(X_train))
+
+    X_train, y_train = X[:num_train], y[:num_train]
+    X_test, y_test = X[num_train:], y[num_train:]
 
     if normalise:
         mean = X_train.mean()
@@ -178,11 +185,6 @@ def load_rotated_mnist(
         X_test = (X_test - mean) / std
         y_train = (y_train - mean_y) / std_y
         y_test = (y_test - mean_y) / std_y
-
-
-    if num_train is not None:
-        X_train = X_train[:num_train]
-        y_train = y_train[:num_train]
 
     if sort_by_angle:
         ix_sort = jnp.argsort(y_train)
