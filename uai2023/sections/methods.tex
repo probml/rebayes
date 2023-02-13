@@ -3,24 +3,24 @@
 
 In this section, we give an efficient recursive algorithm
 for computing the filtering distribution
-$p(\vtheta_t||data_{1:t})$ in \cref{eqn:post},
+$p(\vtheta_t|\data_{1:t})$ in \cref{eqn:post},
 as well as the posterior predictive distribution
 for observations,
-$p(\vy_t|\data_{1:t-1}$.
+$p(\vy_t|\vx_t,\data_{1:t-1})$ in \cref{eqn:post-pred}.
 
-\eat{
+
 \subsection{EKF}
 
 In the standard EKF setup, the prior at each step is approximated by a Gaussian,
 \begin{align}
-    q(\vtheta_{t-1}|\data_{1:t-1}) = \gauss(\vtheta_t  | 
+    p(\vtheta_{t-1}|\data_{1:t-1}) = \gauss(\vtheta_t  | 
     \vmu_{t-1}, \vS_{t-1})
 \end{align}
 The prior predictive distribution is given by
 \begin{align}
-p(\vtheta_t |\vtheta_{t-1})=
-\gauss(\vtheta_t| \vmu_{t+1|t} = \gamma \vmu_{t-1},
-    \vS_{t+1|t} = \gamma^2 \vS_t + q\vI)
+p(\vtheta_t |\data_{1:t-1})=
+\gauss(\vtheta_t| \underbrace{\gamma \vmu_{t-1}}_{\vmu_{t|t-1}},
+\underbrace{\gamma^2 \vS_t + q\vI}_{\vS_{t|t-1}})
 \end{align}
 We now linearize the observation model
 about the prior mean:
@@ -36,31 +36,130 @@ We also approximate the likelihood by a Gaussian:
 For regression, $\vR_t=\lambda^{-1}\vI$ with observation noise $\lambda^{-1}$. For classification, 
 $\vR_t = \diag(h(\vx_t,\vtheta_t)) - h(\vx_t,\vtheta_t) h(\vx_t,\vtheta_t)^\T$ is the conditional covariance, where
 $h(\vx_t,\vtheta_t)$ is the vector of predicted class probabilities (output from softmax).
-Under these assumptions, standard  results imply the posterior can be written as
+Because $\vR_t$ is positive-definite, we can write $\vR_t^{-1} = \vA_t^\T\vA_t$
+and define $\vG_t = \vF_t^\T\vA_t^\T$ so that $\vG_t\vG_t^\T = \vF_t^\T \vR_t^{-1} \vF_t$.
+One can think of $\vG_t$ as the (transposed) Jacobian of a standardized observation vector $\vz_t=\vA_t\vy_t$
+that has variance $\vI$.
+
+Under the above assumptions, standard  results imply the posterior can be written as
+$q(\vtheta_{t}|\data_{1:t}) = \gauss(\vtheta_t  |     \vmu_{t}, \vS_{t})$,
+where
 \begin{align}
-   q(\vtheta_{t}|\data_{1:t}) = \gauss(\vtheta_t  | 
-    \vmu_{t}, \vS_{t}) \\
-    \vmu_t &= \vmu_{t|t-1} + \left( \vS_{t|t-1}^{-1} + \vF_t^\T \vR_t^{-1} \vF_t \right)^{-1} \nonumber \\
-    & \qquad\qquad\qquad \times \vF_t^\T \vR_t^{-1} (\vy_t - f(\vx_t,\vmu_{t|t-1})) \\
-    \vS_t &= \left( \vS_{t|t-1}^{-1} + \vF_t^\T \vR_t^{-1} \vF_t \right)^{-1} \label{eq:EKF-var-update}
+      \vS_t &= \left( \vS_{t|t-1}^{-1} + \vF_t^\T \vR_t^{-1} \vF_t \right)^{-1} 
+    \label{eq:EKF-var-update} \\
+    \vmu_t &= \vmu_{t|t-1} + \vS_t^{-1} \vF_t^\T \vR_t^{-1} (\vy_t - h(\vx_t,\vmu_{t|t-1}))
+    \label{eq:EKF-mu-update}
 \end{align}
 
-Because $\vR_t$ is positive-definite, we can write $\vR_t^{-1} = \vA_t^\T\vA_t$ and define $\vG_t = \vF_t^\T\vA_t^\T$ so that $\vG_t\vG_t^\T = \vF_t^\T \vR_t^{-1} \vF_t$. One can think of $\vG_t$ as the (transposed) Jacobian of a standardized outcome $\vz_t=\vA_t\vy_t$ that has variance $\vI$.
+To initialize the process,
+we start with a spherical Gaussian prior
+$p(\vtheta_0) = \gauss(\vmu_0=\vzero, \eta_0^{-1} \Id)$.
+In this case, 
+the marginal variance of the prior at each step is
+ $\var{\vtheta_t} = \eta_t^{-1} \vI$,
+where $\eta_t^{-1} = \gamma^2 \eta_{t-1}^{-1} + q$.
+We make a steady-state assumption,
+that $\eta_t=\eta_0$ for all $t$,
+and hence we have the constraint that 
+$\gamma^{2}+q\eta_{0}=1$.
+This is the same as the "variance preserving" Gaussian process used in diffusion probabilistic models
+\citep{song2020score,ho2020denoising}.
 
-}
+
 
 \subsection{Low-Rank EKF}
 
-To motivate our LoFi approach, consider the stationary case as in Equation \eqref{eq:stationary}. Then $\vS_{t|t-1} = \vS_{t-1}$, and telescoping Equation \eqref{eq:EKF-var-update} yields
+The primary disadvantage of the EKF is that
+it takes $O(\nparams^3$ time per step, because of the need to invert
+the $\nparams \times \nparams$ precision matrix.
+We now propose a method that takes $O(\memory \nparams)$ time,
+where $\memory$ is a parameter we get to choose.
+In particular, we assume
+the posterior precision matrix is low-rank plus diagonal,
+$\vS_t^{-1} \approx \vW_t\vW_t^\T  + \vPsi_t$,
+where $\vW_t$ is $\nparams \times \memory$ and
+$\vPsi_t$ is $\nparams \times \nparams$ diagonal.
+One way to find these parameters is to solve
 \begin{align}
-    \vS_t^{-1} = \eta\vI + \sum_{i=1}^t \vG_i\vG_i^\T \label{eq:EKF-posterior-variance}
-\end{align}
+  q_t(\vtheta) &= \argmin_{\vmu_t, \vW_t, \vPsi_t}
+  \text{KL}\left( \gauss(\vmu_t, (\vW_t \vW_t^\trans + \vPsi_t)^{-1})   \right. \\
+   & \left.
+    || Z_t p(\vy_t|\vtheta_t) p(\vtheta_t|\data_{1:t-1}) \right)
+  \end{align}
+where $Z_t = p(\vy_t|\vy_{1:t-1})$ is a normalization constamt.
+This problem has been tackled by \citep{Ong2018}.
+However, they rely on a stochastic approximation,
+which can result in a high variance objective which is slow to compute,
+and hard to optimize, requiring a careful choice of step size.
 
-where $\eta\vI$ is the prior precision at time zero. The data-driven part of Equation \eqref{eq:EKF-posterior-variance} is a sum of outer products of gradients, taken over all time steps and (standardized) outcome dimensions. We seek a low-rank approximation of this sum,
+An alternative, two-stage approach, known as LRVGA,  was proposed in
+\citep{LRVGA}.
+This does not require choosing a step size.
+Instead they solve
+\begin{align}
+  q^*_t(\vtheta) &= \gauss(\vmu_t^*,\vS_t^*) = \argmin_{\vmu_t, \vS_t}
+  \text{KL}\left( \gauss(\vmu_t,\vS_t)   \right. \\
+   & \left.
+  || Z_t p(\vy_t|\vtheta_t) p(\vtheta_t|\data_{1:t-1}) \right)
+  \label{eqn:LRVGA1}
+  \\
+  \hat{q}_t(\vtheta) &= \gauss(\vmu_t^*,\hat{\vS}_t) = \argmin_{\vW_t, \vPsi_t} \\
+  & \text{KL}\left( \gauss(\vmu_t^*, (\vW_t \vW_t^\trans + \vPsi_t)^{-1})
+  || q_t^*(\vtheta_t) \right)
+    \label{eqn:LRVGA2}
+\end{align}
+These two optimization steps are solved jointly,
+by using an extra-gradient method,
+combined with a stochastic EM algorithm.
+Below we present our method, which is simpler and faster.
+
+
+\subsection{\lofi}
+
+In \lofi, we use the same Gaussian approximation
+as stage 1 of LRVGA,  in \cref{eqn:LRVGA1},
+but we linearize the observation model,
+so we can solve the problem explicitly rather than implicitly.
+%but we leverage the fact that
+%$(\vS_t^*)^{-1} = \eta_t \vI + \tilde{\vW}_t \tilde{\vW}_t^\trans$ is spherical plus rank $M+C$
+%to compute $\vmu_t^*$ efficiently.
+We then replace LRVGA stage 2 with
+$q_t(\vtheta) = \gauss(\vmu_t^*,\tilde{\vS}_t)$,
+where (FIX THIS)
+\begin{align}
+  \tilde{\vS}^{-1}_t = \argmin_{\vS \in \real^{\nparams \times \memory}} ||\vS^{-1}-\tilde{\vS}_t^{-1}||_F
+    \label{eqn:LOFI}
+\end{align}
+We propose two ways to compute
+\cref{eqn:LOFI}.
+The first involves computing the SVD of a $\nparams \times \memory$ matrix.
+The second involves projecting the gradient of the likelihood onto
+the subspace spanned by previous gradients,
+and then computing the SVD of the matrix of orthogonalized gradients,
+which can be solved in closed form.
+
+
+
+
+
+\subsection{Scratchpad}
+
+
+To see how this work, consider the case of a stationary parameter,
+as in Equation \eqref{eq:stationary}.
+Then $\vS_{t|t-1} = \vS_{t-1}$, and telescoping Equation \eqref{eq:EKF-var-update} yields
+\begin{align}
+    \vS_t^{-1} = \eta_0 \vI + \sum_{i=1}^t \vG_i\vG_i^\T \label{eq:EKF-posterior-variance}
+\end{align}
+where $\eta_0 \vI$ is the prior precision at time zero.
+The data-driven part of Equation \eqref{eq:EKF-posterior-variance} is a sum of outer products of gradients,
+taken over all time steps and (standardized) outcome dimensions. We seek a low-rank approximation of this sum,
 \begin{align}
     \vW_t\vW_t^\T \approx \sum_{i=1}^t \vG_i\vG_i^\T
 \end{align}
-with $\vW_t\in\real^{P\times M}$, where $M\ll\{T,P\}$ is a (fixed or adaptive) memory limit. As explained below, $\vW_t$ will be obtained by an incremental SVD algorithm that aims to maintain the top $M$ non-normalized singular vectors of $[\vG_1,\dots,\vG_t]$.
+with $\vW_t\in\real^{P\times M}$.
+%, where $M\ll\{T,P\}$ is a (fixed or adaptive) memory limit.
+As explained below, $\vW_t$ will be obtained by an incremental SVD algorithm that aims to maintain the top $M$ non-normalized singular vectors of $[\vG_1,\dots,\vG_t]$.
 
 mean inference step
 dynamics step for mean (trivial)
@@ -97,7 +196,7 @@ mean update
  version using $S_{t-1}$
 variance update
  note spherical part unchanged
-telescoped variance, $\vI+X_T\Lambda \vX_T^\T$ where $\Lambda=diag(\lambda^{0:T-1})$
+telescoped variance, $\vI+X_T\Lambda \vX_T^\T$ where $\Lambda=\diag(\lambda^{0:T-1})$
 SVD approximation, I+WW'
  write as $W=U\vsigma$ where $\vsigma[j]=\Vert \vW_t[:,j]\Vert$ and $\vU_t[:,j]=\vsigma_t[j]^{-1}\Vert \vW_t[:,j]\Vert$
  inference step explained next

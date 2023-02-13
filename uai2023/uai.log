@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.14159265-2.6-1.40.21 (TeX Live 2020) (preloaded format=pdflatex 2020.4.7)  12 FEB 2023 20:33
+This is pdfTeX, Version 3.14159265-2.6-1.40.21 (TeX Live 2020) (preloaded format=pdflatex 2020.4.7)  12 FEB 2023 21:43
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -918,7 +918,7 @@ LaTeX Info: Redefining \smaller on input line 151.
 )
 (./macros.tex
 LaTeX Font Info:    Overwriting math alphabet `\mathsfit' in version `bold'
-(Font)                  T1/phv/m/sl --> T1/phv/bx/n on input line 287.
+(Font)                  T1/phv/m/sl --> T1/phv/bx/n on input line 295.
 \c@thm=\count315
 \c@lem=\count316
 \c@cor=\count317
@@ -1083,251 +1083,40 @@ Underfull \hbox (badness 10000) in paragraph at lines 1--1
 
  []
 
-
-Package natbib Warning: Citation `Huang2015' on page 1 undefined on input line 
-21.
-
-
-Package natbib Warning: Citation `Wolczyk2021' on page 1 undefined on input lin
-e 22.
-
-
-Package natbib Warning: Citation `Lesort2020' on page 1 undefined on input line
- 22.
-
-
-Package natbib Warning: Citation `Ditzler2015' on page 1 undefined on input lin
-e 23.
-
-
-Package natbib Warning: Citation `Holzmuller2022' on page 1 undefined on input 
-line 44.
-
-
-Package natbib Warning: Citation `Garnett2023' on page 1 undefined on input lin
-e 45.
-
-
-Package natbib Warning: Citation `Duran-Martin2022' on page 1 undefined on inpu
-t line 46.
-
-
-Package natbib Warning: Citation `Khetarpal2022' on page 1 undefined on input l
-ine 47.
-
-
-Package natbib Warning: Citation `Wang2021' on page 1 undefined on input line 4
-7.
-
-
-Package natbib Warning: Citation `Ash2020' on page 1 undefined on input line 96
-.
-
-
-Package natbib Warning: Citation `Dohare2021' on page 1 undefined on input line
- 96.
-
-
-Package natbib Warning: Citation `Barrau2018' on page 1 undefined on input line
- 102.
-
-
-Package natbib Warning: Citation `song2020score' on page 1 undefined on input l
-ine 120.
-
-
-Package natbib Warning: Citation `ho2020denoising' on page 1 undefined on input
- line 120.
-
 [1{/usr/local/texlive/2020/texmf-var/fonts/map/pdftex/updmap/pdftex.map}
 
 
 
-]
+])
+(./sections/related.tex [2]) (./sections/methods.tex
 
-Package natbib Warning: Citation `Sarkka23' on page 2 undefined on input line 1
-34.
-
-
-Package natbib Warning: Citation `pml2Book' on page 2 undefined on input line 1
-34.
-
-
-Package natbib Warning: Citation `Singhal1988' on page 2 undefined on input lin
-e 143.
-
-
-Package natbib Warning: Citation `Ollivier2018' on page 2 undefined on input li
-ne 145.
-
-
-Package natbib Warning: Citation `Tronarp2018' on page 2 undefined on input lin
-e 145.
-
-
-Package natbib Warning: Citation `Puskorius1991' on page 2 undefined on input l
-ine 153.
-
-
-Package natbib Warning: Citation `Chang2022' on page 2 undefined on input line 
-153.
-
-
-Package natbib Warning: Citation `Cai2021' on page 2 undefined on input line 17
-0.
-
-) (./sections/related.tex
-
-Package natbib Warning: Citation `LRVGA' on page 2 undefined on input line 9.
-
-
-Package natbib Warning: Citation `RVGA' on page 2 undefined on input line 10.
-
-
-Package natbib Warning: Citation `ORFit' on page 2 undefined on input line 16.
-
-
-Package natbib Warning: Citation `Singhal1988' on page 2 undefined on input lin
-e 26.
-
-
-Package natbib Warning: Citation `Watanabe1990' on page 2 undefined on input li
-ne 26.
-
-
-Package natbib Warning: Citation `Puskorius1991' on page 2 undefined on input l
-ine 26.
-
-
-Package natbib Warning: Citation `Haykin01' on page 2 undefined on input line 2
-6.
-
-
-Package natbib Warning: Citation `Chang2022' on page 2 undefined on input line 
-27.
-
-
-Package natbib Warning: Citation `Puskorius1991' on page 2 undefined on input l
-ine 33.
-
-
-Package natbib Warning: Citation `Ghosh2016' on page 2 undefined on input line 
-37.
-
-
-Package natbib Warning: Citation `Wagner2022' on page 2 undefined on input line
- 37.
-
-
-Package natbib Warning: Citation `Nguyen2018continual' on page 2 undefined on i
-nput line 46.
-
-
-Package natbib Warning: Citation `Broderick2013' on page 2 undefined on input l
-ine 46.
-
-
-Package natbib Warning: Citation `Kurle2020' on page 2 undefined on input line 
-46.
-
-
-Package natbib Warning: Citation `Zeno2021' on page 2 undefined on input line 4
-6.
-
-
-Package natbib Warning: Citation `Wu2019VB' on page 2 undefined on input line 4
-7.
-
-
-Package natbib Warning: Citation `Ritter2018online' on page 2 undefined on inpu
-t line 52.
-
-
-Package natbib Warning: Citation `Daxberger2021laplace' on page 2 undefined on 
-input line 52.
-
-
-Package natbib Warning: Citation `Wang2023CL' on page 2 undefined on input line
- 63.
-
-
-Package natbib Warning: Citation `Mai2022' on page 2 undefined on input line 63
+Package natbib Warning: Citation `Ong2018' on page 3 undefined on input line 90
 .
 
-
-Package natbib Warning: Citation `Delange2021' on page 2 undefined on input lin
-e 63.
-
-
-Package natbib Warning: Citation `Mundt2023' on page 2 undefined on input line 
-63.
-
-
-Package natbib Warning: Citation `Cai2021' on page 2 undefined on input line 75
-.
-
-
-Package natbib Warning: Citation `Ghunaim2023' on page 2 undefined on input lin
-e 75.
-
-
-Package natbib Warning: Citation `Dawid99' on page 2 undefined on input line 75
-.
-
-
-Package natbib Warning: Citation `Gama2013' on page 2 undefined on input line 7
-5.
-
-[2]
-
-Package natbib Warning: Citation `Hu2021onepass' on page 3 undefined on input l
-ine 78.
-
-
-Package natbib Warning: Citation `Ash2020' on page 3 undefined on input line 78
-.
-
-
-Package natbib Warning: Citation `Dohare2021' on page 3 undefined on input line
- 78.
-
-
-Package natbib Warning: Citation `Xu2021' on page 3 undefined on input line 78.
-
-
-
-Package natbib Warning: Citation `Paria2022' on page 3 undefined on input line 
-85.
-
-
-Package natbib Warning: Citation `Ghunaim2023' on page 3 undefined on input lin
-e 87.
-
-) (./sections/methods.tex
-
-LaTeX Warning: Reference `eq:EKF-var-update' on page 3 undefined on input line 
-54.
-
-
-Underfull \hbox (badness 10000) in paragraph at lines 74--75
+[3]
+Underfull \hbox (badness 10000) in paragraph at lines 171--172
 []\T1/ptm/m/n/10 (+20) Under the dy-namic as-sump-tion $\OML/cmm/m/it/10 p\OT1/
 cmr/m/n/10 (\OML/cmm/b/it/10 ^^R[]\OMS/cmsy/m/n/10 j\OML/cmm/b/it/10 ^^R[]\OT1/
 cmr/m/n/10 ) =
  []
 
 
-Underfull \hbox (badness 1062) in paragraph at lines 84--107
+LaTeX Warning: Reference `ft:steady-state' on page 4 undefined on input line 17
+6.
+
+
+Underfull \hbox (badness 1062) in paragraph at lines 181--204
 []\T1/ptm/m/n/10 (+20) state-space model x generic out-come $\OML/cmm/m/it/10 p
 \OT1/cmr/m/n/10 (\OML/cmm/b/it/10 y[]\OMS/cmsy/m/n/10 j\OML/cmm/b/it/10 x[]\OML
 /cmm/m/it/10 ; \OML/cmm/b/it/10 ^^R[]\OT1/cmr/m/n/10 ) =
  []
 
 
-Overfull \hbox (68.77493pt too wide) in paragraph at lines 157--157
+Overfull \hbox (68.77493pt too wide) in paragraph at lines 254--254
 \OML/cmm/m/it/10 ^^M []$  
  []
 
-[3]) (./sections/results.tex) (./sections/concl.tex) (./uai.bbl
+[4]) (./sections/results.tex) (./sections/concl.tex) (./uai.bbl
 LaTeX Font Info:    Trying to load font information for T1+pcr on input line 13
 .
 
@@ -1396,7 +1185,7 @@ Underfull \hbox (badness 10000) in paragraph at lines 101--107
 \T1/pcr/m/n/10 assumeddensityfilteringaaai2016final .
  []
 
-[4]
+[5]
 Underfull \hbox (badness 1460) in paragraph at lines 143--149
 []\T1/ptm/m/n/10 (+20) Yanxiang Huang, Bin Cui, Wenyu Zhang, Jie Jiang,
  []
@@ -1418,7 +1207,7 @@ Underfull \hbox (badness 1910) in paragraph at lines 190--197
 ptm/m/n/10 (+20) , 469:28--51, Jan-uary
  []
 
-[5]
+[6]
 Underfull \hbox (badness 1014) in paragraph at lines 219--223
 \T1/ptm/m/n/10 (+20) Turner.  Vari-a-tional con-tin-ual learn-ing.  In \T1/ptm/
 m/it/10 (+20) ICLR\T1/ptm/m/n/10 (+20) ,
@@ -1436,22 +1225,17 @@ Underfull \hbox (badness 10000) in paragraph at lines 273--280
 
 ) 
 AED: lastpage setting LastPage
-[6]
+[7]
 
 Package natbib Warning: There were undefined citations.
 
 Package atveryend Info: Empty hook `BeforeClearDocument' on input line 122.
 Package atveryend Info: Empty hook `AfterLastShipout' on input line 122.
-(./uai.aux
-
-Package natbib Warning: Citation(s) may have changed.
-(natbib)                Rerun to get citations correct.
-
-)
+(./uai.aux)
 Package atveryend Info: Executing hook `AtVeryEndDocument' on input line 122.
 Package atveryend Info: Executing hook `AtEndAfterFileList' on input line 122.
 Package rerunfilecheck Info: File `uai.out' has not changed.
-(rerunfilecheck)             Checksum: 6142AAAFCFB0B3487E222AC261E008E7;371.
+(rerunfilecheck)             Checksum: CBA7B064A634B0C8E0CF61CEDAEB2F0F;537.
 
 
 LaTeX Warning: There were undefined references.
@@ -1462,45 +1246,41 @@ LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.
 Package atveryend Info: Empty hook `AtVeryVeryEnd' on input line 122.
  ) 
 Here is how much of TeX's memory you used:
- 28067 strings out of 480608
- 496383 string characters out of 5903631
- 808824 words of memory out of 5000000
- 43080 multiletter control sequences out of 15000+600000
- 590384 words of font info for 205 fonts, out of 8000000 for 9000
+ 28109 strings out of 480608
+ 496906 string characters out of 5903631
+ 812971 words of memory out of 5000000
+ 43093 multiletter control sequences out of 15000+600000
+ 590904 words of font info for 213 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  62i,20n,100p,502b,649s stack positions out of 5000i,500n,10000p,200000b,80000s
 {/usr/local/texlive/2020/texmf-dist/fonts/enc/dvips/base/8r.enc}</usr/local/t
 exlive/2020/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/local/te
-xlive/2020/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx9.pfb></usr/local/texl
+xlive/2020/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx7.pfb></usr/local/texl
 ive/2020/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></usr/local/texli
 ve/2020/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/local/texliv
 e/2020/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi5.pfb></usr/local/texlive/
-2020/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi6.pfb></usr/local/texlive/20
-20/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb></usr/local/texlive/2020
-/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi9.pfb></usr/local/texlive/2020/t
-exmf-dist/fonts/type1/public/amsfonts/cm/cmmib10.pfb></usr/local/texlive/2020/t
-exmf-dist/fonts/type1/public/amsfonts/cmextra/cmmib9.pfb></usr/local/texlive/20
-20/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/local/texlive/2020
-/texmf-dist/fonts/type1/public/amsfonts/cm/cmr5.pfb></usr/local/texlive/2020/te
-xmf-dist/fonts/type1/public/amsfonts/cm/cmr6.pfb></usr/local/texlive/2020/texmf
--dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/local/texlive/2020/texmf-di
-st/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/local/texlive/2020/texmf-dist/
-fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/texlive/2020/texmf-dist/f
-onts/type1/public/amsfonts/cm/cmsy5.pfb></usr/local/texlive/2020/texmf-dist/fon
-ts/type1/public/amsfonts/cm/cmsy6.pfb></usr/local/texlive/2020/texmf-dist/fonts
-/type1/public/amsfonts/cm/cmsy7.pfb></usr/local/texlive/2020/texmf-dist/fonts/t
-ype1/public/amsfonts/cm/cmsy9.pfb></usr/local/texlive/2020/texmf-dist/fonts/typ
-e1/public/amsfonts/symbols/msam7.pfb></usr/local/texlive/2020/texmf-dist/fonts/
-type1/public/amsfonts/symbols/msbm10.pfb></usr/local/texlive/2020/texmf-dist/fo
-nts/type1/public/amsfonts/symbols/msbm7.pfb></usr/local/texlive/2020/texmf-dist
-/fonts/type1/urw/courier/ucrr8a.pfb></usr/local/texlive/2020/texmf-dist/fonts/t
-ype1/urw/times/utmb8a.pfb></usr/local/texlive/2020/texmf-dist/fonts/type1/urw/t
-imes/utmr8a.pfb></usr/local/texlive/2020/texmf-dist/fonts/type1/urw/times/utmri
-8a.pfb>
-Output written on uai.pdf (6 pages, 305851 bytes).
+2020/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb></usr/local/texlive/20
+20/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi9.pfb></usr/local/texlive/2020
+/texmf-dist/fonts/type1/public/amsfonts/cm/cmmib10.pfb></usr/local/texlive/2020
+/texmf-dist/fonts/type1/public/amsfonts/cmextra/cmmib7.pfb></usr/local/texlive/
+2020/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/local/texlive/20
+20/texmf-dist/fonts/type1/public/amsfonts/cm/cmr5.pfb></usr/local/texlive/2020/
+texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/local/texlive/2020/tex
+mf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/local/texlive/2020/texmf-
+dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/texlive/2020/texmf-d
+ist/fonts/type1/public/amsfonts/cm/cmsy5.pfb></usr/local/texlive/2020/texmf-dis
+t/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/local/texlive/2020/texmf-dist/
+fonts/type1/public/amsfonts/symbols/msam7.pfb></usr/local/texlive/2020/texmf-di
+st/fonts/type1/public/amsfonts/symbols/msbm10.pfb></usr/local/texlive/2020/texm
+f-dist/fonts/type1/public/amsfonts/symbols/msbm7.pfb></usr/local/texlive/2020/t
+exmf-dist/fonts/type1/urw/courier/ucrr8a.pfb></usr/local/texlive/2020/texmf-dis
+t/fonts/type1/urw/times/utmb8a.pfb></usr/local/texlive/2020/texmf-dist/fonts/ty
+pe1/urw/times/utmr8a.pfb></usr/local/texlive/2020/texmf-dist/fonts/type1/urw/ti
+mes/utmri8a.pfb>
+Output written on uai.pdf (7 pages, 289848 bytes).
 PDF statistics:
- 388 PDF objects out of 1000 (max. 8388607)
- 349 compressed objects within 4 object streams
- 117 named destinations out of 1000 (max. 500000)
- 29253 words of extra memory for PDF output out of 29859 (max. 10000000)
+ 526 PDF objects out of 1000 (max. 8388607)
+ 489 compressed objects within 5 object streams
+ 134 named destinations out of 1000 (max. 500000)
+ 29277 words of extra memory for PDF output out of 29859 (max. 10000000)
 

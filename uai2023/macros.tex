@@ -1,10 +1,18 @@
 
+\newcommand{\nparams}{D}
+\newcommand{\memory}{M}
+
+
 \newcommand{\orfit}{ORFit\xspace}
 \newcommand{\lofi}{LO-FI\xspace}
 
 \newcommand{\Id}{\vI}
 %\newcommand{\Id}{\mathbb{I}}
 
+\newcommand{\T}{\intercal}
+\newcommand{\col}{\text{col}}
+
+\newcommand{\data}{\calD}
 
 \newcommand{\myvec}[1]{\mathbf{#1}}
 \newcommand{\myvecsym}[1]{\boldsymbol{#1}}
@@ -757,8 +765,8 @@
 \newcommand{\conddepend}[3]{{#1} \not \perp {#2} | {#3}}
 
 %\newcommand{\trans}{\top}
-%\newcommand{\trans}{\intercal}
-\newcommand{\trans}{{\mkern-1.5mu\mathsf{T}}}
+\newcommand{\trans}{\T}
+%\newcommand{\trans}{{\mkern-1.5mu\mathsf{T}}}
 \newcommand{\transpose}[1]{{#1}^{\trans}}
 
 \newcommand{\inv}[1]{{#1}^{-1}}
@@ -797,8 +805,8 @@
 \newcommand{\param}{\theta}
 \newcommand{\genparams}{\vtheta}
 %\newcommand{\nparams}{{\ensuremath{N_{\theta}}\xspace}}
-\newcommand{\nparams}{D}
-\newcommand{\Nparams}{\nparams}
+%\newcommand{\nparams}{D}
+%\newcommand{\Nparams}{\nparams}
 \newcommand{\nopt}{n}
 \newcommand{\infnet}{f^\text{inf}_{\infparams}}
 \newcommand{\gennet}{f^\text{gen}_{\genparams}}
@@ -1649,7 +1657,3 @@
 \def\vy{{\bm{y}}}
 \def\vz{{\bm{z}}}
 
-\newcommand{\T}{\intercal}
-\newcommand{\col}{\text{col}}
-
-\newcommand{\data}{\calD}

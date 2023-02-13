@@ -25,9 +25,6 @@
 \citation{Garnett2023}
 \citation{Duran-Martin2022}
 \citation{Khetarpal2022,Wang2021}
-\citation{Ash2020,Dohare2021}
-\citation{Barrau2018}
-\citation{song2020score,ho2020denoising}
 \providecommand \oddpage@label [2]{}
 \babel@aux{american}{}
 \@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
@@ -37,10 +34,12 @@
 \newlabel{eqn:likelihood@cref}{{[equation][2][]2}{[1][1][]1}}
 \newlabel{eqn:prior-predictive}{{3}{1}{Introduction}{equation.1.3}{}}
 \newlabel{eqn:prior-predictive@cref}{{[equation][3][]3}{[1][1][]1}}
-\newlabel{eqn:dynamics}{{4}{1}{Introduction}{equation.1.4}{}}
-\newlabel{eqn:dynamics@cref}{{[equation][4][]4}{[1][1][]1}}
-\newlabel{eq:stationary}{{5}{1}{Introduction}{equation.1.5}{}}
-\newlabel{eq:stationary@cref}{{[equation][5][]5}{[1][1][]1}}
+\newlabel{eqn:post-pred}{{4}{1}{Introduction}{equation.1.4}{}}
+\newlabel{eqn:post-pred@cref}{{[equation][4][]4}{[1][1][]1}}
+\newlabel{eqn:dynamics}{{5}{1}{Introduction}{equation.1.5}{}}
+\newlabel{eqn:dynamics@cref}{{[equation][5][]5}{[1][1][]1}}
+\citation{Ash2020,Dohare2021}
+\citation{Barrau2018}
 \citation{Sarkka23,pml2Book}
 \citation{Singhal1988}
 \citation{Ollivier2018,Tronarp2018}
@@ -56,22 +55,38 @@
 \citation{Nguyen2018continual,Broderick2013,Kurle2020,Zeno2021}
 \citation{Wu2019VB}
 \citation{Ritter2018online,Daxberger2021laplace}
-\citation{Wang2023CL,Mai2022,Delange2021,Mundt2023}
-\citation{Cai2021,Ghunaim2023,Dawid99,Gama2013}
-\newlabel{ft:steady-state}{{3}{2}{}{Hfootnote.3}{}}
-\newlabel{ft:steady-state@cref}{{[footnote][3][]3}{[1][1][]2}}
+\newlabel{eq:stationary}{{6}{2}{Introduction}{equation.1.6}{}}
+\newlabel{eq:stationary@cref}{{[equation][6][]6}{[1][1][]2}}
 \@writefile{toc}{\contentsline {section}{\numberline {2}Related work}{2}{section.2}\protected@file@percent }
 \newlabel{sec:related}{{2}{2}{Related work}{section.2}{}}
 \newlabel{sec:related@cref}{{[section][2][]2}{[1][2][]2}}
+\citation{Wang2023CL,Mai2022,Delange2021,Mundt2023}
+\citation{Cai2021,Ghunaim2023,Dawid99,Gama2013}
 \citation{Hu2021onepass,Ash2020,Dohare2021,Xu2021}
 \citation{Paria2022}
 \citation{Ghunaim2023}
+\citation{song2020score,ho2020denoising}
+\citation{Ong2018}
+\citation{LRVGA}
 \@writefile{toc}{\contentsline {section}{\numberline {3}Methods}{3}{section.3}\protected@file@percent }
 \newlabel{sec:methods}{{3}{3}{Methods}{section.3}{}}
 \newlabel{sec:methods@cref}{{[section][3][]3}{[1][3][]3}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Low-Rank EKF}{3}{subsection.3.1}\protected@file@percent }
-\newlabel{eq:EKF-posterior-variance}{{6}{3}{Low-Rank EKF}{equation.3.6}{}}
-\newlabel{eq:EKF-posterior-variance@cref}{{[equation][6][]6}{[1][3][]3}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}EKF}{3}{subsection.3.1}\protected@file@percent }
+\newlabel{eq:EKF-var-update}{{11}{3}{EKF}{equation.3.11}{}}
+\newlabel{eq:EKF-var-update@cref}{{[equation][11][]11}{[1][3][]3}}
+\newlabel{eq:EKF-mu-update}{{12}{3}{EKF}{equation.3.12}{}}
+\newlabel{eq:EKF-mu-update@cref}{{[equation][12][]12}{[1][3][]3}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Low-Rank EKF}{3}{subsection.3.2}\protected@file@percent }
+\newlabel{eqn:LRVGA1}{{16}{3}{Low-Rank EKF}{equation.3.16}{}}
+\newlabel{eqn:LRVGA1@cref}{{[equation][16][]16}{[1][3][]3}}
+\newlabel{eqn:LRVGA2}{{18}{3}{Low-Rank EKF}{equation.3.18}{}}
+\newlabel{eqn:LRVGA2@cref}{{[equation][18][]18}{[1][3][]3}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}LO-FI\xspace  }{4}{subsection.3.3}\protected@file@percent }
+\newlabel{eqn:LOFI}{{19}{4}{\lofi }{equation.3.19}{}}
+\newlabel{eqn:LOFI@cref}{{[equation][19][]19}{[1][4][]4}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Scratchpad}{4}{subsection.3.4}\protected@file@percent }
+\newlabel{eq:EKF-posterior-variance}{{20}{4}{Scratchpad}{equation.3.20}{}}
+\newlabel{eq:EKF-posterior-variance@cref}{{[equation][20][]20}{[1][4][]4}}
 \bibdata{refs}
 \bibcite{Ash2020}{{1}{2020}{{Ash and Adams}}{{}}}
 \bibcite{Barrau2018}{{2}{2018}{{Barrau and Bonnabel}}{{}}}
@@ -87,17 +102,17 @@
 \bibcite{Gama2013}{{12}{2013}{{Gama et~al.}}{{Gama, Sebasti{\~a}o, and Rodrigues}}}
 \bibcite{Garnett2023}{{13}{2023}{{Garnett}}{{}}}
 \bibcite{Ghosh2016}{{14}{2016}{{Ghosh et~al.}}{{Ghosh, Delle~Fave, and Yedidia}}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Algorithm}{4}{subsection.3.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.5}Algorithm}{5}{subsection.3.5}\protected@file@percent }
 \providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
-\newlabel{alg:LoFi-full-SVD}{{1}{4}{Algorithm}{algocf.1}{}}
-\newlabel{alg:LoFi-full-SVD@cref}{{[algocf][1][]1}{[1][3][]4}}
-\@writefile{loa}{\contentsline {algocf}{\numberline {1}{\ignorespaces LoFi regression algorithm\relax }}{4}{algocf.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {4}Experimental results}{4}{section.4}\protected@file@percent }
-\newlabel{sec:results}{{4}{4}{Experimental results}{section.4}{}}
-\newlabel{sec:results@cref}{{[section][4][]4}{[1][4][]4}}
-\@writefile{toc}{\contentsline {section}{\numberline {5}Conclusion and future work}{4}{section.5}\protected@file@percent }
-\newlabel{sec:concl}{{5}{4}{Conclusion and future work}{section.5}{}}
-\newlabel{sec:concl@cref}{{[section][5][]5}{[1][4][]4}}
+\newlabel{alg:LoFi-full-SVD}{{1}{5}{Algorithm}{algocf.1}{}}
+\newlabel{alg:LoFi-full-SVD@cref}{{[algocf][1][]1}{[1][4][]5}}
+\@writefile{loa}{\contentsline {algocf}{\numberline {1}{\ignorespaces LoFi regression algorithm\relax }}{5}{algocf.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Experimental results}{5}{section.4}\protected@file@percent }
+\newlabel{sec:results}{{4}{5}{Experimental results}{section.4}{}}
+\newlabel{sec:results@cref}{{[section][4][]4}{[1][5][]5}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Conclusion and future work}{5}{section.5}\protected@file@percent }
+\newlabel{sec:concl}{{5}{5}{Conclusion and future work}{section.5}{}}
+\newlabel{sec:concl@cref}{{[section][5][]5}{[1][5][]5}}
 \bibcite{Ghunaim2023}{{15}{2023}{{Ghunaim et~al.}}{{Ghunaim, Bibi, Alhamoud, Alfarra, Al~Kader~Hammoud, Prabhu, Torr, and Ghanem}}}
 \bibcite{Haykin01}{{16}{2001}{{Haykin}}{{}}}
 \bibcite{ho2020denoising}{{17}{2020}{{Ho et~al.}}{{Ho, Jain, and Abbeel}}}
@@ -110,9 +125,9 @@
 \bibcite{RVGA}{{24}{2021{b}}{{Lambert et~al.}}{{Lambert, Bonnabel, and Bach}}}
 \bibcite{Lesort2020}{{25}{2020}{{Lesort et~al.}}{{Lesort, Lomonaco, Stoian, Maltoni, Filliat, and D{\'\i }az-Rodr{\'\i }guez}}}
 \bibcite{Mai2022}{{26}{2022}{{Mai et~al.}}{{Mai, Li, Jeong, Quispe, Kim, and Sanner}}}
-\@writefile{loa}{\contentsline {algocf}{\numberline {2}{\ignorespaces Generalized ORFit algorithm.\relax }}{5}{algocf.2}\protected@file@percent }
-\newlabel{alg:ORFit-general}{{2}{5}{Algorithm}{algocf.2}{}}
-\newlabel{alg:ORFit-general@cref}{{[algocf][2][]2}{[1][4][]5}}
+\@writefile{loa}{\contentsline {algocf}{\numberline {2}{\ignorespaces Generalized ORFit algorithm.\relax }}{6}{algocf.2}\protected@file@percent }
+\newlabel{alg:ORFit-general}{{2}{6}{Algorithm}{algocf.2}{}}
+\newlabel{alg:ORFit-general@cref}{{[algocf][2][]2}{[1][5][]6}}
 \bibcite{ORFit}{{27}{2022}{{Min et~al.}}{{Min, Ahn, and Azizan}}}
 \bibcite{Mundt2023}{{28}{2023}{{Mundt et~al.}}{{Mundt, Hong, Pliushch, and Ramesh}}}
 \bibcite{pml2Book}{{29}{2023}{{Murphy}}{{}}}
@@ -133,6 +148,6 @@
 \bibcite{Wu2019VB}{{44}{2019}{{Wu et~al.}}{{Wu, Nowozin, Meeds, Turner, Hern{\'a}ndez-Lobato, and Gaunt}}}
 \bibcite{Xu2021}{{45}{2021}{{Xu and Zhu}}{{}}}
 \bibcite{Zeno2021}{{46}{2021}{{Zeno et~al.}}{{Zeno, Golan, Hoffer, and Soudry}}}
-\newlabel{LastPage}{{}{6}{}{page.6}{}}
-\xdef\lastpage@lastpage{6}
-\xdef\lastpage@lastpageHy{6}
+\newlabel{LastPage}{{}{7}{}{page.7}{}}
+\xdef\lastpage@lastpage{7}
+\xdef\lastpage@lastpageHy{7}
