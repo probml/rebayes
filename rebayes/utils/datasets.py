@@ -369,8 +369,23 @@ def load_uci_kin8nm(frac_train=0.8, seed=314):
     return data
 
 
-def load_uci_power():
-    ...
+def load_uci_power(frac_train=0.8, seed=314):
+    """
+    https://archive.ics.uci.edu/ml/datasets/combined+cycle+power+plant
+    """
+    url = "https://archive.ics.uci.edu/ml/machine-learning-databases/00294/CCPP.zip"
+    file_target = "CCPP/Folds5x2_pp.xlsx"
+    target_variable = "PE"
+
+    r = requests.get(url)
+    file = io.BytesIO(r.content)
+    with zipfile.ZipFile(file) as zip:
+        with zip.open(file_target) as f:
+            data = io.BytesIO(f.read())
+            data = pd.read_excel(data)
+        
+    data = normalise_dataset(data, target_variable, frac_train, seed)
+    return data
 
 
 def load_uci_protein():
