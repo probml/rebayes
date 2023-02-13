@@ -1,8 +1,12 @@
 """
 Prepcocessing and data augmentation for the datasets.
 """
+import re
+import io
 import os
 import jax
+import zipfile
+import requests
 import torchvision
 import numpy as np
 import pandas as pd
@@ -309,11 +313,51 @@ def load_uci_wine_regression(color="all", frac_train=0.8, include_color=False, s
     return data
 
 
-def load_uci_naval():
-    ...
+def load_uci_naval(target_variable="ship_speed", frac_train=0.8, seed=314):
+    """
+    http://archive.ics.uci.edu/ml/datasets/condition+based+maintenance+of+naval+propulsion+plants
 
-def load_uci_naval():
-    ...
+    Target column is one of the following (default is "ship_speed"):
+    * lever_position
+    * ship_speed
+    * gas_turbine_shaft_torque
+    * gas_turbine_rate_of_revolutions
+    * gas_generator_rate_of_revolutions
+    * starboard_propeller_torque
+    * port_propeller_torque
+    * hp_turbine_exit_temperature
+    * gt_compressor_inlet_air_temperature
+    * gt_compressor_outlet_air_temperature
+    * hp_turbine_exit_pressure
+    * gt_compressor_inlet_air_pressure
+    * gt_compressor_outlet_air_pressure
+    * gas_turbine_exhaust_gas_pressure
+    * turbine_injecton_control
+    * fuel_flow
+    * gt_compressor_decay_state_coefficient
+    * gt_turbine_decay_state_coefficient
+    """
+    file_target = "UCI CBM Dataset/data.txt"
+    file_features = "UCI CBM Dataset/Features.txt"
+    url = "http://archive.ics.uci.edu/ml/machine-learning-databases/00316/UCI%20CBM%20Dataset.zip"
+
+    r = requests.get(url)
+    file = io.BytesIO(r.content)
+    with zipfile.ZipFile(file) as zip:
+        with zip.open(file_features) as f:
+            features = f.read().decode("utf-8")
+            regexp = re.compile("[0-9]{1,2} - ([\w\s]+)")
+            features = regexp.findall(features)
+            features = [f.lower().rstrip().replace(" ", "_") for f in features]
+
+        with zip.open(file_target) as f:
+            data = f.read().decode("utf-8")
+            data = io.StringIO(data)
+            data = pd.read_csv(data, sep="\s+", header=None, engine="python")
+            data.columns = features
+
+    data = normalise_dataset(data, target_variable, frac_train, seed)
+    return data
 
 
 def load_uci_kin8nm():
