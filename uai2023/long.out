@@ -1,0 +1,39 @@
+\BOOKMARK [1][-]{section.1}{1 Introduction}{}% 1
+\BOOKMARK [1][-]{section.2}{2 Related work}{}% 2
+\BOOKMARK [1][-]{section.3}{3 Methods}{}% 3
+\BOOKMARK [2][-]{subsection.3.1}{3.1 Low-Rank EKF}{section.3}% 4
+\BOOKMARK [2][-]{subsection.3.2}{3.2 Algorithm}{section.3}% 5
+\BOOKMARK [1][-]{section.4}{4 Experimental results}{}% 6
+\BOOKMARK [1][-]{section.5}{5 Conclusion and future work}{}% 7
+\BOOKMARK [1][-]{section.6}{6 ORFit}{}% 8
+\BOOKMARK [2][-]{subsection.6.1}{6.1 ORFit Algorithm}{section.6}% 9
+\BOOKMARK [2][-]{subsection.6.2}{6.2 Posterior Predictive Covariance}{section.6}% 10
+\BOOKMARK [2][-]{subsection.6.3}{6.3 A different connection to EKF and L-RVGA}{section.6}% 11
+\BOOKMARK [2][-]{subsection.6.4}{6.4 ORFit sampling}{section.6}% 12
+\BOOKMARK [1][-]{section.7}{7 Generalized ORFit}{}% 13
+\BOOKMARK [2][-]{subsection.7.1}{7.1 Adaptive observation noise}{section.7}% 14
+\BOOKMARK [2][-]{subsection.7.2}{7.2 Adaptive memory size}{section.7}% 15
+\BOOKMARK [2][-]{subsection.7.3}{7.3 Kernel ORFit}{section.7}% 16
+\BOOKMARK [2][-]{subsection.7.4}{7.4 Full SVD update}{section.7}% 17
+\BOOKMARK [2][-]{subsection.7.5}{7.5 Interdomain sparse GP}{section.7}% 18
+\BOOKMARK [1][-]{section.8}{8 ORFit: Peter's notes}{}% 19
+\BOOKMARK [2][-]{subsection.8.1}{8.1 EW-RLS Update}{section.8}% 20
+\BOOKMARK [2][-]{subsection.8.2}{8.2 Non-linear ORFit}{section.8}% 21
+\BOOKMARK [2][-]{subsection.8.3}{8.3 ORFit for GLM Loss}{section.8}% 22
+\BOOKMARK [1][-]{section.9}{9 Bayesian Interpretation}{}% 23
+\BOOKMARK [2][-]{subsection.9.1}{9.1 Covariance Matrix}{section.9}% 24
+\BOOKMARK [2][-]{subsection.9.2}{9.2 ORFit for GLM Loss}{section.9}% 25
+\BOOKMARK [1][-]{section.10}{10 Connection to Kalman Filter and L-RVGA}{}% 26
+\BOOKMARK [2][-]{subsection.10.1}{10.1 Infinite-Memory ORFit}{section.10}% 27
+\BOOKMARK [2][-]{subsection.10.2}{10.2 Limited-Memory ORFit}{section.10}% 28
+\BOOKMARK [2][-]{subsection.10.3}{10.3 L-RVGA}{section.10}% 29
+\BOOKMARK [2][-]{subsection.10.4}{10.4 L-RVGA}{section.10}% 30
+\BOOKMARK [2][-]{subsection.10.5}{10.5 Diagonal EKF}{section.10}% 31
+\BOOKMARK [1][-]{section.11}{11 Datasets}{}% 32
+\BOOKMARK [1][-]{section.12}{12 Metrics}{}% 33
+\BOOKMARK [1][-]{section.13}{13 Baselines}{}% 34
+\BOOKMARK [2][-]{subsection.13.1}{13.1 SGD}{section.13}% 35
+\BOOKMARK [2][-]{subsection.13.2}{13.2 Posterior sampling with HMC}{section.13}% 36
+\BOOKMARK [2][-]{subsection.13.3}{13.3 Deep ensembles}{section.13}% 37
+\BOOKMARK [2][-]{subsection.13.4}{13.4 MFVI / BBB}{section.13}% 38
+\BOOKMARK [1][-]{section.14}{14 Bayesian optimization}{}% 39

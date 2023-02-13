@@ -1,0 +1,66 @@
+\section{Datasets}
+
+%\cite{Sutton2022} is foo
+
+
+We are interested in online learning from a sequence of distributions, $p_t(x,y)$, which may be constant or slowly varying over time. Sometimes these different distributions are called "tasks", but we require that the  output space for $y$ is the same across time, so we cannot change the label set.
+
+To create a set of potentially changing distributions,
+we start with a static labeled image classification dataset such as MNIST, which we partition into $(X^{\tr}, Y^{\tr})$ and $(X^{\te}, Y^{\te})$.
+Let $C$ be the number of classes.\footnote{For classification settings with MNIST, we exclude the 9 class to avoid confusion with 6, leaving $C=9$.} We define the $t$'th training distribution $p_t^\tr(x,y)$ as follows:
+\begin{align}
+y &\sim \Unif(\{1,\ldots,C\}) \label{eq:unif-labels}\\
+x' &\sim \Unif(\{ x_n \in X^\tr: y_n = y \}) \\
+\alpha_t &\sim p_t(\alpha|\alpha_{t-1}) \\
+x &= \text{rotate}(x', \alpha_t)
+ \end{align}
+ where $x'$ is sampled uniformly from all training examples that belong to class $y$,
+ and
+ $p_t(\alpha_t|\alpha_{t-1})$ is the distribution over angles at time $t$. 
+ This can be used to induce optional non-stationarity. 
+ Possibilites for the dynamics include
+ \begin{align}
+p_t(\alpha|\alpha_{t-1})&  =\Unif(0,2\pi)  \text{ iid/stationary} \\
+p_t(\alpha|\alpha_{t-1}) &=\delta(\alpha = \frac{2 \pi t}{T}) \text{ increasing angle} \label{eq:increasing-angle}\\
+p_t(\alpha|\alpha_{t-1}) &= \text{mod}(\gauss(\alpha_{t-1}, \sigma^2), 2\pi)  \text{ random walk} \label{eq:diffusion-angle} \\
+p_t(\alpha|\alpha_{t-1}) &= \delta(\alpha =  \text{mod}(\xi(t), 2\pi))
+ \text{ where $\xi$ is $1/f$ noise} \label{eq:fractal-angle}
+\end{align}
+We define $p_t^\te(x,y)$ similarly, the only difference is that $x$ is chosen from $X^{\te}$ to ensure the inputs are distinct.
+
+We could also include dynamics for $y$, replacing the uniform distribution in \eqref{eq:unif-labels}. Possibilities include
+\begin{align}
+    p_t(y) &= \frac{1}{C} \text{ iid uniform} \\
+    p_t(y|y_{t-1}) &= r\delta(y=y_{t-1}) + \frac{1-r}{C} \text{ simple autoregressive} \\
+    p_t(y) &= \text{softmax}(\bm{\ell}_t) \text{ where $\bm{\ell}_t$ is $1/f$ noise in $\mathbb{R}^C$}
+\end{align}
+
+In the regression setting, we can define the distribution 
+$p_t^\tr(x,y)$ as follows,
+where $y^*$ is a chosen class (e.g., 2):
+\begin{align}
+x' &\sim \Unif(\{ x_n \in X^\tr: y_n = y^* \}) \\
+\alpha_t &\sim p_t(\alpha|\alpha_{t-1}) \\
+x &= \text{rotate}(x', \alpha_t) \\
+y &= \alpha_t
+ \end{align}
+
+In either case,
+we define the training distribution at step $t$ to be
+\begin{align}
+\data_t^{\tr} = \{ (x_n,y_n) \sim p_t^{\tr}: n=1:N_{\tr} \}
+\end{align}
+We define $\data_t^{\te}$ similarly.
+Note that we may set $N_{\tr}=1$, meaning we get a single
+training sample from each distribution,
+as in the one-pass learning literature.
+In this case, we expect the $p_t$ to change slowly over time.
+Alternatively, we may get a large batch $N_{\tr} \gg 1$
+from each distribution ("task"),
+as in the continual learning literature.
+We can assume $N_{\te}=\infty$, in order to reduce the variance of the performance estimates on the test set.
+Finally we denote the sequence of training sets up to time $t$
+by 
+\begin{align}
+\data_{1:t}^{\tr} = \union_{i=1}^t \data_t^{\tr}
+\end{align}

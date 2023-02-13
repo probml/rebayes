@@ -1,0 +1,456 @@
+
+\section{Generalized ORFit}
+
+We now generalize the Bayesian ORFit to include multidimensional output,
+decay, and dynamics noise. The combination of decay and dynamics noise
+makes the algorithm suited for nonstationarity in the task, and may also help to handle the endogenous nonstationarity arising from the linear approximation of the model (i.e. stale gradients).
+
+\textcolor{red}{MJ: Include a scaling factor for different prior variance at different weights in the network}
+
+Consider the following SSM:
+\begin{align}
+p\left(w_{0}\right) & =\mathcal{N}\left(w_{0}\vert\mu_{0},\eta_{0}^{-1}\mathbb{I}_{p}\right)\\
+p\left(w_{i}\vert w_{i-1}\right) & =\mathcal{N}\left(w_{i}\vert\gamma w_{i-1},q\mathbb{I}_{p}\right)\\
+p\left(y_{i}\vert w_{i}\right) & =\mathcal{N}\left(y_{i}\vert h\left(w_{i},x_{i}\right),R_{i}\right)
+\end{align}
+Below, we make a steady-state assumption that implies $\gamma^{2}+q\eta_{0}=1$. Notice that this assumption implies the marginal variance is constant: $\text{Var}(w_i)=\eta_0^{-1}$ for all $i$.
+\textcolor{red}{MJ: Make constant marginal variance the starting assumption. Also drop all subscripts on $\eta$. Explain the relationship better, as setting $q$ based on $\eta,\gamma$: We choose $q$ so that the effects of decay and system noise balance out to yield constant marginal variance at each step: $\gamma^2\eta^{-1}+q = \eta^{-1}$. Then observe below that this assumption results in the spherical part of the posterior covariance being constant.}
+
+We follow the EKF approach of maintaining an iterative prior,
+\begin{align}
+p\left(w_{i}\vert\mathcal{D}_{1:i-1}\right)\approx\mathcal{N}\left(w_{i}\vert\mu_{i\vert i-1},S_{i\vert i-1}\right)
+\end{align}
+and linearizing the model at each step,
+\begin{align}
+h\left(w,x_{i}\right)\approx h\left(\mu_{i\vert i-1},x_{i}\right)+H_{i}\left(w-\mu_{i\vert i-1}\right)
+\end{align}
+where $H_i$ is the Jacobian of $h\left(\cdot,x_{i}\right)$ at $\mu_{i-1}$.
+We allow $R_{i}$ to depend implicitly on $h\left(\mu_{i-1},x_{i}\right)$,
+and since it is strictly positive-definite we can write
+\begin{align}
+R_{i}^{-1}=A_{i}^{\top}A_{i}
+\end{align}
+For example, in a regression setting with isotropic observation noise,
+we have $R_{i}=\lambda^{2}\mathbb{I}_{p}$ and $A_{i}=\lambda^{-1}\mathbb{I}_{p}$.
+In this case, we can place a Gamma prior on $\lambda^{-1}$ so that it
+is self-adjusting (section \ref{sec:gamma-prior}). 
+
+Adapting L-RVGA, we require the precision to have the form
+\begin{align}
+S_{i\vert i-1}^{-1}=\eta_{i}\mathbb{I}_{p}+W_{i\vert i-1}W_{i\vert i-1}^{\top}
+\end{align}
+where $W_{i\vert i-1}=U_{i\vert i-1}\Sigma_{i\vert i-1}$ for $U_{i\vert i-1}\in\mathbb{R}^{p\times m}$
+with $U_{i\vert i-1}^{\top}U_{i\vert i-1}=\mathbb{I}_{m}$ and $\Sigma_{i\vert i-1}={\rm diag}\left(\sigma_{i\vert i-1}\right)$
+for $\sigma_{i\vert i-1}\in\mathbb{R}^{m}$. 
+
+The Bayesian update for the mean is
+\begin{align}
+\mu_{i\vert i} & =\arg\min_{w}\left\{ \left(w-\mu_{i\vert i-1}\right)^{\top}S_{i\vert i-1}^{-1}\left(w-\mu_{i\vert i-1}\right)\right.
+\\ &\qquad\qquad\quad +\left.\left(h\left(\mu_{i\vert i-1},x_{i}\right)+H_{i}\left(w-\mu_{i\vert i-1}\right)-y_{i}\right)^{\top}A_{i}^{\top}A_{i}\left(h\left(\mu_{i\vert i-1},x_{i}\right)+H_{i}\left(w-\mu_{i\vert i-1}\right)-y_{i}\right)\right\} \nonumber\\
+ &=\mu_{i\vert i-1}+\left(S_{i\vert i-1}^{-1}+H_{i}^{\top}A_{i}^{\top}A_{i}H_{i}\right)^{-1}H_{i}^{\top}A_{i}^{\top}A_{i}\left(y_{i}-h\left(\mu_{i\vert i-1},x_{i}\right)\right)\\
+ & =\mu_{i\vert i-1}+\eta_{i}^{-1}\left(\mathbb{I}_{p}-\tilde{W}_{i}\left(\eta_{i}\mathbb{I}_{m+C}+\tilde{W}_{i}^{\top}\tilde{W}_{i}\right)^{-1}\tilde{W}_{i}^{\top}\right)H_{i}^{\top}A_{i}^{\top}A_{i}\left(y_{i}-h\left(\mu_{i\vert i-1},x_{i}\right)\right) \label{eq:ORFit-bayes-mean-update}
+\end{align}
+where
+\begin{align}
+\tilde{W}_{i}=\left[\begin{array}{cc}
+W_{i\vert i-1} & H_{i}^{\top}A_{i}^{\top}\end{array}\right]
+\end{align}
+Inverting $\eta_{i}\mathbb{I}_{m+C}+\tilde{W}_{i}^{\top}\tilde{W}_{i}$ may be able to take advantage of the fact that the upper-left $m\times m$ block is diagonal (since $W_{i|i-1}$ is column-wise orthogonal), using formulas for inverting $2\times2$ block matrices.
+
+The exact Bayesian inference step for the precision is
+\begin{align}
+S_{i\vert i}^{*-1} & =S_{i\vert i-1}^{-1}+H_{i}^{\top}A_{i}^{T}A_{i}H_{i}\\
+ & =\eta_{i}\mathbb{I}_{p}+\tilde{W}_{i}\tilde{W}_{i}^{\top}
+\end{align}
+Adapting ORFit, we approximate an SVD of $\tilde{W}_{i}$ by substituting $H_{i}^{\top}A_{i}^{\top}$ with the projection
+$\left(\mathbb{I}_{p}-U_{i\vert i-1}U_{i\vert i-1}^{\top}\right)H_{i}^{\top}A_{i}^{\top}$, which is columnwise orthogonal to $W_i$.
+However, the columns of $\left(\mathbb{I}_{p}-U_{i\vert i-1}U_{i\vert i-1}^{\top}\right)H_{i}^{\top}A_{i}^{\top}$ are not mutually orthogonal,
+so to avoid computing an SVD of this $p\times C$ matrix, we consider each column in sequence, substituting it for the shortest vector in $W_{i\vert i-1}$
+if its norm is greater (see Algorithm \cref{alg:ORFit-general}). 
+The resulting $W_{i\vert i}=U_{i\vert i}\Sigma_{i\vert i}$ provides the approximate posterior:
+\begin{align}
+S_{i\vert i}^{-1}=\eta_{i}\mathbb{I}_{p}+W_{i\vert i}W_{i\vert i}^{\top}
+\end{align}
+
+The transition step for the mean is 
+\begin{align}
+\mu_{i+1\vert i}=\gamma\mu_{i\vert i}
+\end{align}
+For the variance, the transition step is
+\begin{align}
+S_{i+1\vert i}=\gamma^{2}\left(\eta_{i}\mathbb{I}_{p}+W_{i\vert i}W_{i\vert i}^{\top}\right)^{-1}+q\mathbb{I}_{p}
+\end{align}
+Because $W_{i\vert i}$ is column-wise orthogonal, this expression can be evaluated
+componentwise in any orthonormal basis extending (i.e., containing the columns of) $U_{i\vert i}$. 
+The result, derived in the appendix, is that the prior covariance on the next step can be written as
+\begin{align}
+    S_{i+1|i}^{-1} = \eta\mathbb{I}_p + U_{i|i}\diag(\sigma^2_{i+1|i})U_{i|i}^\T
+\end{align}
+with
+\begin{align}
+\sigma_{i+1\vert i}^{2}=\frac{\gamma^{2}\sigma_{i\vert i}^{2}}{1+q\sigma_{i\vert i}^{2}}
+\label{eq:singular-value-transition}
+\end{align}
+Therefore, the transition step for the covariance amounts to updating the singular values according to Equation \eqref{eq:singular-value-transition}, applied componentwise.
+
+Given a test input $x_\star$ after step $i$, the posterior predictive distribution is
+\begin{align}
+    p(y_\star|x_\star,\data_{1:i}) = \gauss(h(\mu_{i|i},x_\star),H_\star S_{i|i} H_\star^\T + R_\star)
+\end{align}
+Again using the above trick of componentwise inversion in a basis extending $U_{i|i}$, we can derive an expression for $S_{i|i}$ (see Equation \eqref{eq:posterior-variance-explicit} in the appendix) that enables the posterior predictive variance to be calculated without explicitly representing the $p\times p$ matrix:
+\begin{align}
+    H_\star S_{i|i} H_\star^\T &= \eta^{-1}H_\star H_\star^\T - (H_\star U_{i|i}) \diag\left(\frac{\sigma^2_{i|i}}{\eta(\eta+\sigma^2_{i|i})}\right) (H_\star U_{i|i})^\T
+\end{align}
+
+---For Appendix---
+
+Recall that 
+$W_{i|i}W_{i|i}^\T = U_{i|i}\diag(\sigma^2_{i|i})U_{i|i}^\T$. 
+Let $\tilde{U}_i$ be unitary with 
+$\tilde{U}_i[:,1:m] = U_{i|i}$. Then 
+\begin{align}
+\eta_{i}\mathbb{I}_{p}+W_{i\vert i}W_{i\vert i}^{\top} = \tilde{U}_i\diag(\tilde{\sigma}_i^2)\tilde{U}_i^\T
+\label{eq:diagonalized-posterior-precision}
+\end{align}
+where 
+\begin{align}
+\tilde{\sigma}_i^2[j] = \begin{cases} \eta + \sigma^2_{i|i}[j] & j\le m \\
+\eta & j>m
+\end{cases}
+\end{align}
+Because $\tilde{U}_i$ is orthonormal, inverting the RHS of Equation \eqref{eq:diagonalized-posterior-precision} amounts to inverting each $\tilde{\sigma}^2_i$. This yields an explicit expression for the posterior covariance without matrix inversion:
+\begin{align}
+S_{i|i} &= \left(\eta_{i}\mathbb{I}_{p}+W_{i\vert i}W_{i\vert i}^{\top}\right)^{-1} \\
+&= \tilde{U}_i\diag(\tilde{\sigma}_i^{-2})\tilde{U}_i^\T \\
+&= \eta^{-1}\mathbb{I}_p - U_{i|i}\diag\left(\frac{\sigma^2_{i|i}}{\eta(\eta+\sigma^2_{i|i})}\right)U_{i|i}^\T \label{eq:posterior-variance-explicit}
+\end{align}
+
+Extending this reasoning, we can also obtain an expression for the precision on the next step:
+
+\begin{align}
+S_{i+1|i}^{-1} &= \left(\gamma^{2}\left(\eta_{i}\mathbb{I}_{p}+W_{i\vert i}W_{i\vert i}^{\top}\right)^{-1}+q\mathbb{I}_{p}\right)^{-1} \\
+&= \tilde{U}_i\diag(\gamma^2\tilde{\sigma}_i^{-2}+q)^{-1}\tilde{U}_i^\T
+\end{align}
+The diagonal terms here can be written as
+\begin{align}
+    (\gamma\tilde{\sigma}_i^{-2}[j]+q)^{-1} = \begin{cases}
+        \eta + \frac{\gamma^{2}\sigma_{i\vert i}[j]^{2}}{1+q\sigma_{i\vert i}[j]^{2}} & j\le m \\
+        \eta & j>m
+    \end{cases}
+\end{align}
+Altogether, this implies 
+\begin{align}
+S_{i+1|i}^{-1} = \eta\mathbb{I}_p + U_{i|i}\diag(\sigma^2_{i+1|i})U_{i|i}^\T
+\end{align}
+where $\sigma^2_{i+1|i}$ is defined by the following update, applied componentwise:
+\begin{align}
+\sigma_{i+1\vert i}^{2}=\frac{\gamma^{2}\sigma_{i\vert i}^{2}}{1+q\sigma_{i\vert i}^{2}}
+\end{align}
+
+---
+
+\begin{algorithm}
+\dontprintsemicolon
+Input: data sequence $\left(\left(x_{k},y_{k}\right)\right)_{k=1}^{K}$,
+memory limit $m$, prior mean $\mu_{0}$, prior precision $\eta$,
+decay factor $\gamma$, observation noise $\lambda$ (optional) \\
+Output: optimal parameter estimate $\mu$, posterior predictive mean $\hat{y}_\star$ and variance $v_\star$ for test items $x_\star$ \\
+Initialize $U\leftarrow\left[0\right]^{p\times m}$, $\sigma\leftarrow\left[0\right]^{m}$,
+$\mu\leftarrow\mu_{0}$ \\
+\For {$i\in\left[K\right]$} {
+$\hat{y}\leftarrow h\left(\mu,x_{i}\right)$ \\
+$A\leftarrow\chol(\Var[y\vert\hat{y}]^{-1})$  \\
+$H\leftarrow\nabla_{w}h\left(w,x_{i}\right)_{w=\mu}$ \\
+$\tilde{W}\leftarrow\left[\begin{array}{cc}U\text{diag}(\sigma) & H^{\top}A^{\top}\end{array}\right]$ \\
+$\mu\leftarrow\gamma\left(\mu+\eta^{-1}\left(\mathbb{I}_{p}-\tilde{W}\left(\eta\mathbb{I}_{m+1}+\tilde{W}^{\top}\tilde{W}\right)^{-1}\tilde{W}^{\top}\right)H^{\top}A^{\top}A\left(y_{i}-\hat{y}\right)\right)$ \\
+Sample $\pi\in{\rm perm}\left(C\right)$ \\
+\For {$j\in\pi$} { 
+\If {$\left\Vert \left(\mathbb{I}_{p}-UU^{\top}\right)H^{\top}\left[A^{\top}\right]_{\cdot j}\right\Vert >\min\sigma$} {
+$U\left[:,\arg\min\left(\sigma\right)\right]\leftarrow\frac{\left(\mathbb{I}_{p}-UU^{\top}\right)H^{\top}\left[A^{\top}\right]_{\cdot j}}{\left\Vert \left(\mathbb{I}_{p}-UU^{\top}\right)H^{\top}\left[A^{\top}\right]_{\cdot j}\right\Vert }$ \\
+$\sigma\left[\arg\min\left(\sigma\right)\right]\leftarrow\left\Vert \left(\mathbb{I}_{p}-UU^{\top}\right)H^{\top}\left[A^{\top}\right]_{\cdot j}\right\Vert $ \\
+}
+}
+\For {$x_\star\in\mathcal{X}_\mathrm{test}$} {
+$\hat{y}_\star \leftarrow h(\mu,x_\star)$ \\
+$H_\star\leftarrow\nabla_{w}h\left(w,x_\star\right)_{w=\mu}$ \\
+$v_\star = \eta^{-1}H_\star H_\star^\T - (H_\star U) \diag\left(\frac{\sigma^2}{\eta(\eta+\sigma^2)}\right) (H_\star U)^\T + \Var[y|\hat{y}_\star]$\\
+}
+$\sigma\leftarrow\sqrt{\frac{\gamma^{2}\sigma^{2}}{1+q\sigma^{2}}}$ // componentwise \\
+}
+\caption{\label{alg:ORFit-general}Generalized ORFit algorithm.}
+\end{algorithm}
+
+\subsection{Adaptive observation noise} \label{sec:gamma-prior}
+
+We now consider regression tasks with unknown (spherical) observation noise with precision $\lambda$. For tractability (conjugate priors) we assume initial uncertainty and system noise in the weights are also scaled by $\lambda^{-1}$. Thus we have the SSM:
+\begin{align}
+p\left(w_{0}\right) & =\mathcal{N}\left(w_{0}\vert\mu_{0},\lambda^{-1}\eta_{0}^{-1}\mathbb{I}_{p}\right)\\
+p\left(w_{i}\vert w_{i-1}\right) & =\mathcal{N}\left(w_{i}\vert\gamma w_{i-1},q\lambda^{-1}\mathbb{I}_{p}\right)\\
+p\left(y_{i}\vert w_{i}\right) & =\mathcal{N}\left(y_{i}\vert h\left(w_{i},x_{i}\right),\lambda^{-1}\mathbb{I}_{C}\right)
+\end{align}
+with iterative prior
+\begin{align}
+p\left(w_{i},\lambda\vert\mathcal{D}_{i:i-1}\right)\approx\mathcal{N}\left(w_{i}\vert\mu_{i\vert i-1},\lambda^{-1}S_{i\vert i-1}\right){\rm Gamma}\left(\lambda\middle\vert\frac{\nu_{i-1}}{2},\frac{\nu_{i-1}\tau_{i-1}}{2}\right)
+\end{align}
+We linearize the model at each step:
+\begin{align}
+h\left(w,x_{i}\right)\approx h\left(\mu_{i\vert i-1},x_{i}\right)+H_{i}\left(w-\mu_{i\vert i-1}\right)
+\end{align}
+Then the exact posterior is given by
+\begin{align}
+\log p\left(w_{i},\lambda\vert\mathcal{D}_{1:i}\right) & =\mathcal{N}\left(w_{i}\vert\mu_{i\vert i},\lambda^{-1}S^*_{i\vert i}\right){\rm Gamma}\left(\lambda\middle\vert\frac{\nu_{i}}{2},\frac{\nu_{i}\tau_{i}}{2}\right)\\
+\end{align}
+with
+\begin{align}
+\mu_{i\vert i} & =\mu_{i\vert i-1}+\left(S_{i\vert i-1}^{-1}+H_{i}^{\top}H_{i}\right)^{-1}H_{i}^{\top}\left(y_{i}-h(\mu_{i\vert i-1},x_i)\right)\\
+S^*_{i\vert i} & = \left(S_{i\vert i-1}^{-1}+H_{i}^{\top}H_{i}\right)^{-1}\\
+\nu_{i}\tau_{i} & =\nu_{i-1}\tau_{i-1}+\left(y_{i}-h(\mu_{i\vert i-1},x_i)\right)^{\top}\left(\mathbb{I}_{C}+H_{i}S_{i\vert i-1}H_{i}^{\top}\right)^{-1}\left(y_{i}-h(\mu_{i\vert i-1},x_i)\right)\\
+\nu_{i} & =\nu_{i-1}+C
+\end{align}
+
+Introduce the low-rank approximation for the posterior precision:
+\begin{align}
+S_{i\vert i-1}^{-1}=\eta_{i}\mathbb{I}_{p}+W_{i\vert i-1}W_{i\vert i-1}^{\top}
+\end{align}
+The mean update becomes 
+\begin{align}
+\mu_{i\vert i} & =\mu_{i\vert i-1}+\left(\eta_{i}\mathbb{I}_{p}+\tilde{W}_{i}\tilde{W}_{i}^{\top}\right)^{-1}H_{i}^{\top}\left(y_{i}-h(\mu_{i\vert i-1},x_i)\right) \label{eq:adaptive-ORFit-mean-update}\\
+ & =\mu_{i\vert i-1}+\eta_{i}^{-1}\left(\mathbb{I}_{p}-\tilde{W}_{i}\left(\eta_{i}\mathbb{I}_{m+C}+\tilde{W}_{i}^{\top}\tilde{W}_{i}\right)^{-1}\tilde{W}_{i}^{\top}\right)H_{i}^{\top}\left(y_{i}-h(\mu_{i\vert i-1},x_i)\right)
+\end{align}
+where 
+\begin{align}
+\tilde{W}=\left[\begin{array}{cc}
+W_{i\vert i-1} & H_{i}^{\top}\end{array}\right]
+\end{align}
+
+The exact Bayesian update for the precision becomes
+\begin{align}
+S_{i\vert i}^{*-1}=\eta_{i}\mathbb{I}_{p}+\tilde{W}_{i\vert i-1}\tilde{W}_{i\vert i-1}^{\top}
+\end{align}
+To approximate the first $m$ singular values and vectors of $\tilde{W}_{i\vert i-1}$,
+we loop through the columns of $H_{i}^{\top}$ in random order as before, substituting
+$\left(\mathbb{I}_{p}-UU^{\top}\right)\left[H_{i}^{\top}\right]_{\cdot j}$
+for the shortest vector in $W$ whenever the former's 2-norm is greater.
+The resulting $W_{i\vert i}=U_{i\vert i}\Sigma_{i\vert i}$ provides
+the approximate posterior:
+\begin{align}
+S_{i\vert i}^{-1}=\eta_{i}\mathbb{I}_{p}+W_{i\vert i}W_{i\vert i}^{\top}
+\end{align}
+
+As above, the transition step for the mean is 
+\begin{align}
+\mu_{i+1\vert i}=\gamma\mu_{i\vert i}
+\end{align}
+and the transition step for the variance amounts to componentwise
+updating of the singular values
+\begin{align}
+\sigma_{i+1\vert i}^{2}=\frac{\gamma^{2}\sigma_{i\vert i}^{2}}{1+q\sigma_{i\vert i}^{2}}
+\end{align}
+under the steady-state assumption $\gamma^{2}+q\eta_{0}=1$ which
+implies $\eta_{i}=\eta_{0}$ for all $i$.
+
+Notice from \eqref{eq:adaptive-ORFit-mean-update} that $\eta^{-1}$ acts a learning rate. Therefore the hyperparameters may best be thought of as $\eta^{-1}$ and the decay rate $\gamma$ (with system noise $q$ determined by the other two), along with the memory size $m$.
+
+Finally, the marginal posterior for $w_{i}$ is a Student distribution
+with $\nu_{i}$ degrees of freedom and precision $\tau_{i}^{-1}S_{i\vert i}^{-1}$
+(where $\tau_{i}^{-1}$ is the posterior mean of $\lambda$). Because $\nu_{i}\approx iC$
+will typically be large, we can approximate with a Gaussian:
+\begin{align}
+p\left(w_{i}\vert\mathcal{D}_{1:i}\right)\approx\mathcal{N}\left(w_{i}\vert\mu_{i\vert i},\tau_{i}S_{i\vert i}\right)
+\end{align}
+Consequently the posterior predictive distribution is
+\begin{align}
+p\left(y_{t}\vert x_{t},\mathcal{D}_{1:i}\right)=\mathcal{N}\left(y_{t}\vert h\left(\mu_{i\vert i},x_{i}\right),\tau_{i}H_{t}S_{i\vert i}H_{t}^{\top}\right)
+\end{align}
+
+The method is summarized in Algorithm \ref{alg:ORFit-gamma-hyperprior}.
+
+\begin{algorithm}
+\dontprintsemicolon
+Input: data sequence $\left(\left(x_{k},y_{k}\right)\right)_{k=1}^{K}$,
+memory limit $m$, prior mean $\mu_{0}$, prior precision or inverse learning rate $\eta$,
+decay factor $\gamma$ \\
+Output: optimal parameter estimate $\mu$, uncertainty
+$S=\tau\left(\eta\mathbb{I}_{p}+U\text{diag}(\sigma^2)U^{\top}\right)^{-1}$ // write efficient version\\
+Initialize $U\leftarrow\left[0\right]^{p\times m}$, $\sigma\leftarrow\left[0\right]^{m}$,
+$\mu\leftarrow\mu_{0}$, $\nu\leftarrow0$, $\rho\leftarrow0$ \\
+\For {$i\in\left[K\right]$} {
+$\hat{y}\leftarrow h\left(\mu,x_{i}\right)$ \\
+$H\leftarrow\nabla_{w}h\left(w,x_{i}\right)_{w=\mu}$ \\
+$\nu\leftarrow\nu+C$ \\
+$\rho\leftarrow\rho+(y_i-\hat{y})^{\top}(\mathbb{I}_C+H\left(\eta\mathbb{I}_{p}+U\text{diag}(\sigma^2)U^{\top}\right)^{-1}H^{\top})^{-1}(y_i-\hat{y})$ // write efficient version\\
+$\tilde{W}\leftarrow\left[\begin{array}{cc}U\text{diag}(\sigma) & H^{\top}\end{array}\right]$ \\
+$\mu\leftarrow\gamma\left(\mu+\eta^{-1}\left(\mathbb{I}_{p}-\tilde{W}\left(\eta\mathbb{I}_{m+1}+\tilde{W}^{\top}\tilde{W}\right)^{-1}\tilde{W}^{\top}\right)H^{\top}\left(y_{i}-\hat{y}\right)\right)$ \\
+Sample $\pi\in{\rm perm}\left(C\right)$ \\
+\For {$j\in\pi$} { 
+\If {$\left\Vert \left(\mathbb{I}_{p}-UU^{\top}\right)\left[H^{\top}\right]_{\cdot j}\right\Vert >\min\sigma$} {
+$U\left[:,\arg\min\left(\sigma\right)\right]\leftarrow\frac{\left(\mathbb{I}_{p}-UU^{\top}\right)\left[H^{\top}\right]_{\cdot j}}{\left\Vert \left(\mathbb{I}_{p}-UU^{\top}\right)\left[H^{\top}\right]_{\cdot j}\right\Vert }$ \\
+$\sigma\left[\arg\min\left(\sigma\right)\right]\leftarrow\left\Vert \left(\mathbb{I}_{p}-UU^{\top}\right)\left[H^{\top}\right]_{\cdot j}\right\Vert $ \\
+}
+}
+$\sigma\leftarrow\sqrt{\frac{\gamma^{2}\sigma^{2}}{1+q\sigma^{2}}}$ // componentwise \\
+}
+$\tau\leftarrow\frac{\rho}{\nu}$
+\caption{\label{alg:ORFit-gamma-hyperprior}Generalized ORFit with adaptive observation variance}
+\end{algorithm}
+
+\subsection{Adaptive memory size}
+
+Instead of a fixed memory size $m$, where singular vectors compete for space in $W$ based on their length, we can use an adaptive memory size, with each singular value independently compared to a fixed threshold. The threshold is set to $\epsilon\sqrt{\eta}$, where $\epsilon$ is a hyperparameter that may have a principled value based on bias-variance tradeoff. That is, we set the threshold such that each singular vector is retained only so long as its expected contribution to accuracy outweighs the added noise from sampling variance (rigorous version to be added).
+
+xx consider the problem of reconstructing a low-rank matrix $X$ based on the SVD of a noisy copy $Y=X+Z$. They show the asymptotically optimal threshold on the singular values for minimizing expected squared reconstruction error is 
+\begin{align}
+    \tau_* = \chi\sqrt{2(\beta+1)+\frac{8\beta}{\beta+1+\sqrt{\beta^2+14\beta+1}}}
+\end{align}
+where $\chi^2$ is the random variance in the singular values of $Y$ coming from the random matrix $Z$, and $\beta$ is the aspect ratio of $X$.
+
+Let $\ring{W}_i$ be the matrix obtained by starting from $\ring{W}_i=W_i$ and looping through the columns of $H_i^{\top}$ in random order and appending $(\mathbb{I}_p-\ring{U}_i\ring{U}_i^{\top})\left[H_i^{\top}\right]_{\cdot j}$ (where $\ring{U}_i$ is $\ring{W}_i$ with columns normalized). Because $\ring{W}$ is orthogonal, its singular values are the norms of its columns, $\sigma_j = \left\Vert\left[\ring{W}_i\right]_{\cdot j}\right\Vert_2$. 
+
+Question: What error or sampling variability do the $\sigma_j$ have? Notice that they do not depend on $y$, so stochasticity in the outcome is irrelevant. The variance update of the full-covariance EKF is deterministic, given the inputs $x_i$. The only error comes from the linear approximation of the model. 
+
+\begin{algorithm}
+\dontprintsemicolon
+Input: data sequence $\left(\left(x_{k},y_{k}\right)\right)_{k=1}^{K}$,
+threshold factor $\epsilon$, prior mean $\mu_{0}$, prior precision $\eta$,
+decay factor $\gamma$, observation noise $\lambda$ (optional) \\
+Output: optimal parameter estimate $\mu$, uncertainty
+$S=\left(\eta\mathbb{I}_{p}+U\text{diag}(\sigma^2)U^{\top}\right)^{-1}$ // write efficient version\\
+Initialize $U\leftarrow\left[0\right]^{p\times m}$, $\sigma\leftarrow\left[0\right]^{m}$,
+$\mu\leftarrow\mu_{0}$ \\
+\For {$i\in\left[K\right]$} {
+$\hat{y}\leftarrow h\left(\mu,x_{i}\right)$ \\
+$A\leftarrow\sqrt{{\rm Var}\left[y\vert\hat{y}\right]}$ // matrix square root \\
+$H\leftarrow\nabla_{w}h\left(w,x_{i}\right)_{w=\mu}$ \\
+$\tilde{W}\leftarrow\left[\begin{array}{cc}U\text{diag}(\sigma) & H^{\top}A^{\top}\end{array}\right]$ \\
+$\mu\leftarrow\gamma\left(\mu+\eta^{-1}\left(\mathbb{I}_{p}-\tilde{W}\left(\eta\mathbb{I}_{m+1}+\tilde{W}^{\top}\tilde{W}\right)^{-1}\tilde{W}^{\top}\right)H^{\top}A^{\top}A\left(y_{i}-\hat{y}\right)\right)$ \\
+Sample $\pi\in{\rm perm}\left(C\right)$ \\
+\For {$j\in\pi$} { 
+$U\leftarrow\left[U,\frac{\left(\mathbb{I}_{p}-UU^{\top}\right)H^{\top}\left[A^{\top}\right]_{\cdot j}}{\left\Vert \left(\mathbb{I}_{p}-UU^{\top}\right)H^{\top}\left[A^{\top}\right]_{\cdot j}\right\Vert }\right]$ \\
+$\sigma\leftarrow\left[\sigma,\left\Vert \left(\mathbb{I}_{p}-UU^{\top}\right)H^{\top}\left[A^{\top}\right]_{\cdot j}\right\Vert \right]$ \\
+}
+$\sigma\leftarrow\sqrt{\frac{\gamma^{2}\sigma^{2}}{1+q\sigma^{2}}}$ // componentwise \\
+$U\leftarrow U[:,\sigma>\epsilon\sqrt{\eta}]$\\
+$\sigma\leftarrow \sigma[\sigma>\epsilon\sqrt{\eta}]$ \\
+}
+\caption{\label{alg:ORFit-general}Generalized ORFit with adaptive memory size.}
+\end{algorithm}
+
+\subsection{Kernel ORFit}
+
+For the following discussion, we introduce the standardized outcome
+\begin{align}
+z_{i}=A_{i}y_{i}
+\end{align}
+and standardized error
+\begin{align}
+d_{i}=z_{i}-A_{i}f_{i}\left(\mu_{t\vert t-1}\right)
+\end{align}
+We define the standardized (and transposed) Jacobian 
+\begin{align}
+F_{i}=H_{i}^{\top}A_{i}^{\top}
+\end{align}
+and kernel 
+\begin{align}
+K_{ij}=\eta^{-1}F_{i}^{\top}F_{j}
+\end{align}
+The kernel may be matrix-valued, $K_{ij}\in\mathbb{R}^{r\times r}$, where $r\le C$ is the dimension of $z$. Last, define
+\begin{align}
+W_{i}=\left[F_{1},\dots,F_{i}\right]
+\end{align}
+
+Consider a full EKF with no dynamics ($\gamma=1$, $q=0$). The exact
+posterior variance is
+\begin{align}
+S_{i\vert i} & =\left(\eta\mathbb{I}_{p}+W_{i}W_{i}^{\top}\right)^{-1}\\
+ & =\eta^{-1}\mathbb{I}_{p}-\eta^{-1}W_{i}\left(\eta\mathbb{I}_{i}+W_{i}^{\top}W_{i}\right)^{-1}W_{i}^{\top}
+\end{align}
+Notice that we never need this distribution explicitly. We only need
+the posterior predictive distribution for any test item $t$, which
+can be written entirely in terms of the kernel:
+\begin{align*}
+{\rm Var}\left(z_{t}\vert\mathcal{D}_{1:i}\right) & =F_{t}^{\top}S_{i\vert i}F_{t}\\
+ & =K_{t,t}-K_{t,1:i}\left(\mathbb{I}_{i}+K_{1:i,1:i}\right)^{-1}K_{1:i,t}
+\end{align*}
+This is the standard duality between Bayesian regression and GP regression
+(kernelized regression).
+
+ORFit introduces two approximations into this picture. First, it limits
+$W$ to size $p\times m$ instead of $p\times i$. Second, it forces
+$W$ to be column-wise orthogonal. These assumptions replace $K_{1:i,1:i}$
+with a diagonal matrix of rank $m$. 
+
+Instead of explicitly making $W$ orthogonal, we can apply the diagonal
+approximation directly to the kernel matrix. The posterior predictive
+variance becomes 
+\begin{align*}
+{\rm Var}\left(z_{t}\vert\mathcal{D}_{1:i}\right) & =K_{t,t}-K_{t,1:i}\left(\mathbb{I}_{i}+{\rm D}\left(K_{1:i,1:i}\right)\right)^{-1}K_{1:i,t}
+\end{align*}
+This approach differs from ORFit in that it calculates $K_{1:i,t}$
+using the full gradient information rather than the projected gradients.
+It likewise leads to a different update for the mean:
+\begin{align}
+\mu_{i\vert i}=\mu_{i\vert i-1}+\eta^{-1}\left(\mathbb{I}_{p}-\eta^{-1}W_{i}\left(\mathbb{I}_{i}+{\rm D}\left(K_{1:i,1:i}\right)\right)^{-1}W_{i}^{\top}\right)F_{i}d_{i}
+\end{align}
+Again, $W_{i}$ retains the full gradient information rather than
+the projected gradients (compare to Eq \eqref{eq:ORFit-bayes-mean-update}). We can also see this
+in terms of the update to the mean prediction for a test item, from
+$\hat{z}_{t\vert i-1}=\mathbb{E}\left[z_{t}\vert\mathcal{D}_{1:i-1}\right]$
+to $\hat{z}_{t\vert i}=\mathbb{E}\left[z_{t}\vert\mathcal{D}_{1:i}\right]$
+(assuming we keep the same linearization point):
+\begin{align*}
+\hat{z}_{t\vert i} & =A_{t}f_{t}\left(\mu_{i\vert i-1}\right)+F_{t}^{\top}\left(\mu_{i\vert i}-\mu_{i\vert i-1}\right)\\
+ & =\hat{z}_{t\vert i-1}+\left(K_{t,i}-K_{t,1:i}\left(\mathbb{I}_{i}+{\rm D}\left(K_{1:i,1:i}\right)\right)^{-1}K_{1:i,i}\right)d_{i}
+\end{align*}
+Again, only $K_{1:i,1:i}$ is diagonalized, while the full gradient
+information is retained in $K_{t,1:i}$ and $K_{1:i,i}$.
+
+ORFit's low-rank approximation amounts to replacing the full history
+of gradients with some subset $\mathcal{I}\in\left[ir\right]$. Thus we have a form of kernel inducing-points algorithm, where the distilled data are chosen
+according to their norms $\Vert \left[F_{i}\right]_{\cdot j}\Vert_2 $
+($j\le r$ indexes a component of $z_i$). 
+\begin{align}
+\mu_{i\vert i} & =\mu_{i\vert i-1}+\eta^{-1}\left(\mathbb{I}_{p}-\eta^{-1}W_{\mathcal{I}}\left(\mathbb{I}_{i}+{\rm D}\left(K_{\mathcal{I},\mathcal{I}}\right)\right)^{-1}W_{\mathcal{I}}^{\top}\right)F_{i}d_{i}\\
+{\rm Var}\left(z_{t}\vert\mathcal{D}_{1:i}\right) & =K_{t,t}-K_{t,\mathcal{I}}\left(\mathbb{I}_{i}+{\rm D}\left(K_{\mathcal{I},\mathcal{I}}\right)\right)^{-1}K_{\mathcal{I},t}
+\end{align}
+
+TODO: add dynamics
+
+\subsection{Full SVD update}
+
+The variations described above all use a ``hard'' covariance update, where the posterior low-rank approximation is obtained by selecting a subset of the vectors in the prior approximation and the new observation. 
+That is, $W_{i\vert i}$ is simply a subset of the columns of $\tilde{W}_{i} = [W_{i\vert i-1},H_i^\top A_i^\top]$. 
+We can instead use a ``soft'' update where the new observation is merged with prior approximation, allowing the entire basis to rotate so as to obtain a low-rank approximation of the correct posterior. 
+This amounts to redoing the full SVD on $\tilde{W}_i$, which can be done in $O((m+C)^2p)$ time. The full algorithm is shown in Algorithm \ref{alg:LoFi-full-SVD}.
+
+Specifically, start with the eigendecomposition $\tilde{W}_i^\T\tilde{W}_i = V\Sigma_i^2 V^\T$ with unitary $V$ and diagonal $\Sigma_i$ both in $\sR^{(m+C)\times(m+C)}$, and assume the entries of $\Sigma_i$ are nonincreasing. Define $W^*_{i\vert i} = \tilde{W}_i V$ and $U^*_{i\vert i} = W^*_{i\vert i} \Sigma_i^{-1}$. Then $U^{*\T}_{i\vert i}U^{*}_{i\vert i}=\mathbb{I}_{m+C}$ and $\tilde{W}_i\tilde{W}_i^\T = U^{*}_{i\vert i}\Sigma_i^2 U^{*\T}_{i\vert i}$. By zeroing out all but the first $m$ entries of $\Sigma_i$, or all entries below a threshold $\epsilon\eta$, we obtain a truncated SVD for $\tilde{W}_i$.
+
+\begin{algorithm}
+\dontprintsemicolon
+Input: data sequence $\left(\left(x_{k},y_{k}\right)\right)_{k=1}^{K}$,
+memory limit $m$, prior mean $\mu_{0}$, prior precision or inverse learning rate $\eta$,
+decay factor $\gamma$ \\
+Output: optimal parameter estimate $\mu$, posterior predictive mean $\hat{y}_\star$ and variance $v_\star$ for test items $x_\star$ \\
+Initialize $U\leftarrow\left[0\right]^{p\times m}$, $\sigma\leftarrow\left[0\right]^{m}$,
+$\mu\leftarrow\mu_{0}$, $\nu\leftarrow0$, $\rho\leftarrow0$ \\
+\For {$i\in\left[K\right]$} {
+$\hat{y}\leftarrow h\left(\mu,x_{i}\right)$ \\
+$H\leftarrow\nabla_{w}h\left(w,x_{i}\right)_{w=\mu}$ \\
+$\nu\leftarrow\nu+C$ \\
+$\rho\leftarrow\rho+(y_i-\hat{y})^{\top}(\mathbb{I}_C+H\left(\eta\mathbb{I}_{p}+U\text{diag}(\sigma^2)U^{\top}\right)^{-1}H^{\top})^{-1}(y_i-\hat{y})$ // write efficient version\\
+$\tilde{W}\leftarrow\left[\begin{array}{cc}U\text{diag}(\sigma) & H^{\top}\end{array}\right]$ \\
+$\mu\leftarrow\gamma\left(\mu+\eta^{-1}\left(\mathbb{I}_{p}-\tilde{W}\left(\eta\mathbb{I}_{m+1}+\tilde{W}^{\top}\tilde{W}\right)^{-1}\tilde{W}^{\top}\right)H^{\top}\left(y_{i}-\hat{y}\right)\right)$ \\
+$U,\sigma\leftarrow{\mathrm{SVD}}_m(\tilde{W})$ \\
+\For {$x_\star\in\mathcal{X}_\mathrm{test}$} {
+$\hat{y}_\star \leftarrow h(\mu,x_\star)$ \\
+$H_\star\leftarrow\nabla_{w}h\left(w,x_\star\right)_{w=\mu}$ \\
+$v_\star = \eta^{-1}H_\star H_\star^\T - (H_\star U) \diag\left(\frac{\sigma^2}{\eta(\eta+\sigma^2)}\right) (H_\star U)^\T + \Var[y|\hat{y}_\star]$\\
+}
+$\sigma\leftarrow\sqrt{\frac{\gamma^{2}\sigma^{2}}{1+q\sigma^{2}}}$ // componentwise \\
+}
+$\tau\leftarrow\frac{\rho}{\nu}$
+\caption{\label{alg:LoFi-full-SVD}LoFi with full SVD and adaptive noise variance}
+\end{algorithm}
+
+\subsection{Interdomain sparse GP}
+
+Whereas it is too expensive to re-perform SVD at every time step on the $p\times (m+C)$ matrix $\tilde{W}_i$, we can efficiently do SVD on a smaller matrix. Consider the case $C=1$, so that there is a single new gradient $F_i$ on each step. Let $w_i$ be the column of $W_i$ with the smallest angle to $F_i$, i.e. $w_i = W_i[\cdot,j]$ where $j = \argmin \cos(W_i[\cdot,j],F_i)$. Then the first principal component of $[w_i,F_i]$ is equal to $\alpha w_i + \beta F_i$ where $\alpha$ and $\beta$ depend only on $w_i^\T w_i$, $F_i^\T F_i$, and $w_i^\T F_i$. Thus we can merge the new gradient into the existing low-rank approximation rather than discarding it (in cases where we otherwise would). This is a form of interdomain sparse GP, because the columns of $W$ are now linear combinations of training items, where the linear combination is taken in gradient space (i.e. the feature space of the kernel).

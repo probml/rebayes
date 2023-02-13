@@ -1,0 +1,97 @@
+
+\subsection{Diagonal EKF}
+
+An alternative to using a stochastic approximation is to linearize the model, and then solve a deterministic optimization problem.
+Specifically, let us define
+\begin{align}
+f_t^{\lin}(\vtheta_t)
+ = f_t(\vmu_{t|t-1})
+  + \vH_t
+  (\vtheta_t - \vmu_{t|t-1})
+\end{align}
+where $\vmu_{t|t-1} = \expectQ{\vtheta_t}{q_{t|t-1}}$
+is the linearization point and $\vH_t = \nabla f_t(\vmu_{t|t-1})^\trans$ is the Jacobian evaluated at $\vmu_{t|t-1}$.
+Let us define the result of combining this linearized
+likelihood with the (predictive) prior from the previous step
+as follows:
+\begin{align}
+\hat{p}_t(\vtheta_t) \propto 
+q_{t|t-1}(\vtheta_t) p_t^{\lin}(y_t|\vtheta_t)
+\end{align}
+This may be intractable to compute if the likelihood is not conjugate to the prior.
+However, if we take the prior to be Gaussian,
+\begin{align}
+    q_{t\vert t-1} = \gauss(\vmu_{t\vert t-1},\vSigma_{t\vert t-1})
+\end{align}
+and assume Gaussian observation noise (approximate it with a Gaussian as in \citep{Ollivier2018})
+%Using the true output distribution with linearization can fail: For example when the distribution is categorical, $p(y=j\vert f_t(\vtheta)) = [f_t(\vtheta)]_j$, the linear approximation entails negative probabilities and the integral defining $\text{KL}(q(\vtheta_t), \hat{p}_t(\vtheta_t))$ can be shown to diverge.
+\begin{align}
+    p(\vy_t\vert \vx_t,\vtheta_t) = \gauss(\vy_t\vert f_t(\vtheta_t),\vR_t)
+\end{align}
+then the update is given in closed form by standard KF equations
+\begin{align}
+    \vK_t &= \vSigma_{t\vert t-1}\vH_t^\T(\vR_t+\vH_t\vSigma_{t\vert t-1}\vH_t^\T)^{-1} \\
+    \vSigma_{t|t} &= \vSigma_{t\vert t-1} - \vK_t \vH_t \vSigma_{t\vert t-1} \label{eq:FC-EKF-var-update} \\
+    \vmu_{t\vert t} &= \vmu_{t\vert t-1} + \vK_t (\vy_t-f_t(\vmu_{t\vert t-1})) \label{eq:EKF-mean-update-a}
+\end{align}
+Applying the Woodbury identity yields the alternative expressions
+\begin{align}
+    \vSigma_{t|t} &= (\vSigma_{t\vert t-1}^{-1} + \vH^\T \vR_t^{-1} \vH_t)^{-1} \label{eq:FC-EKF-prec-update} \\
+    \vmu_{t\vert t} &= \vmu_{t\vert t-1} + \vSigma_{t\vert t} \vH_t^\T \vR_t^{-1} (\vy_t-f_t(\vmu_{t\vert t-1})) \label{eq:EKF-mean-update-b}
+\end{align}
+To make the memory requirement linear in the number of parameters, we can require $\vSigma_{t\vert t}$ to be diagonal, in which case Eqs \eqref{eq:EKF-mean-update-a} and \eqref{eq:EKF-mean-update-b} are no longer equivalent.
+
+To diagonalize the posterior variance, we can solve the following VI-like objective
+\begin{align}
+    q_t(\vtheta_t) &= \argmin_q \text{KL}(q(\vtheta_t), \hat{p}_t(\vtheta_t))
+\end{align}
+This is known as the variational diagonal EKF or VD-EKF \citep{Chang2022}. This approximation amounts to zeroing out the off-diagonal elements of the precision. Thus using Eq \eqref{eq:FC-EKF-prec-update}, the posterior variance becomes
+\begin{align}
+    [\vSigma_{t|t}]_{ii} &= ([\vSigma_{t\vert t-1}^{-1}]_{ii} + [\vH^\T \vR_t^{-1} \vH_t]_{ii})^{-1} \\
+    [\vSigma_{t|t}]_{ij} &= 0 \text{ for $i\ne j$}
+\end{align}
+
+Alternatively, we can optimize the following EP-like objective:
+\begin{align}
+q_t(\vtheta_t)
+ &= \argmin_q \text{KL}(\hat{p}_t(\vtheta_t),q(\vtheta_t))
+\end{align}
+This turns out to be equivalent to the fully decoupled EKF or FD-EKF method of \citep{Puskorius1991,Puskorius2003,Murtuza1994}, as shown in \citep{Chang2022}. The approximation amounts to zeroing out the off-diagonal elements of the variance. Thus using Eq \eqref{eq:FC-EKF-var-update}, the posterior variance becomes
+\begin{align}
+    [\vSigma_{t|t}]_{ii} &= [\vSigma_{t\vert t-1}]_{ii} - [\vK_t \vH_t \vSigma_{t\vert t-1}]_{ii} \\
+    [\vSigma_{t|t}]_{ij} &= 0 \text{ for $i\ne j$}
+\end{align}
+
+In the special case of a scalar outcome, with $\vg_t$ denoting the gradient at $\vmu_{t\vert t-1}$ and $\lambda_t^2$ the observation variance, the above equations reduce to
+\begin{align}
+    \vSigma_{t|t} &= \vSigma_{t\vert t-1} - \frac{\vSigma_{t\vert t-1}\vg_t\vg_t^\T \vSigma_{t\vert t-1}}{\lambda_t^2+\vg_t^\T\vSigma_{t\vert t-1}\vg_t} \\
+    &= (\vSigma_{t\vert t-1}^{-1} + \lambda_t^{-2} \vg_t \vg_t^\T)^{-1} \\
+    \vmu_{t\vert t} &= \vmu_{t\vert t-1} + \frac{\vSigma_{t\vert t-1}\vg_t}{\lambda_t^2+\vg_t^\T\vSigma_{t\vert t-1}\vg_t} (y_t-f_t(\vmu_{t\vert t-1})) \\
+    &= \vmu_{t\vert t-1} + \lambda_t^{-2} \vSigma_{t\vert t} \vg_t (y_t-f_t(\vmu_{t\vert t-1}))
+\end{align}
+For VD-EKF, the variance update becomes
+\begin{align}
+    [\vSigma_{t|t}]_{ii} &= ([\vSigma_{t\vert t-1}^{-1}]_{ii} + \lambda^{-2}\vg_{t,i}^2)^{-1}
+\end{align}
+For FD-EKF, the variance update becomes
+\begin{align}
+    [\vSigma_{t|t}]_{ii} &= [\vSigma_{t\vert t-1}]_{ii} - \frac{\vg_{t,i}^2[\vSigma_{t\vert t-1}]_{ii}^{2}}{\lambda_t^2+\vg_t^\T\vSigma_{t\vert t-1}\vg_t}
+\end{align}
+
+\eat{
+When implementing these EKF methods, we assume the following state space model, where $\vtheta_t$ are the hidden states:
+\begin{align}
+p_t(y_t|\vtheta_t) &= p(y_t|f(\vx_t,\vtheta_t)) \\
+p_t(\vtheta_t|\vtheta_{t-1}) &= \gauss(\vtheta_{t-1}, \vQ_t) \\
+p(\vtheta_0) &= \gauss(\vmu_0, \vSigma_0)
+\end{align}
+We  usually assume $\vQ_t = q \vI$, where $q$ is a small constant,
+chosen based on cross validation. (This violates the strictly online nature of our setup; we leave online model selection for future work.)
+Alternatively, we can use the "fading memory" trick,
+which exponentially downweights past data
+\citep{Haykin01,Ollivier2018}.
+This has the form $\vQ_t = \lambda_t \vSigma_{t-1}$,
+where $\lambda_t > 0$ is a tuning constant,
+and $\vSigma_{t-1}$ is the posterior covariance from the previous step.
+}
+

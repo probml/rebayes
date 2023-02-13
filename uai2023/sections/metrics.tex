@@ -1,0 +1,66 @@
+
+\section{Metrics}
+
+\begin{figure}[h]
+    \centering
+\includegraphics[height=2in]{figs/ORFit-fig2a.png} 
+    \caption{Test error vs number training steps.
+    From Figure 2a of \citep{ORFit}.
+    }
+    \label{fig:errorCurve}
+\end{figure}
+
+We consider the following  base loss functions:
+\begin{align}
+\ell_{NLL}(y, q) &= -\log q(y) \\
+\ell_{RMSE}(y, q) &= \sqrt{(y - E[q])^2} \\
+\ell_{01}(y, q) &= \ind{y \neq \argmax_c q(c)}
+\end{align}
+We can apply these to evaluate some prediction method on a set of examples from the train or test distributions at a given time.
+Let us define the predictive distribution at time $t$ as
+\begin{align}
+q_t(y|x) &= q(y|x,\data_{1:t}^{\tr})
+\end{align}
+Then we define the average test error (averaged over samples, and over distributions) as 
+\begin{align}
+\loss_{\all}(t)
+ &= \frac{1}{t} \sum_{k=1}^t \frac{1}{N_{\te}}
+\sum_{(x_n, y_n) \in \data_k^{\te}} \ell(y_n, q_k(y\vert x_n))
+\end{align}
+We can plot $\loss_{\all}(t)$ vs $t$ for different methods,
+and average each curve over different random seeds.
+See \cref{fig:errorCurve} for an example.
+
+We can also define the test error for a specific future distribution as follows:
+\begin{align}
+\loss_{\delta}(t)
+ &=   \frac{1}{N_{\te}}
+\sum_{(x_n, y_n) \in \data_{t+\delta}^{\te}} \ell(y_n, q_t(y\vert x_n))
+\end{align}
+We can plot this vs $t$ for different values of $\delta$.
+As $\delta$ increases, we are forecasting further into the future.
+If we $p_{t+\delta}$ becomes increasingly different from $p_t$ as $\delta$ increases, the error should go up monotonically.
+Ideally we would like the predictive uncertainty to also go up.
+However, it may be the case that future distributions are similar to past distributions (e.g., if the angle "wraps around") in which case the error may not be monotonic with $\delta$ (this should happen in the deterministic case of \eqref{eq:increasing-angle} but not the stochastic cases of \eqref{eq:diffusion-angle} or \eqref{eq:fractal-angle}).
+
+We can also assess calibration of uncertainty, for example with expected calibration error:
+\begin{align}
+    ECE = \frac{1}{K} \sum_{k=1}^K \frac{1}{n_k}\left\vert\sum_{(t,n,y)\in A_k} q_t(y\vert x_n) - \mathbb{I}(y_n=y)\right\vert
+\end{align}
+where 
+\begin{align}
+    A_k = \left\{(t,n,y):(x_n,y_n)\in\mathcal{D}^{\rm    tr}_t,\frac{k-1}{K}\le q_t(y\vert x_n)<\frac{k}{K}\right\}
+\end{align}
+and $n_k=|A_k|$.
+
+Finally, we can assess the ability to remember the past training examples by computing the following quantity (used in \citep{ORFit} with $N_{\tr}=1$):
+\begin{align}
+\loss_{k}^{\tr}(t)
+ &=  \frac{1}{N_{\tr}}
+\sum_{(x_n, y_n) \in \data_{k}^{\tr}} \ell(y_n, q_t(y\vert x_n))
+\end{align}
+where $k < t$ is some point in the past.
+We can plot this vs $t$ for different values of $k$, to assess forgetting.
+
+Calibration for regression:
+\cite{Kuleshov2018}.

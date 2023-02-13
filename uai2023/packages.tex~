@@ -1,0 +1,235 @@
+
+\newcommand{\myeat}[1]{}
+%http://www.stackprinter.com/export?service=tex.stackexchange&question=59702&printer=false&linktohome=true
+
+%\usepackage[framemethod=TikZ]{mdframed}
+
+% https://tex.stackexchange.com/questions/99049/latex-error-option-clash-for-package-xcolor-even-if-i-put-listings-before
+%https://en.wikibooks.org/wiki/LaTeX/Colors
+\usepackage[usenames,dvipsnames]{xcolor}
+%\usepackage[usenames]{color}
+
+%\usepackage{float}
+\usepackage{longtable}
+
+\usepackage[toc,page]{appendix}
+
+%\usepackage{tocloft}
+%\advance\cftchapnumwidth 1cm
+%https://tex.stackexchange.com/questions/436063/spacing-between-number-and-text-in-toc
+%\advance\cftsecnumwidth 0.5em\relax
+
+
+% https://mirror.las.iastate.edu/tex-archive/macros/latex/contrib/mathalpha/doc/mathalpha-doc.pdf
+\usepackage{bm}
+\usepackage{frcursive} 
+\usepackage{xfrac}
+\usepackage{mathrsfs}
+
+\usepackage{fancyvrb} % https://tex.stackexchange.com/questions/122195/how-to-center-verbatim
+\usepackage{xspace}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+
+%https://tex.stackexchange.com/questions/58098/what-are-all-the-font-styles-i-can-use-in-math-mode
+\usepackage[mathscr]{euscript}
+
+\mathchardef\mhyphen="2D % Define a "math hyphen"
+\mathchardef\mdash="2D % Define a "math hyphen"
+
+%\usepackage{undertilde}
+\usepackage{accents}
+
+
+\usepackage[font={small,it}]{caption}
+%\usepackage{subfigure}
+\usepackage{subcaption} 
+%\usepackage{caption}
+%\usepackage[font={small,it}]{subcaption} % https://en.wikibooks.org/wiki/LaTeX/Floats,_Figures_and_Captions#Subfloats
+
+%https://tex.stackexchange.com/questions/283324/different-font-sizes-for-figure-and-subfigure-captions/283327
+%\captionsetup{font={footnotesize,it}}
+%\captionsetup[sub]{font={footnotesize,it}}
+
+%\usepackage[font={small,it}]{caption}
+%\usepackage[font={footnotesize,it}]{caption}
+
+\usepackage{url}
+\usepackage{cancel} % \cancel for strikethrough
+\usepackage{multirow}
+\usepackage{multicol}
+
+
+\usepackage{verbatim}
+%\usepackage{comment} %http://www.ctan.org/tex-archive/macros/latex/contrib/comment/
+
+% From https://media.nips.cc/Conferences/NIPS2017/Styles/nips_2017.tex
+% https://tex.stackexchange.com/questions/406179/how-to-type-the-letter-%C5%81
+
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+% https://tex.stackexchange.com/questions/392208/command-k-unavailable-in-encoding-ot1-error-takes-me-to-line-which-doesnt-eve
+
+%http://mirrors.ibiblio.org/CTAN/macros/latex/base/utf8ienc.pdf
+\usepackage[utf8]{inputenc}
+%\DeclareUnicodeCharacter{2010}{-}% support older LaTeX versions
+%\DeclareUnicodeCharacter{2212}{-}% support older LaTeX versions
+%\DeclareUnicodeCharacter{301}{-}% support older LaTeX versions
+%\DeclareUnicodeCharacter{00B4}{\textasciiacute}
+\DeclareUnicodeCharacter{00B4}{'}
+
+
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+
+
+
+%https://tex.stackexchange.com/questions/36660/only-authors-initials-in-bibtex-natbib-using-named-style
+
+%http://mirrors.ibiblio.org/CTAN/macros/latex/exptl/biblatex/doc/biblatex.pdf
+%  bibstyle=authortitle,
+\usepackage[
+  style=alphabetic,
+  citestyle=alphabetic,
+  natbib=true,
+  backend=bibtex,
+  maxcitenames=3,  mincitenames=1,
+  maxbibnames=10,  minbibnames=1,
+  firstinits=true,
+  backref=false, 
+  hyperref=true,
+  doi=false,  isbn=false,  url=false,
+  arxiv=abs
+]{biblatex}
+
+%https://tex.stackexchange.com/questions/36307/formatting-back-references-in-bibliography
+\DefineBibliographyStrings{english}{%
+  backrefpage = {page},% originally "cited on page"
+  backrefpages = {pages},% originally "cited on pages"
+}
+
+\usepackage{xpatch}
+
+\usepackage{booktabs}
+\usepackage{comment}
+
+\usepackage{paralist} % compactenunm, compactitem
+
+\usepackage{tikz}
+\usetikzlibrary{fit,arrows,calc,positioning,shadows.blur}
+
+% https://www.overleaf.com/learn/how-to/Cross_referencing_with_the_xr_package_in_Overleaf
+%https://tex.stackexchange.com/questions/14364/cross-referencing-between-different-files?noredirect=1&lq=1
+%https://texfaq.org/FAQ-extref
+\usepackage{xr}
+%\usepackage{xr-hyper}
+%\usepackage{zref-xr,zref-user}
+
+%\externaldocument{app}
+
+
+% From 	Mykel Kochenderfer 
+\usepackage{mathtools}
+\DeclarePairedDelimiter{\paren}{\lparen}{\rparen}
+\DeclarePairedDelimiter{\brock}{\lbrack}{\rbrack}
+
+\usepackage{enumitem}
+
+
+%\usepackage{algorithm}
+%\usepackage{algpseudocode}
+
+% https://jdhao.github.io/2019/09/21/latex_algorithm_pseudo_code/
+
+\usepackage[ruled,vlined,linesnumbered,algochapter]{algorithm2e}
+%\usepackage[ruled,vlined,linesnumbered]{algorithm2e}
+%\usepackage[noend]{algpseudocode}
+%\usepackage{algorithmic}
+\DontPrintSemicolon
+\newcommand{\dontprintsemicolon}{}
+% https://tex.stackexchange.com/questions/192435/adding-a-blank-line-in-algorithm2e
+
+\usepackage{mdframed}
+\usepackage{multicol}
+\usepackage{rotating}
+\usepackage{setspace}
+
+
+
+\usepackage{blkarray}
+
+
+
+%https://www.tug.org/FontCatalogue/newpx/
+%https://wiki.carleton.edu/download/attachments/20155418/fontguide.pdf?version=1&modificationDate=1388599695000&api=v2
+%\usepackage{newpxmath,newpxtext}
+
+% https://tex.stackexchange.com/questions/514149/three-column-full-page-index-in-tufte-booktwoside-symmetric
+%\usepackage[makeindex]{imakeidx}
+\usepackage{imakeidx}
+\usepackage[columns=3]{idxlayout}
+
+% Hyperref needs to be last package
+%https://tex.stackexchange.com/questions/326950/hyperref-conflicts-with-footnotea
+%\usepackage[pagebackref=true,colorlinks=true,pdftex]{hyperref} % incompatible
+%\usepackage[backref=true,colorlinks=true,pdftex]{hyperref} % incompatible
+
+% https://tex.stackexchange.com/questions/35422/partition-numbering-and-pdf-bookmark-generation/35430#35430
+\usepackage[bookmarksnumbered]{hyperref}
+
+%\hypersetup{hidelinks,backref=true,pagebackref=true,hyperindex=true,hypertexnames=false,colorlinks=false,breaklinks=true,bookmarks=true,bookmarksopen=false,pdftitle={Title},pdfauthor={Author}}
+
+
+
+\usepackage[capitalize]{cleveref}
+%\usepackage{cleveref}
+\Crefname{equation}{Equation}{Equations}
+\crefname{equation}{Equation}{Equations}
+\Crefname{section}{Section}{Sections}
+\crefname{section}{Section}{Sections}
+\Crefname{chapter}{Chapter}{Chapters}
+\crefname{chapter}{Chapter}{Chapters}
+\Crefname{figure}{Figure}{Figures}
+\crefname{figure}{Figure}{Figures}
+\Crefname{appsec}{Appendix}{Appendices}
+\crefname{appsec}{Appendix}{Appendices}
+%\usepackage[noabbrev,capitalize,nameinlink]{cleveref}
+
+
+%https://robjhyndman.com/hyndsight/squeezing-space-with-latex/
+%\usepackage{fontspec}
+%setmonofont{DejaVu Sans Mono}[Scale=MatchLowercase]
+%\setmainfont{DejaVu Sans}
+%There is no ∇ (U+2207) in font ec-lmr10!
+
+%http://www.gang.umass.edu/~franz/latexmanual.pdf
+
+
+%https://image-color.com/color-picker#DA4F4F
+
+
+
+\definecolor{cyan}{cmyk}{1,0,0,0.4}
+\definecolor{magenta}{cmyk}{0,1,0,0.15}
+\definecolor{yellow}{cmyk}{0,0,1,0}
+\definecolor{black}{cmyk}{0,0,0,1}
+\definecolor{orange}{cmyk}{0,0.5,1,0}
+\definecolor{red}{cmyk}{0.00,0.92,0.92,0.06}
+\definecolor{blue}{cmyk}{0.92,0.92,0.00,0.06}
+\definecolor{green}{cmyk}{0.88,0.00,0.78,0.03}
+
+\hypersetup{
+    colorlinks,
+    citecolor=magenta,
+    linkcolor=magenta,
+    urlcolor=cyan,
+}
+
+\usepackage{eqnalign}
+\usepackage{version}
+
+% Provide toggle to enable if..else conditions
+\usepackage{etoolbox}

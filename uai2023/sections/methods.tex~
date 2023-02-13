@@ -1,0 +1,189 @@
+\section{Methods}
+\label{sec:methods}
+
+In this section, we give an efficient recursive algorithm
+for computing the filtering distribution
+$p(\vheta_t||data_{1:t})$ in \cref{eqn:post},
+as well as the posterior predictive distribution
+for observations,
+$p(\vy_t|\data_{1:t-1}$.
+
+\eat{
+\subsection{EKF}
+
+In the standard EKF setup, the prior at each step is approximated by a Gaussian,
+\begin{align}
+    q(\vtheta_{t-1}|\data_{1:t-1}) = \gauss(\vtheta_t  | 
+    \vmu_{t-1}, \vS_{t-1})
+\end{align}
+The prior predictive distribution is given by
+\begin{align}
+p(\vtheta_t |\vtheta_{t-1})=
+\gauss(\vtheta_t| \vmu_{t+1|t} = \gamma \vmu_{t-1},
+    \vS_{t+1|t} = \gamma^2 \vS_t + q\vI)
+\end{align}
+We now linearize the observation model
+about the prior mean:
+\begin{align}
+    \hat{h}(\vx_t,\vtheta_t) =
+    h(\vx_t,\vmu_{t|t-1}) + \vH_t(\vtheta_t-\vmu_{t|t-1})
+\end{align}
+where $\vH_t$ is the Jacobian of $h(\vx_t,\cdot)$ evaluated at $\vmu_{t|t-1}$.
+We also approximate the likelihood by a Gaussian:
+\begin{align}
+    p(\vy_t|\vx_t,\vtheta_t) \approx \gauss(\vy_t | \hat{h}(\vx_t,\vtheta_t),\vR_t)
+\end{align}
+For regression, $\vR_t=\lambda^{-1}\vI$ with observation noise $\lambda^{-1}$. For classification, 
+$\vR_t = \diag(h(\vx_t,\vtheta_t)) - h(\vx_t,\vtheta_t) h(\vx_t,\vtheta_t)^\T$ is the conditional covariance, where
+$h(\vx_t,\vtheta_t)$ is the vector of predicted class probabilities (output from softmax).
+Under these assumptions, standard  results imply the posterior can be written as
+\begin{align}
+   q(\vtheta_{t}|\data_{1:t}) = \gauss(\vtheta_t  | 
+    \vmu_{t}, \vS_{t}) \\
+    \vmu_t &= \vmu_{t|t-1} + \left( \vS_{t|t-1}^{-1} + \vF_t^\T \vR_t^{-1} \vF_t \right)^{-1} \nonumber \\
+    & \qquad\qquad\qquad \times \vF_t^\T \vR_t^{-1} (\vy_t - f(\vx_t,\vmu_{t|t-1})) \\
+    \vS_t &= \left( \vS_{t|t-1}^{-1} + \vF_t^\T \vR_t^{-1} \vF_t \right)^{-1} \label{eq:EKF-var-update}
+\end{align}
+
+Because $\vR_t$ is positive-definite, we can write $\vR_t^{-1} = \vA_t^\T\vA_t$ and define $\vG_t = \vF_t^\T\vA_t^\T$ so that $\vG_t\vG_t^\T = \vF_t^\T \vR_t^{-1} \vF_t$. One can think of $\vG_t$ as the (transposed) Jacobian of a standardized outcome $\vz_t=\vA_t\vy_t$ that has variance $\vI$.
+
+}
+
+\subsection{Low-Rank EKF}
+
+To motivate our LoFi approach, consider the stationary case as in Equation \eqref{eq:stationary}. Then $\vS_{t|t-1} = \vS_{t-1}$, and telescoping Equation \eqref{eq:EKF-var-update} yields
+\begin{align}
+    \vS_t^{-1} = \eta\vI + \sum_{i=1}^t \vG_i\vG_i^\T \label{eq:EKF-posterior-variance}
+\end{align}
+
+where $\eta\vI$ is the prior precision at time zero. The data-driven part of Equation \eqref{eq:EKF-posterior-variance} is a sum of outer products of gradients, taken over all time steps and (standardized) outcome dimensions. We seek a low-rank approximation of this sum,
+\begin{align}
+    \vW_t\vW_t^\T \approx \sum_{i=1}^t \vG_i\vG_i^\T
+\end{align}
+with $\vW_t\in\real^{P\times M}$, where $M\ll\{T,P\}$ is a (fixed or adaptive) memory limit. As explained below, $\vW_t$ will be obtained by an incremental SVD algorithm that aims to maintain the top $M$ non-normalized singular vectors of $[\vG_1,\dots,\vG_t]$.
+
+mean inference step
+dynamics step for mean (trivial)
+dynamics step for variance
+ uses column orthogonality of W
+ uses steady-state assumption
+ amounts to rescaling each column -- easier to write in terms of U and sigma
+
+--
+
+Under the dynamic assumption $p(\vtheta_t\vert\vtheta_{t-1})=\gauss(\vtheta_t|\gamma\vtheta_{t-1},q\vI)$, the prior for the next step is given by
+\begin{align}
+    \vmu_{t+1|t} &= \gamma\vmu_t \\
+    \vS_{t+1|t} &= \gamma^2\vS_t + q\vI
+\end{align}
+Taking the prior to be $p(\vtheta_0)=\gauss(\vtheta_0|\vmu_0,\eta^{-1}\vI)$, and making the steady-state assumption $\gamma^2 + q\eta = 1$ (see Footnote \ref{ft:steady-state}), the posterior precision for the full EKF becomes
+\begin{align}
+    \vS_t^{-1} = \eta\vI + \sum_{i=1}^t \gamma^{2(t-i)}\vF_t^\T \vR_t^{-1}\vF_t
+\end{align}
+
+state-space model
+ x generic outcome $p(\vy_t\vert \vx_t,\vtheta_t) = p(\vy_t\vert f(\vx_t,\vtheta_t))$
+ x justify gamma: nonstationary or stale
+prior set to same distribution current initialization schemes sample from
+ mean 0, variance depending on weight (e.g. fan)
+ standardized params
+ eta=1 by default, but we can keep it in as hyperparameter
+iterative posterior: $\gauss(\vmu_t,\vS_t)$
+update step for prior: $\vmu_{t\vert t-1}=\gamma\vmu_t$, $vS_{t\vert t-1}=\gamma^2\vS_{t-1}+q\vI$
+EKF approximation using $\vmu_{t-1}$
+ linearize network
+ Gaussian 
+mean update
+ version using $S_{t-1}$
+variance update
+ note spherical part unchanged
+telescoped variance, $\vI+X_T\Lambda \vX_T^\T$ where $\Lambda=diag(\lambda^{0:T-1})$
+SVD approximation, I+WW'
+ write as $W=U\vsigma$ where $\vsigma[j]=\Vert \vW_t[:,j]\Vert$ and $\vU_t[:,j]=\vsigma_t[j]^{-1}\Vert \vW_t[:,j]\Vert$
+ inference step explained next
+final equations
+ mean update: from $\vmu_{t\vert t-1}$ to $\vmu_t$ and (easy) from $\vmu_t$ to $\vmu_{t+1\vert t}$
+ from $\vS_t$ to $\vS_{t+1\vert t}$, amounts to update of $\sigma$
+
+
+To motivate our approach, consider online Bayesian linear regression, with features $\vx_t$, unknown parameters $\vtheta$, and outcome modeled as
+\begin{align}
+    p(y_t|\vx_t,\vtheta) = \gauss(y_t|\vx_t^\T\vtheta,\lambda^{-1})
+\end{align}
+Assuming a conjugate Gaussian iterative prior,
+\begin{align}
+    p(\vtheta|\vx_{<t},\vy_{<t}) = \gauss(\vtheta|\vmu_{t|t-1},\vS_{t|t-1})
+\end{align}
+the exact posterior is given by
+\begin{align}
+    \vS_{t|t} &= (\vS_{t|t-1}^{-1} + \lambda\vx_t\vx_t^\T)^{-1} \\
+    \vmu_{t|t} &= \vmu_{t|t-1} + \vS_{t|t}\lambda\vx_t (y_t-\vx_t^\T\vmu_{t|t-1})
+\end{align}
+Thus the posterior precision, $\vS_{t|t}^{-1}$, accumulates $\lambda\vx_t\vx_t^\T$ on each step, where $\vx_t$ is the gradient of the prediction with respect to the mean parameter estimate $\vmu$. The posterior covariance then acts as a preconditioner on the loss gradient, $\lambda\vx_t (y_t-\vx_t^\T\vmu_{t|t-1})$, in updating the mean. The same observations hold, with additional details explained below, for an EKF applied to a nonlinear model such as an NN.
+
+We seek an inexpensive approximation of $\vS_{t|t}$ that is linear (rather than quadratic) in the number of parameters. Writing the prior variance as 
+\begin{align}
+    \vS_{1|0} = \eta^{-1}\Id_p
+\end{align}
+the exact posterior precision is
+\begin{align}
+    \vS_{t|t}^{-1} = \eta\Id_p + \vX_t\vX_t^\T
+\end{align}
+where $\vX_t[:,i]=\vx_i$. We approximate the $p\times t$ matrix $\vX_t$ with a $p\times m$ matrix $\vW_t$, where $m\ll \{n,p\}$ is a (fixed or adaptive) memory limit. We compute $\vW_t$ using incremental SVD algorithms that aim for $\vW_t$ to comprise the top $m$ non-normalized singular vectors of $\vX_t$.
+
+\subsection{Algorithm}
+
+\begin{algorithm}
+\dontprintsemicolon
+Input: data sequence $\left(\left(\vx_{t},\vy_{t}\right)\right)_{t=1}^{T}$,
+memory limit $M$, prior mean $\vmu_{0}$, prior precision or inverse learning rate $\eta$, decay factor $\gamma$ \\
+Output:  optimal parameter estimate $\mu$, posterior predictive mean $\hat{y}_\star$ and variance $v_\star$ for test items $x_\star$ \\
+Initialize $U\leftarrow\left[0\right]^{p\times m}$, $\sigma\leftarrow\left[0\right]^{m}$,
+$\mu\leftarrow\mu_{0}$, $\nu\leftarrow0$, $\rho\leftarrow0$ \\
+\For {$i\in\left[K\right]$} {
+$\hat{y}\leftarrow h\left(\mu,x_{i}\right)$ \\
+$H\leftarrow\nabla_{w}h\left(w,x_{i}\right)_{w=\mu}$ \\
+$\nu\leftarrow\nu+C$ \\
+$\rho\leftarrow\rho+(y_i-\hat{y})^{\top}(\mathbb{I}_C+H\left(\eta\mathbb{I}_{p}+U\text{diag}(\sigma^2)U^{\top}\right)^{-1}H^{\top})^{-1}(y_i-\hat{y})$ // write efficient version\\
+$\tilde{W}\leftarrow\left[\begin{array}{cc}U\text{diag}(\sigma) & H^{\top}\end{array}\right]$ \\
+$\mu\leftarrow\gamma\left(\mu+\eta^{-1}\left(\mathbb{I}_{p}-\tilde{W}\left(\eta\mathbb{I}_{m+1}+\tilde{W}^{\top}\tilde{W}\right)^{-1}\tilde{W}^{\top}\right)H^{\top}\left(y_{i}-\hat{y}\right)\right)$ \\
+$U,\sigma\leftarrow{\mathrm{SVD}}_m(\tilde{W})$ \\
+\For {$x_\star\in\mathcal{X}_\mathrm{test}$} {
+$\hat{y}_\star \leftarrow h(\mu,x_\star)$ \\
+$H_\star\leftarrow\nabla_{w}h\left(w,x_\star\right)_{w=\mu}$ \\
+$v_\star = \eta^{-1}H_\star H_\star^\T - (H_\star U) \diag\left(\frac{\sigma^2}{\eta(\eta+\sigma^2)}\right) (H_\star U)^\T + \Var[y|\hat{y}_\star]$\\
+}
+$\sigma\leftarrow\sqrt{\frac{\gamma^{2}\sigma^{2}}{1+q\sigma^{2}}}$ // componentwise \\
+}
+$\tau\leftarrow\frac{\rho}{\nu}$
+\caption{\label{alg:LoFi-full-SVD}LoFi regression algorithm}
+\end{algorithm}
+
+\begin{algorithm*}
+Input: data sequence $\left(\left(x_{k},y_{k}\right)\right)_{k=1}^{K}$,
+where $x_k \in \real^D$ and $y_i \in \real^C$,
+memory limit $m$, prior mean $\mu_{0} \in \real^p$, prior precision $\eta$,
+decay factor $\gamma$, observation noise $\lambda$ (optional) \\
+Output: optimal parameter estimate $\mu$, 
+uncertainty
+$S=\left(\eta \Id_{p} +U \diag(\sigma^2)U^{\top}\right)^{-1}$ \\
+Initialize $U\leftarrow\left[0\right]^{p\times m}$, $\sigma\leftarrow\left[0\right]^{m}$,
+$\mu\leftarrow\mu_{0}$ \\
+\For {$i\in\left[K\right]$} {
+$\hat{y}\leftarrow h\left(\mu,x_{i}\right)$ \\
+$A\leftarrow\sqrt{{\rm Var}\left[y\vert\hat{y}\right]}$ // matrix square root \\
+$H\leftarrow\nabla_{w}h\left(w,x_{i}\right)_{w=\mu}$ \\
+$\tilde{W}\leftarrow\left[\begin{array}{cc}U\text{diag}(\sigma) & H^{\top}A^{\top}\end{array}\right]$ \\
+$\mu\leftarrow\gamma\left(\mu+\eta^{-1}\left(\mathbb{I}_{p}-\tilde{W}\left(\eta\mathbb{I}_{m+1}+\tilde{W}^{\top}\tilde{W}\right)^{-1}\tilde{W}^{\top}\right)H^{\top}A^{\top}A\left(y_{i}-\hat{y}\right)\right)$ \\
+Sample $\pi\in{\rm perm}\left(C\right)$ \\
+\For {$j\in\pi$} { 
+\If {$\left\Vert \left(\mathbb{I}_{p}-UU^{\top}\right)H^{\top}\left[A^{\top}\right]_{\cdot j}\right\Vert >\min\sigma$} {
+$U\left[:,\arg\min\left(\sigma\right)\right]\leftarrow\frac{\left(\mathbb{I}_{p}-UU^{\top}\right)H^{\top}\left[A^{\top}\right]_{\cdot j}}{\left\Vert \left(\mathbb{I}_{p}-UU^{\top}\right)H^{\top}\left[A^{\top}\right]_{\cdot j}\right\Vert }$ \\
+$\sigma\left[\arg\min\left(\sigma\right)\right]\leftarrow\left\Vert \left(\mathbb{I}_{p}-UU^{\top}\right)H^{\top}\left[A^{\top}\right]_{\cdot j}\right\Vert $ \\
+}
+}
+$\sigma\leftarrow\sqrt{\frac{\gamma^{2}\sigma^{2}}{1+q\sigma^{2}}}$ // componentwise \\
+}
+\caption{Generalized ORFit algorithm.}
+\label{alg:ORFit-general}
+\end{algorithm*}

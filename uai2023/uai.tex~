@@ -1,0 +1,124 @@
+
+\documentclass{uai2023} % for initial submission
+% \documentclass[accepted]{uai2023} % after acceptance, for a revised
+                                    % version; also before submission to
+                                    % see how the non-anonymous paper
+                                    % would look like
+%% There is a class option to choose the math font
+% \documentclass[mathfont=ptmx]{uai2023} % ptmx math instead of Computer
+                                         % Modern (has noticable issues)
+% \documentclass[mathfont=newtx]{uai2023} % newtx fonts (improves upon
+                                          % ptmx; less tested, no support)
+% NOTE: Only keep *one* line above as appropriate, as it will be replaced
+%       automatically for papers to be published. Do not make any other
+%       change above this note for an accepted version.
+
+%% Choose your variant of English; be consistent
+\usepackage[american]{babel}
+% \usepackage[british]{babel}
+
+%% Some suggested packages, as needed:
+\usepackage{natbib} % has a nice set of citation styles and commands
+    \bibliographystyle{plainnat}
+    \renewcommand{\bibsection}{\subsubsection*{References}}
+\usepackage{mathtools} % amsmath with fixes and additions
+% \usepackage{siunitx} % for proper typesetting of numbers and units
+\usepackage{booktabs} % commands to create good-looking tables
+\usepackage{tikz} % nice language for creating drawings and diagrams
+
+%% Provided macros
+% \smaller: Because the class footnote size is essentially LaTeX's \small,
+%           redefining \footnotesize, we provide the original \footnotesize
+%           using this macro.
+%           (Use only sparingly, e.g., in drawings, as it is quite small.)
+
+
+
+
+\usepackage{xspace}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{bm}
+\usepackage{cleveref}
+
+  \usepackage[ruled,vlined,linesnumbered,algochapter]{algorithm2e}
+
+    \input{macros}
+    %\input{packages}
+
+    
+\title{Low-rank extended Kalman filtering for online learning of neural networks}
+
+
+
+% The standard author block has changed for UAI 2023 to provide
+% more space for long author lists and allow for complex affiliations
+%
+% All author information is authomatically removed by the class for the
+% anonymous submission version of your paper, so you can already add your
+% information below.
+%
+% Add authors
+\author[1]{Peter Chang}
+\author[2]{Gerardo Duran-Martin}
+\author[2]{Alex Shestopaloff}
+\author[3]{Matt Jones}
+\author[4]{Kevin Murphy}
+% Add affiliations after the authors
+\affil[1]{%
+    U. Chicago, IL.
+}
+\affil[2]{%
+   Queen Mary University, London, UK.
+}
+\affil[3]{%
+    U. Colorado, Boulder, CO.
+  }
+\affil[3]{%
+    Google Research, Brain team, Mountain View, CA.
+  }
+
+  
+  \begin{document}
+\maketitle
+
+%\input{sections/methods.tex}
+
+\eat{
+\input{sections/abstract.tex}
+\input{sections/intro.tex}
+\input{sections/related.tex}
+\input{sections/methods.tex}
+\input{sections/results.tex}
+\input{sections/concl.tex}
+}
+
+
+\begin{contributions} % will be removed in pdf for initial submission 
+					  % (without ‘accepted’ option in \documentclass)
+                      % so you can already fill it to test with the
+                      % ‘accepted’ class option
+    Briefly list author contributions. 
+    This is a nice way of making clear who did what and to give proper credit.
+    This section is optional.
+
+    H.~Q.~Bovik conceived the idea and wrote the paper.
+    Coauthor One created the code.
+    Coauthor Two created the figures.
+\end{contributions}
+
+\begin{acknowledgements} % will be removed in pdf for initial submission,
+						 % (without ‘accepted’ option in \documentclass)
+                         % so you can already fill it to test with the
+                         % ‘accepted’ class option
+    Briefly acknowledge people and organizations here.
+
+    \emph{All} acknowledgements go in this section.
+\end{acknowledgements}
+
+% References
+%\bibliography{refs}
+
+
+\end{document}

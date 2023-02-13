@@ -1,0 +1,102 @@
+\section{Related work}
+\label{sec:related}
+
+
+
+
+
+Our technique is related to
+the LRVGA (low-rank recursive variational Gaussian approximation) method of \citep{LRVGA},
+which is a low-rank extension of \citep{RVGA}.
+This seeks to compute a diagonal--plus--low-rank approximation to the posterior precision. 
+However LRVGA uses stochastic EM at each step,
+whereas our method is fully deterministic,
+and each step is a closed form update.
+Our technique is also related to 
+the \orfit method of \citep{ORFit},
+which uses orthogonal projection to efficiently
+compute a low rank representation at each step.
+However, our method allows
+for a general multidimensional, noisy observation model, as opposed to assuming the likelihood has the degenerate form $p(y_t|\vx_t,\vtheta_t) =\gauss(f(\vx_t,\vtheta_t), 0)$.
+In  addition, we allow the parameters to evolve over time.
+
+Our technique is a special case of a low-rank version
+of the extended Kalman filter (EKF).
+The EKF has been used for online training of neural networks
+ in \citep{Singhal1988,Watanabe1990,Puskorius1991,Haykin01}.
+In \citep{Chang2022},
+they propose a simple diagonal EKF approximation
+which minimizes the reverse KL,
+$\KLpq{q(\vtheta_t)}{p(\vtheta_t|\data_{1:t})}$,
+using a linearized observation model.
+They also show that  the diagonal approximation of 
+ \citep{Puskorius1991} is equivalent to minimizing
+ the forwards KL
+$\KLpq{p(\vtheta_t|\data_{1:t})}{q(\vtheta_t)}$
+using  a linearized observation model.
+In \citep{Ghosh2016,Wagner2022},
+they propose  a diagonal approximation
+to minimize $\KLpq{p(\vtheta_t|\data_{1:t})}{q(\vtheta_t)}$
+which avoids linearization, but which requires
+approximating the first and second moments of the hidden
+units at every layer of the model.
+%which requires the use of numerical integration.
+
+There are many papers that use recursive variational inference for continual learning of DNNs  (see e.g., 
+\citep{Nguyen2018continual,Broderick2013,Kurle2020,Zeno2021}).
+The primary difference from our work is that these methods rely on a Monte Carlo approximation of the evidence lower bound, which can result in a high-variance objective that is hard to optimize (c.f. \citep{Wu2019VB}).
+By contrast, by linearizing the observation model, 
+we derive a determinsistic, closed-form update to the posterior.
+
+There are  several papers on online extensions of the Laplace approximation
+(see e.g., \citep{Ritter2018online,Daxberger2021laplace}).
+The primary difference from our work is that these methods compute the MAP estimate using standard SGD methods, and then compute the Hessian at the mode
+ to approximate the covariance.
+
+ \eat{
+ (In practice it is common to use 
+ the generalized Gauss-Newton approximation to the Hessian, which computes the outer product of the Jacobian matrix, similar to our linearization method.)
+ This inner optimization for computing the MAP estimate is usually stochastic, and requires tuning the step size, whereas our method gives a deterministic update for the posterior mean, and leverages the covariance matrix as a preconditioner. 
+ }
+
+ There is a very large literature on continual learning
+ (see e.g., \citep{Wang2023CL,Mai2022,Delange2021,Mundt2023} for recent reviews).
+ However, this is mostly concerned with learning from a sequence of distributions ("tasks"),
+ presented in batch form,
+ without forgetting any of the past tasks.
+ %which in general is NP-hard \citep{Knoblauch2020}.
+ By contrast, we focus on the online continual learning setting,
+ where the goal is to rapidly
+ learn from  individual examples from a possibly
+ changing distribution, so as to
+ %minimize
+ %regret \citep{Orabona2019} or maximize
+ %future expected performance  \citep{Dawid99,Gama2013}.
+minimize the online loss \citep{Cai2021,Ghunaim2023,Dawid99,Gama2013}.
+ 
+ There are also several papers on online learning of DNNs based on SGD
+ (see e.g., \citep{Hu2021onepass,Ash2020,Dohare2021,Xu2021}).
+However, many of these techniques 
+ rely on computing multiple gradient steps,
+ applied to data drawn from  a replay buffer,
+ every time a new data point arrives,
+ or even require retraining from scratch
+ at each step
+ \citep{Paria2022},
+ both of which are often too slow in a streaming setting
+\citep{Ghunaim2023}.
+%However, in this paper, our focus is on 
+% approximating the posterior using a representation
+% that is more accurate than just a point estimate.
+ %However, a point estimate is a poor approximation to the posterior, which can result in over confident predictions and slow adaptation to changing distributions.
+
+ \eat{
+ Finally, there is some work on online
+ learning of nonparametric Gaussian process models
+ (e.g., \citep{Bui2017,Verma2022}).
+ However, in this paper we focus on DNNs.
+
+}
+ 
+
+ 

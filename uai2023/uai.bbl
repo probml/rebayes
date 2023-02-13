@@ -1,0 +1,341 @@
+\begin{thebibliography}{46}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Ash and Adams(2020)]{Ash2020}
+Jordan~T Ash and Ryan~P Adams.
+\newblock On {Warm-Starting} neural network training.
+\newblock In \emph{{NIPS}}, 2020.
+\newblock URL
+  \url{https://proceedings.neurips.cc/paper/2020/hash/288cd2567953f06e460a33951f55daaf-Abstract.html}.
+
+\bibitem[Barrau and Bonnabel(2018)]{Barrau2018}
+Axel Barrau and Silv{\`e}re Bonnabel.
+\newblock Invariant kalman filtering.
+\newblock \emph{Annu. Rev. Control Robot. Auton. Syst.}, 1\penalty0
+  (1):\penalty0 237--257, May 2018.
+\newblock URL \url{https://doi.org/10.1146/annurev-control-060117-105010}.
+
+\bibitem[Broderick et~al.(2013)Broderick, Boyd, Wibisono, Wilson, and
+  Jordan]{Broderick2013}
+Tamara Broderick, Nicholas Boyd, Andre Wibisono, Ashia~C Wilson, and Michael~I
+  Jordan.
+\newblock Streaming variational bayes.
+\newblock In \emph{{NIPS}}, 2013.
+\newblock URL \url{http://arxiv.org/abs/1307.6769}.
+
+\bibitem[Cai et~al.(2021)Cai, Sener, and Koltun]{Cai2021}
+Zhipeng Cai, Ozan Sener, and Vladlen Koltun.
+\newblock Online continual learning with natural distribution shifts: An
+  empirical study with visual data.
+\newblock In \emph{{ICCV}}, August 2021.
+\newblock URL \url{http://arxiv.org/abs/2108.09020}.
+
+\bibitem[Chang et~al.(2022)Chang, Murphy, and Jones]{Chang2022}
+Peter~G Chang, Kevin~Patrick Murphy, and Matt Jones.
+\newblock On diagonal approximations to the extended kalman filter for online
+  training of bayesian neural networks.
+\newblock In \emph{Continual Lifelong Learning Workshop at {ACML} 2022},
+  December 2022.
+\newblock URL \url{https://openreview.net/forum?id=asgeEt25kk}.
+
+\bibitem[Dawid and Vovk(1999)]{Dawid99}
+A.~P. Dawid and V.~Vovk.
+\newblock Prequential probability: Principles and properties.
+\newblock \emph{Bernoulli}, 5:\penalty0 125--162, 1999.
+
+\bibitem[Daxberger et~al.(2021)Daxberger, Kristiadi, Immer, Eschenhagen, Bauer,
+  and Hennig]{Daxberger2021laplace}
+Erik Daxberger, Agustinus Kristiadi, Alexander Immer, Runa Eschenhagen,
+  Matthias Bauer, and Philipp Hennig.
+\newblock Laplace redux--effortless bayesian deep learning.
+\newblock In \emph{{NIPS}}, 2021.
+\newblock URL \url{https://openreview.net/forum?id=gDcaUj4Myhn}.
+
+\bibitem[Delange et~al.(2021)Delange, Aljundi, Masana, Parisot, Jia, Leonardis,
+  Slabaugh, and Tuytelaars]{Delange2021}
+Matthias Delange, Rahaf Aljundi, Marc Masana, Sarah Parisot, Xu~Jia, Ales
+  Leonardis, Greg Slabaugh, and Tinne Tuytelaars.
+\newblock A continual learning survey: Defying forgetting in classification
+  tasks.
+\newblock \emph{IEEE Trans. Pattern Anal. Mach. Intell.}, PP, February 2021.
+\newblock URL \url{https://arxiv.org/abs/1909.08383}.
+
+\bibitem[Ditzler et~al.(2015)Ditzler, Roveri, Alippi, and Polikar]{Ditzler2015}
+Gregory Ditzler, Manuel Roveri, Cesare Alippi, and Robi Polikar.
+\newblock Learning in nonstationary environments: A survey.
+\newblock \emph{IEEE Comput. Intell. Mag.}, 10\penalty0 (4):\penalty0 12--25,
+  November 2015.
+\newblock URL \url{http://dx.doi.org/10.1109/MCI.2015.2471196}.
+
+\bibitem[Dohare et~al.(2021)Dohare, Sutton, and Rupam~Mahmood]{Dohare2021}
+Shibhansh Dohare, Richard~S Sutton, and A~Rupam~Mahmood.
+\newblock Continual backprop: Stochastic gradient descent with persistent
+  randomness.
+\newblock August 2021.
+\newblock URL \url{http://arxiv.org/abs/2108.06325}.
+
+\bibitem[Duran-Martin et~al.(2022)Duran-Martin, Kara, and
+  Murphy]{Duran-Martin2022}
+Gerardo Duran-Martin, Aleyna Kara, and Kevin Murphy.
+\newblock Efficient online bayesian inference for neural bandits.
+\newblock In \emph{AISTATS}, 2022.
+\newblock URL \url{http://arxiv.org/abs/2112.00195}.
+
+\bibitem[Gama et~al.(2013)Gama, Sebasti{\~a}o, and Rodrigues]{Gama2013}
+Jo{\~a}o Gama, Raquel Sebasti{\~a}o, and Pedro~Pereira Rodrigues.
+\newblock On evaluating stream learning algorithms.
+\newblock \emph{MLJ}, 90\penalty0 (3):\penalty0 317--346, March 2013.
+\newblock URL \url{https://tinyurl.com/mrxfk4ww}.
+
+\bibitem[Garnett(2023)]{Garnett2023}
+Roman Garnett.
+\newblock \emph{{Bayesian Optimization}}.
+\newblock Cambridge University Press, 2023.
+\newblock URL \url{https://bayesoptbook.com/}.
+
+\bibitem[Ghosh et~al.(2016)Ghosh, Delle~Fave, and Yedidia]{Ghosh2016}
+Soumya Ghosh, Francesco~Maria Delle~Fave, and Jonathan Yedidia.
+\newblock Assumed density filtering methods for learning bayesian neural
+  networks.
+\newblock In \emph{{AAAI}}, 2016.
+\newblock URL
+  \url{https://jonathanyedidia.files.wordpress.com/2012/01/assumeddensityfilteringaaai2016final.pdf}.
+
+\bibitem[Ghunaim et~al.(2023)Ghunaim, Bibi, Alhamoud, Alfarra,
+  Al~Kader~Hammoud, Prabhu, Torr, and Ghanem]{Ghunaim2023}
+Yasir Ghunaim, Adel Bibi, Kumail Alhamoud, Motasem Alfarra, Hasan~Abed
+  Al~Kader~Hammoud, Ameya Prabhu, Philip H~S Torr, and Bernard Ghanem.
+\newblock {Real-Time} evaluation in online continual learning: A new paradigm.
+\newblock February 2023.
+\newblock URL \url{http://arxiv.org/abs/2302.01047}.
+
+\bibitem[Haykin(2001)]{Haykin01}
+Simon Haykin, editor.
+\newblock \emph{{Kalman Filtering and Neural Networks}}.
+\newblock Wiley, 2001.
+
+\bibitem[Ho et~al.(2020)Ho, Jain, and Abbeel]{ho2020denoising}
+Jonathan Ho, Ajay Jain, and Pieter Abbeel.
+\newblock Denoising diffusion probabilistic models.
+\newblock In \emph{{NIPS}}, 2020.
+
+\bibitem[Holzm{\"u}ller et~al.(2022)Holzm{\"u}ller, Zaverkin, K{\"a}stner, and
+  Steinwart]{Holzmuller2022}
+David Holzm{\"u}ller, Viktor Zaverkin, Johannes K{\"a}stner, and Ingo
+  Steinwart.
+\newblock A framework and benchmark for deep batch active learning for
+  regression.
+\newblock March 2022.
+\newblock URL \url{http://arxiv.org/abs/2203.09410}.
+
+\bibitem[Hu et~al.(2021)Hu, Li, Calandriello, and Gorur]{Hu2021onepass}
+Huiyi Hu, Ang Li, Daniele Calandriello, and Dilan Gorur.
+\newblock One pass {ImageNet}.
+\newblock In \emph{{NeurIPS} 2021 Workshop on Imagenet: past, present and
+  future}, November 2021.
+\newblock URL \url{http://arxiv.org/abs/2111.01956}.
+
+\bibitem[Huang et~al.(2015)Huang, Cui, Zhang, Jiang, and Xu]{Huang2015}
+Yanxiang Huang, Bin Cui, Wenyu Zhang, Jie Jiang, and Ying Xu.
+\newblock {TencentRec}: Real-time stream recommendation in practice.
+\newblock In \emph{Proceedings of the 2015 {ACM} {SIGMOD} International
+  Conference on Management of Data}, SIGMOD '15, pages 227--238, New York, NY,
+  USA, May 2015. Association for Computing Machinery.
+\newblock URL \url{https://doi.org/10.1145/2723372.2742785}.
+
+\bibitem[Khetarpal et~al.(2022)Khetarpal, Riemer, Rish, and
+  Precup]{Khetarpal2022}
+Khimya Khetarpal, Matthew Riemer, Irina Rish, and Doina Precup.
+\newblock Towards continual reinforcement learning: A review and perspectives.
+\newblock \emph{JAIR}, 2022.
+\newblock URL \url{http://arxiv.org/abs/2012.13490}.
+
+\bibitem[Kurle et~al.(2020)Kurle, Cseke, Klushyn, van~der Smagt, and
+  G{\"u}nnemann]{Kurle2020}
+Richard Kurle, Botond Cseke, Alexej Klushyn, Patrick van~der Smagt, and Stephan
+  G{\"u}nnemann.
+\newblock Continual learning with bayesian neural networks for {Non-Stationary}
+  data.
+\newblock In \emph{{ICLR}}, 2020.
+\newblock URL \url{https://openreview.net/forum?id=SJlsFpVtDB}.
+
+\bibitem[Lambert et~al.(2021{\natexlab{a}})Lambert, Bonnabel, and Bach]{LRVGA}
+Marc Lambert, Silv{\`e}re Bonnabel, and Francis Bach.
+\newblock The limited-memory recursive variational gaussian approximation
+  ({L-RVGA}).
+\newblock December 2021{\natexlab{a}}.
+\newblock URL \url{https://hal.inria.fr/hal-03501920}.
+
+\bibitem[Lambert et~al.(2021{\natexlab{b}})Lambert, Bonnabel, and Bach]{RVGA}
+Marc Lambert, Silv{\`e}re Bonnabel, and Francis Bach.
+\newblock The recursive variational gaussian approximation ({R-VGA}).
+\newblock \emph{Stat. Comput.}, 32\penalty0 (1):\penalty0 10, December
+  2021{\natexlab{b}}.
+\newblock URL \url{https://hal.inria.fr/hal-03086627/document}.
+
+\bibitem[Lesort et~al.(2020)Lesort, Lomonaco, Stoian, Maltoni, Filliat, and
+  D{\'\i}az-Rodr{\'\i}guez]{Lesort2020}
+Timoth{\'e}e Lesort, Vincenzo Lomonaco, Andrei Stoian, Davide Maltoni, David
+  Filliat, and Natalia D{\'\i}az-Rodr{\'\i}guez.
+\newblock Continual learning for robotics: Definition, framework, learning
+  strategies, opportunities and challenges.
+\newblock \emph{Inf. Fusion}, 58:\penalty0 52--68, June 2020.
+\newblock URL \url{https://arxiv.org/abs/1907.00182}.
+
+\bibitem[Mai et~al.(2022)Mai, Li, Jeong, Quispe, Kim, and Sanner]{Mai2022}
+Zheda Mai, Ruiwen Li, Jihwan Jeong, David Quispe, Hyunwoo Kim, and Scott
+  Sanner.
+\newblock Online continual learning in image classification: An empirical
+  survey.
+\newblock \emph{Neurocomputing}, 469:\penalty0 28--51, January 2022.
+\newblock URL
+  \url{https://www.sciencedirect.com/science/article/pii/S0925231221014995}.
+
+\bibitem[Min et~al.(2022)Min, Ahn, and Azizan]{ORFit}
+Youngjae Min, Kwangjun Ahn, and Navid Azizan.
+\newblock {One-Pass} learning via bridging orthogonal gradient descent and
+  recursive {Least-Squares}.
+\newblock In \emph{{IEEE} Conference on Decision and Control}, July 2022.
+\newblock URL \url{http://arxiv.org/abs/2207.13853}.
+
+\bibitem[Mundt et~al.(2023)Mundt, Hong, Pliushch, and Ramesh]{Mundt2023}
+Martin Mundt, Yong~Won Hong, Iuliia Pliushch, and Visvanathan Ramesh.
+\newblock A wholistic view of continual learning with deep neural networks:
+  Forgotten lessons and the bridge to active and open world learning.
+\newblock \emph{Neural Netw.}, 2023.
+\newblock URL \url{http://arxiv.org/abs/2009.01797}.
+
+\bibitem[Murphy(2023)]{pml2Book}
+Kevin~P. Murphy.
+\newblock \emph{Probabilistic Machine Learning: Advanced Topics}.
+\newblock MIT Press, 2023.
+\newblock URL \url{probml.ai}.
+
+\bibitem[Nguyen et~al.(2018)Nguyen, Li, Bui, and Turner]{Nguyen2018continual}
+Cuong~V Nguyen, Yingzhen Li, Thang~D Bui, and Richard~E Turner.
+\newblock Variational continual learning.
+\newblock In \emph{{ICLR}}, 2018.
+\newblock URL \url{https://openreview.net/forum?id=BkQqq0gRb}.
+
+\bibitem[Ollivier(2018)]{Ollivier2018}
+Yann Ollivier.
+\newblock Online natural gradient as a kalman filter.
+\newblock \emph{Electron. J. Stat.}, 12\penalty0 (2):\penalty0 2930--2961,
+  2018.
+\newblock URL \url{https://projecteuclid.org/euclid.ejs/1537257630}.
+
+\bibitem[Paria et~al.(2022)Paria, P{\`o}czos, and Ravikumar]{Paria2022}
+Biswajit Paria, Barnab{\`a}s P{\`o}czos, and Pradeep Ravikumar.
+\newblock Be greedy -- a simple algorithm for blackbox optimization using
+  neural networks.
+\newblock In \emph{{ICML2022} Workshop on Adaptive Experimental Design and
+  Active Learning in the Real World}, 2022.
+\newblock URL \url{https://realworldml.github.io/files/cr/paper64.pdf}.
+
+\bibitem[Puskorius and Feldkamp(1991)]{Puskorius1991}
+G~V Puskorius and L~A Feldkamp.
+\newblock Decoupled extended kalman filter training of feedforward layered
+  networks.
+\newblock In \emph{International Joint Conference on Neural Networks},
+  volume~i, pages 771--777 vol.1, 1991.
+\newblock URL \url{http://dx.doi.org/10.1109/IJCNN.1991.155276}.
+
+\bibitem[Ritter et~al.(2018)Ritter, Botev, and Barber]{Ritter2018online}
+Hippolyt Ritter, Aleksandar Botev, and David Barber.
+\newblock Online structured laplace approximations for overcoming catastrophic
+  forgetting.
+\newblock In \emph{{NIPS}}, pages 3738--3748, 2018.
+
+\bibitem[Sarkka and Svensson(2023)]{Sarkka23}
+Simo Sarkka and Lennart Svensson.
+\newblock \emph{{Bayesian Filtering and Smoothing (2nd edition)}}.
+\newblock Cambridge University Press, 2023.
+
+\bibitem[Singhal and Wu(1989)]{Singhal1988}
+Sharad Singhal and Lance Wu.
+\newblock Training multilayer perceptrons with the extended kalman algorithm.
+\newblock In \emph{{NIPS}}, volume~1, 1989.
+
+\bibitem[Song et~al.(2021)Song, Sohl-Dickstein, Kingma, Kumar, Ermon, and
+  Poole]{song2020score}
+Yang Song, Jascha Sohl-Dickstein, Diederik~P Kingma, Abhishek Kumar, Stefano
+  Ermon, and Ben Poole.
+\newblock Score-based generative modeling through stochastic differential
+  equations.
+\newblock In \emph{{ICLR}}, 2021.
+
+\bibitem[Tronarp et~al.(2018)Tronarp, Garc{\'\i}a-Fern{\'a}ndez, and
+  S{\"a}rkk{\"a}]{Tronarp2018}
+Filip Tronarp, {\'A}ngel~F Garc{\'\i}a-Fern{\'a}ndez, and Simo S{\"a}rkk{\"a}.
+\newblock Iterative filtering and smoothing in nonlinear and {Non-Gaussian}
+  systems using conditional moments.
+\newblock \emph{IEEE Signal Process. Lett.}, 25\penalty0 (3):\penalty0
+  408--412, 2018.
+\newblock URL
+  \url{https://acris.aalto.fi/ws/portalfiles/portal/17669270/cm_parapub.pdf}.
+
+\bibitem[Wagner et~al.(2022)Wagner, Wu, and Huber]{Wagner2022}
+Philipp Wagner, Xinyang Wu, and Marco~F Huber.
+\newblock Kalman bayesian neural networks for closed-form online learning.
+\newblock In \emph{{AAAI}}, 2022.
+\newblock URL \url{http://arxiv.org/abs/2110.00944}.
+
+\bibitem[Wang et~al.(2023)Wang, Zhang, Su, and Zhu]{Wang2023CL}
+Liyuan Wang, Xingxing Zhang, Hang Su, and Jun Zhu.
+\newblock A comprehensive survey of continual learning: Theory, method and
+  application.
+\newblock January 2023.
+\newblock URL \url{http://arxiv.org/abs/2302.00487}.
+
+\bibitem[Wang et~al.(2021)Wang, Chen, and Dong]{Wang2021}
+Zhi Wang, Chunlin Chen, and Daoyi Dong.
+\newblock Lifelong incremental reinforcement learning with online bayesian
+  inference.
+\newblock \emph{IEEE Transactions on Neural Networks and Learning Systems},
+  2021.
+\newblock URL \url{http://arxiv.org/abs/2007.14196}.
+
+\bibitem[Watanabe and Tzafestas(1990)]{Watanabe1990}
+Keigo Watanabe and Spyros~G Tzafestas.
+\newblock Learning algorithms for neural networks with the kalman filters.
+\newblock \emph{J. Intell. Rob. Syst.}, 3\penalty0 (4):\penalty0 305--319,
+  December 1990.
+\newblock URL \url{https://doi.org/10.1007/BF00439421}.
+
+\bibitem[Wo{\l}czyk et~al.(2021)Wo{\l}czyk, Zaj{\k a}c, Pascanu, Kuci{\'n}ski,
+  and Mi{\l}o{\'s}]{Wolczyk2021}
+Maciej Wo{\l}czyk, Micha{\l} Zaj{\k a}c, Razvan Pascanu, {\L}ukasz
+  Kuci{\'n}ski, and Piotr Mi{\l}o{\'s}.
+\newblock Continual world: A robotic benchmark for continual reinforcement
+  learning.
+\newblock In \emph{{NIPS}}, 2021.
+\newblock URL \url{http://arxiv.org/abs/2105.10919}.
+
+\bibitem[Wu et~al.(2019)Wu, Nowozin, Meeds, Turner, Hern{\'a}ndez-Lobato, and
+  Gaunt]{Wu2019VB}
+Anqi Wu, Sebastian Nowozin, Edward Meeds, Richard~E Turner, Jos{\'e}~Miguel
+  Hern{\'a}ndez-Lobato, and Alexander~L Gaunt.
+\newblock Fixing variational bayes: Deterministic variational inference for
+  bayesian neural networks.
+\newblock In \emph{{ICLR}}, 2019.
+\newblock URL \url{http://arxiv.org/abs/1810.03958}.
+
+\bibitem[Xu and Zhu(2021)]{Xu2021}
+Jiaming Xu and Hanjing Zhu.
+\newblock One-pass stochastic gradient descent in overparametrized two-layer
+  neural networks.
+\newblock In \emph{{AISTATS}}, May 2021.
+\newblock URL \url{http://arxiv.org/abs/2105.00262}.
+
+\bibitem[Zeno et~al.(2021)Zeno, Golan, Hoffer, and Soudry]{Zeno2021}
+Chen Zeno, Itay Golan, Elad Hoffer, and Daniel Soudry.
+\newblock {Task-Agnostic} continual learning using online variational bayes
+  with {Fixed-Point} updates.
+\newblock \emph{Neural Comput.}, 33\penalty0 (11):\penalty0 3139--3177, 2021.
+\newblock URL \url{https://arxiv.org/abs/2010.00373}.
+
+\end{thebibliography}

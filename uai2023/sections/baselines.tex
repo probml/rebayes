@@ -1,0 +1,64 @@
+\section{Baselines}
+
+\subsection{SGD}
+
+A simple approximation to the filtering posterior
+is to use a point estimate,
+$q_t(\vtheta_t) = \delta(\vtheta_t - \hat{\vtheta}_t)$.
+We can compute the MLE %why is this an MLE?
+$\hat{\vtheta}_t$ using SGD
+on the latest datapoint, warm-starting at $\hat{\vtheta}_{t-1}$:
+\begin{align}
+\hat{\vtheta}_t = \text{SGD}(\ell_t(\vtheta), \hat{\vtheta}_{t-1})
+\end{align}
+If the parameter is believed to be stationary, we can average the gradients over a memory buffer 
+(also called a replay buffer) $\calM_t$ of examples:
+\begin{align}
+\hat{\vtheta}_t = \text{SGD}\left(
+\frac{1}{|\calM_t|} \sum_{k \in \calM_t}
+\ell_k(\vtheta), \hat{\vtheta}_{t-1}\right)
+\end{align}
+To bound the amount of computation time per step,
+we can make the memory buffer be a FIFO queue. 
+Although fancier methods have been developed,
+\citep{Bornschein2022} show that FIFO works well.
+
+\subsection{Posterior sampling with HMC}
+The gold-standard to estimate the posterior predictive is to draw samples from the true
+posterior distribution using MCMC and approximate the posterior predictive:
+
+\begin{align}
+\expectQ{\log p(y|\vtheta)}{p(\vtheta \vert \mathcal{D}_{1:T})}
+ \approx \frac{1}{S} \sum_{s=1}^S \log p(y|\vtheta_s)
+\end{align}
+where $\vtheta_s \sim p(\vtheta \vert \mathcal{D}_{1:T})$
+
+\subsection{Deep ensembles}
+
+\subsection{MFVI / BBB}
+
+An arguably better approach is to use a non-degenerate posterior approximation, such as a Gaussian. We can then use variational inference to compute
+\begin{align}
+q_t(\vtheta_t) &= \argmin_{q}
+\text{NELBO}(q(\vtheta_t), 
+q_{t|t-1}(\vtheta_t) p_t(y_t|\vtheta_t))
+\end{align}
+where the negative ELBO (variational upper bound) is
+\begin{align}
+\text{NELBO}(q(\vtheta), p(y,\vtheta))
+= -\expectQ{\log p(y|\vtheta)}{q(\vtheta)}
++ \KLpq{q(\vtheta)}{p(\vtheta)}
+\end{align}
+In the case of Gaussians, we can compute the second term analytically.
+We can approximate the first term using Monte Carlo:
+\begin{align}
+\expectQ{\log p(y|\vtheta)}{q(\vtheta)}
+ \approx \frac{1}{S} \sum_{s=1}^S \log p(y|\vtheta_s)
+\end{align}
+where $\vtheta_s \sim q(\vtheta)$.
+This is called stochastic variational inference.
+If $q$ is a diagonal Gaussian, this is called mean field VI, and is the most common approach to VI for Bayesian neural networks.
+In \citep{Blundell2015}, they update the parameters of $q$ by SGD on the MC estimate of the ELBO, and call this method "Bayes By Backprop".
+
+This method computes $q_t$ by minimizing $D_\mathbb{KL}(q_t(\vtheta)\Vert p(\vtheta|y_t))$. For completeness and parallelism with the EKF methods below, we can also explore minimizing $D_\mathbb{KL}(p(\vtheta|y_t)\Vert q_t(\vtheta))$ using the same Monte Carlo approach. This requires sampling from the correct posterior $p(\vtheta|y_t)$ but may be feasible with an importance-sampling scheme.
+
