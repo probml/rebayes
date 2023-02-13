@@ -134,9 +134,10 @@ def load_rotated_mnist(
     minangle: int = 0,
     maxangle: int = 180,
     n_processes: Union[int, None] = 1,
-    num_train: int = 10_000,
+    num_train: int = 5_000,
     seed: int = 314,
     sort_by_angle: bool = False,
+    normalise: bool = True,
 ):
     """
     """
@@ -150,8 +151,12 @@ def load_rotated_mnist(
     (X_train, labels_train), (X_test, labels_test) = train, test
 
     if target_digit is not None:
-        X_train = X_train[labels_train == target_digit]
-        X_test = X_test[labels_test == target_digit]
+        digits = [target_digit] if type(target_digit) == int else target_digit
+
+        map_train = [label in digits for label in labels_train]
+        map_test = [label in digits for label in labels_test]
+        X_train = X_train[map_train]
+        X_test = X_test[map_test]
 
     n_train = len(X_train)
     X = np.concatenate([X_train, X_test], axis=0)
@@ -162,6 +167,18 @@ def load_rotated_mnist(
 
     X_train = jnp.array(X_train)
     y_train = jnp.array(y_train)
+
+    if normalise:
+        mean = X_train.mean()
+        std = X_train.std()
+        mean_y = y_train.mean()
+        std_y = y_train.std()
+
+        X_train = (X_train - mean) / std
+        X_test = (X_test - mean) / std
+        y_train = (y_train - mean_y) / std_y
+        y_test = (y_test - mean_y) / std_y
+
 
     if num_train is not None:
         X_train = X_train[:num_train]
