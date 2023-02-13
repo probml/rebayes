@@ -284,7 +284,6 @@ def normalise_dataset(data, target_variable, frac_train, seed, target_normalise=
     return train, test
 
 
-
 def load_uci_wine_regression(color="all", frac_train=0.8, include_color=False, seed=314, normalise=True):
     """
     https://archive.ics.uci.edu/ml/datasets/wine+quality
