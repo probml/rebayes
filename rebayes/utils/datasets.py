@@ -360,8 +360,13 @@ def load_uci_naval(target_variable="ship_speed", frac_train=0.8, seed=314):
     return data
 
 
-def load_uci_kin8nm():
-    ...
+def load_uci_kin8nm(frac_train=0.8, seed=314):
+    url = "https://www.openml.org/data/get_csv/3626/dataset_2175_kin8nm.arff"
+    target_variable = "y"
+    data = pd.read_csv(url)
+
+    data = normalise_dataset(data, target_variable, frac_train, seed)    
+    return data
 
 
 def load_uci_power():
