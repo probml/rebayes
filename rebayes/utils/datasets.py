@@ -245,7 +245,7 @@ def load_1d_synthetic_dataset(n_train=100, n_test=100, key=0, trenches=False, so
     return (X_train, y_train), (X_test, y_test)
 
 
-def normalise_dataset(data, target_variable, frac_train, seed):
+def normalise_dataset(data, target_variable, frac_train, seed, target_normalise=True):
     """
     Randomise a dataframe, normalise by column and transform to jax arrays
     """
@@ -269,8 +269,9 @@ def normalise_dataset(data, target_variable, frac_train, seed):
     X_train = (X_train - mean) / std
     X_test = (X_test - mean) / std
 
-    y_train = (y_train - mean_y) / std_y
-    y_test = (y_test - mean_y) / std_y
+    if target_normalise:
+        y_train = (y_train - mean_y) / std_y
+        y_test = (y_test - mean_y) / std_y
 
     # Convert to jax arrays
     X_train = jnp.array(X_train)
@@ -392,5 +393,12 @@ def load_uci_protein():
     ...
 
 
-def load_uci_spam():
-    ...
+def load_uci_spam(frac_train=0.8, seed=314):
+    """
+    https://archive.ics.uci.edu/ml/datasets/spambase
+    """
+    target_variable = 57
+    url = "https://archive.ics.uci.edu/ml/machine-learning-databases/spambase/spambase.data"
+    data = pd.read_csv(url, header=None)
+    data = normalise_dataset(data, target_variable, frac_train, seed, target_normalise=False)
+    return data
