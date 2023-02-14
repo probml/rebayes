@@ -122,8 +122,8 @@ class Rebayes(ABC):
         num_timesteps = X.shape[0]
         
         def step(bel, t):
-            pred_obs = self.predict_obs(bel, X[t])
             bel = self.predict_state(bel)
+            pred_obs = self.predict_obs(bel, X[t])
             bel = self.update_state(bel, X[t], Y[t])
             out = None
             if callback is not None:
