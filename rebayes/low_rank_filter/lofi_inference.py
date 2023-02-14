@@ -44,6 +44,34 @@ _project_to_columns = lambda A, x: \
     jnp.where(A.any(), vmap(_project, (1, None))(A, x).sum(axis=0), jnp.zeros(shape=x.shape))
 
 
+def _invert_2x2_block_matrix(M, lr_block_dim):
+    """Invert a 2x2 block matrix. The matrix is assumed to be of the form:
+    [[A, b],
+    [b.T, c]]
+    where A is a diagonal matrix.
+
+    Args:
+        M (2, 2): 2x2 block matrix.
+        lr_block_dim (int): Dimension of the lower right block.
+        
+    Returns:
+        (2, 2): Inverse of the 2x2 block matrix.
+    """
+    m, n = M.shape
+    A = M[:m-lr_block_dim, :n-lr_block_dim]
+    B = M[:m-lr_block_dim, n-lr_block_dim:]
+    D = M[m-lr_block_dim:, n-lr_block_dim:]
+    a = 1/jnp.diag(A)
+    K_inv = jnp.linalg.inv(D - (a*B.T) @ B)
+
+    B_inv = - (a * B.T).T @ K_inv
+    A_inv = jnp.diag(a) + (a * B.T).T @ K_inv @ (a * B.T)
+    C_inv = -K_inv @ (a * B.T)
+    D_inv = K_inv
+
+    return jnp.block([[A_inv, B_inv], [C_inv, D_inv]])
+
+
 def _orfit_condition_on(m, U, Sigma, apply_fn, x, y, sv_threshold):
     """Condition on the emission using orfit
 
@@ -114,7 +142,7 @@ def _lofi_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_thres
     H = _jacrev_2d(m_Y, m)
     W_tilde = jnp.hstack([Sigma * U, (H.T @ A).reshape(U.shape[0], -1)])
     S = eta*jnp.eye(W_tilde.shape[1]) + W_tilde.T @ W_tilde
-    K = (H.T @ A) @ A.T - W_tilde @ (jnp.linalg.pinv(S) @ (W_tilde.T @ ((H.T @ A) @ A.T)))
+    K = (H.T @ A) @ A.T - W_tilde @ (_invert_2x2_block_matrix(S, yhat.shape[0]) @ (W_tilde.T @ ((H.T @ A) @ A.T)))
 
     m_cond = m + K/eta @ (y - yhat)
 
@@ -166,7 +194,7 @@ def _aov_lofi_condition_on(m, U, Sigma, eta, y_cond_mean, x, y, sv_threshold):
     H = _jacrev_2d(m_Y, m)
     W_tilde = jnp.hstack([Sigma * U, (H.T).reshape(U.shape[0], -1)])
     S = eta*jnp.eye(W_tilde.shape[1]) + W_tilde.T @ W_tilde
-    K = H.T - W_tilde @ (jnp.linalg.pinv(S) @ (W_tilde.T @ H.T))
+    K = H.T - W_tilde @ (_invert_2x2_block_matrix(S, yhat.shape[0]) @ (W_tilde.T @ H.T))
 
     m_cond = m + K/eta @ (y - yhat)
 
@@ -375,7 +403,7 @@ def low_rank_filter_with_adaptive_observation_variance(
     m_Y = model_params.emission_mean_function
     gamma = model_params.dynamics_weights
     assert isinstance(gamma, float), "Dynamics decay and noise terms must be scalars."
-    nu, rho = 0, 0
+    nu, rho = 0.0, 0.0
 
     # Steady-state constraint
     q = (1 - gamma**2) / eta
@@ -386,17 +414,83 @@ def low_rank_filter_with_adaptive_observation_variance(
         # Get input and emission and compute Jacobians
         x, y = inputs[t], emissions[t]
 
+        # Predict the next state
+        pred_mean, pred_Sigma = _lofi_predict(mean, Sigma, gamma, q)
+
         # Condition on the emission
         filtered_mean, filtered_U, filtered_Sigma = \
             _aov_lofi_condition_on(
-                mean, U, Sigma, eta, m_Y, x, y, sv_threshold
+                pred_mean, U, pred_Sigma, eta, m_Y, x, y, sv_threshold
             )
 
+        # Marginalize
+        nu, rho, tau = _aov_lofi_marginalize(filtered_mean, filtered_U, filtered_Sigma, eta, m_Y, x, y, nu, rho)
+
+        return (pred_mean, filtered_U, pred_Sigma, nu, rho), (filtered_mean, filtered_U, filtered_Sigma, tau)
+    
+    # Run ORFit
+    carry = (initial_mean, U, Sigma, nu, rho)
+    _, (filtered_means, filtered_bases, filtered_Sigmas, filtered_taus) = scan(_step, carry, jnp.arange(len(inputs)))
+    filtered_posterior = PosteriorLoFiFiltered(
+        filtered_means=filtered_means, 
+        filtered_bases=filtered_bases,
+        filtered_sigmas=filtered_Sigmas,
+        filtered_taus=filtered_taus,
+    )
+
+    return filtered_posterior
+
+
+def low_rank_filter_full_svd(
+    model_params: RebayesParams,
+    inf_params: LoFiParams,
+    emissions: Float[Array, "ntime emission_dim"],
+    inputs: Float[Array, "ntime input_dim"]
+) -> PosteriorLoFiFiltered:
+    """Low-rank filter algorithm with full SVD.
+
+    Args:
+        model_params (RebayesParams): Model parameters.
+        inf_params (LoFiParams): Inference parameters that specify the 
+            memory buffer size and singular value threshold.
+        emissions (Float[Array]): Array of observations.
+        inputs (Float[Array]): Array of inputs.
+
+    Returns:
+        filtered_posterior: Posterior object.
+    """
+    # Initialize parameters
+    initial_mean, initial_cov = model_params.initial_mean, model_params.initial_covariance
+    assert isinstance(initial_cov, float) and initial_cov > 0, "Initial covariance must be a positive scalar."
+    eta = 1/initial_cov
+    m, sv_threshold = inf_params
+    U, Sigma = jnp.zeros((len(initial_mean), m)), jnp.zeros((m,))
+
+    m_Y = model_params.emission_mean_function
+    gamma = model_params.dynamics_weights
+    assert isinstance(gamma, float), "Dynamics decay term must be a scalar."
+    nu, rho = 0.0, 0.0
+    
+    # Steady-state constraint
+    q = (1 - gamma**2) / eta
+
+    def _step(carry, t):
+        mean, U, Sigma, nu, rho = carry
+
+        # Get input and emission and compute Jacobians
+        x, y = inputs[t], emissions[t]
+
         # Predict the next state
-        pred_mean, pred_Sigma = _lofi_predict(filtered_mean, filtered_Sigma, gamma, q)
+        pred_mean, pred_Sigma = _lofi_predict(mean, Sigma, gamma, q)
+
+        # Condition on the emission
+        filtered_mean, filtered_U, filtered_Sigma = \
+            _aov_lofi_condition_on(
+                pred_mean, U, pred_Sigma, eta, m_Y, x, y, sv_threshold
+            )
 
         # Marginalize
-        nu, rho, tau = _aov_lofi_marginalize(pred_mean, filtered_U, pred_Sigma, eta, m_Y, x, y, nu, rho)
+        nu, rho, tau = _aov_lofi_marginalize(filtered_mean, filtered_U, filtered_Sigma, eta, m_Y, x, y, nu, rho)
 
         return (pred_mean, filtered_U, pred_Sigma, nu, rho), (filtered_mean, filtered_U, filtered_Sigma, tau)
     
