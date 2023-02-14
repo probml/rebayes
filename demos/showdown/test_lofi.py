@@ -41,6 +41,8 @@ def bbf(
 
     bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
     metric = callback(bel, **test_callback_kwargs)["test"].item()
+    isna = np.isnan(metric)
+    metric = 10 if isna else metric
     return -metric
 
 
