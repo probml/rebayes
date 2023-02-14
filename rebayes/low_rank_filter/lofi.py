@@ -12,7 +12,8 @@ from rebayes.low_rank_filter.lofi_inference import (
     _lofi_condition_on,
     _lofi_predict,
     _aov_lofi_condition_on,
-    _aov_lofi_marginalize,
+    _lofi_marginalize,
+    _full_svd_lofi_condition_on,
 )
 
 
@@ -111,7 +112,14 @@ class RebayesLoFi(Rebayes):
             m_cond, U_cond, Sigma_cond = _aov_lofi_condition_on(
                 m, U, Sigma, self.eta, self.model_params.emission_mean_function, u, y, self.sv_threshold
             )
-            nu, rho, tau = _aov_lofi_marginalize(
+            nu, rho, tau = _lofi_marginalize(
                 m_cond, U_cond, Sigma_cond, self.eta, self.model_params.emission_mean_function, u, y, nu, rho
             )    
+        elif self.method == 'full_svd_lofi':
+            m_cond, U_cond, Sigma_cond = _full_svd_lofi_condition_on(
+                m, U, Sigma, self.eta, self.model_params.emission_mean_function, u, y, self.sv_threshold
+            )
+            nu, rho, tau = _lofi_marginalize(
+                m_cond, U_cond, Sigma_cond, self.eta, self.model_params.emission_mean_function, u, y, nu, rho
+            )
         return LoFiBel(mean=m_cond, basis=U_cond, sigma=Sigma_cond, nu=nu, rho=rho, tau=tau)
