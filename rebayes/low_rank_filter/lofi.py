@@ -87,12 +87,12 @@ class RebayesLoFi(Rebayes):
         else:
             lamb = (sigma**2)/(self.eta**2 * jnp.ones(sigma.shape) + self.eta * sigma**2)
             HU = H @ U
-            HSHT = H @ H.T/self.eta - (lamb * HU) @ (HU).T
+            V_epi = H @ H.T/self.eta - (lamb * HU) @ (HU).T
             if self.method == 'lofi':
                 R = jnp.atleast_2d(Cov_Y(m))
-                Sigma_obs = HSHT + R
+                Sigma_obs = V_epi + R
             else:
-                Sigma_obs = tau * HSHT
+                Sigma_obs = tau * V_epi + tau * jnp.eye(y_pred.shape[0])
         
         return Gaussian(mean=y_pred, cov=Sigma_obs) # TODO: regression/classification separation (reg:mean / var, class: dist)
 

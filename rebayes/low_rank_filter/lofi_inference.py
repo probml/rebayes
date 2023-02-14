@@ -282,14 +282,13 @@ def _lofi_marginalize(m, U, Sigma, eta, y_cond_mean, x, y, nu, rho):
     
     yhat = jnp.atleast_1d(m_Y(m))
     H = _jacrev_2d(m_Y, m)
-    W_tilde = jnp.hstack([Sigma * U, (H.T).reshape(U.shape[0], -1)])
-    S = eta*jnp.eye(W_tilde.shape[1]) + W_tilde.T @ W_tilde
-    K = H.T - W_tilde @ (jnp.linalg.pinv(S) @ (W_tilde.T @ H.T))
 
-    # Marginalize
-    HSHT = 1/eta * H @ K
+    lamb = (Sigma**2)/(eta**2 * jnp.ones(Sigma.shape) + eta * Sigma**2)
+    HU = H @ U
+    V_epi = H @ H.T/eta - (lamb * HU) @ (HU).T
+
     nu += yhat.shape[0]
-    rho += (y - yhat).T @ (jnp.eye(yhat.shape[0]) + HSHT) @ (y - yhat)
+    rho += (y - yhat).T @ (jnp.eye(yhat.shape[0]) + V_epi) @ (y - yhat)
     tau = rho/nu
 
     return nu, rho, tau
