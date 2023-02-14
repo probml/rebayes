@@ -61,7 +61,7 @@ def bbf(
 
 
     if method == "fdekf":
-        initial_covariance = initial_covariance * jnp.eye(num_params)
+        initial_covariance = initial_covariance * jnp.ones(num_params)
     elif method == "fcekf":
         Ip = jnp.eye(num_params)
         initial_covariance = initial_covariance * Ip
