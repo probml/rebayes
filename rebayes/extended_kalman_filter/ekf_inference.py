@@ -73,6 +73,25 @@ def _stationary_dynamics_diagonal_predict(m, P_diag, Q_diag):
     return mu_pred, Sigma_pred
 
 
+def _non_stationary_dynamics_diagonal_predict(m, P_diag, Q_diag, gamma):
+    """Predict the next state using a non-stationary dynamics model with diagonal covariance matrices.
+
+    Args:
+        m (D_hid,): Prior mean.
+        P_diag (D_hid,): Diagonal elements of prior covariance.
+        Q_diag (D_hid,): Diagonal elements of dynamics covariance.
+        f (Callable): Dynamics function.
+        u (D_in,): Control input.
+
+    Returns:
+        mu_pred (D_hid,): Predicted mean.
+        Sigma_pred (D_hid,): Predicted covariance diagonal elements.
+    """
+    mu_pred = gamma * m
+    Sigma_pred = gamma**2 * P_diag + Q_diag
+    return mu_pred, Sigma_pred
+
+
 #### Fully-decoupled EKF
 def _fully_decoupled_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, num_iter):
     """Condition on the emission using a fully decoupled EKF.

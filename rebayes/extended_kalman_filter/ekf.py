@@ -8,6 +8,7 @@ from rebayes.extended_kalman_filter.ekf_inference import (
     _full_covariance_condition_on,
     _fully_decoupled_ekf_condition_on,
     _variational_diagonal_ekf_condition_on,
+    _non_stationary_dynamics_diagonal_predict,
 )
 
 
@@ -27,12 +28,11 @@ class RebayesEKF(Rebayes):
         if self.method == 'fcekf':
             return super().predict_state(bel)
 
-        # Diagonal EKF: assume that dynamics weights and covariance are given by 1d vector
+        # Diagonal EKF: assume that dynamics weights are given by a float decay factor.
         m, P = bel.mean, bel.cov 
-        F = self.params.dynamics_weights
+        gamma = self.params.dynamics_weights
         Q = self.params.dynamics_covariance
-        pred_mean = F * m
-        pred_cov = F**2 * P + Q
+        pred_mean, pred_cov = _non_stationary_dynamics_diagonal_predict(m, P, Q, gamma)
         return Gaussian(mean=pred_mean, cov=pred_cov)
 
     @partial(jit, static_argnums=(0,))
