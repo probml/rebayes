@@ -220,7 +220,46 @@ def _aov_lofi_condition_on(m, U, Sigma, eta, y_cond_mean, x, y, sv_threshold):
     return m_cond, U_cond, Sigma_cond
 
 
-def _aov_lofi_marginalize(m, U, Sigma, eta, y_cond_mean, x, y, nu, rho):
+def _full_svd_lofi_condition_on(m, U, Sigma, eta, y_cond_mean, x, y, sv_threshold):
+    """Condition step of the low-rank filter with adaptive observation variance.
+
+    Args:
+        m (D_hid,): Prior mean.
+        U (D_hid, D_mem,): Prior basis.
+        Sigma (D_mem,): Prior singular values.
+        eta (float): Prior precision. 
+        y_cond_mean (Callable): Conditional emission mean function.
+        y_cond_cov (Callable): Conditional emission covariance function.
+        x (D_in,): Control input.
+        y (D_obs,): Emission.
+        sv_threshold (float): Threshold for singular values.
+
+    Returns:
+        m_cond (D_hid,): Posterior mean.
+        U_cond (D_hid, D_mem,): Posterior basis.
+        Sigma_cond (D_mem,): Posterior singular values.
+        yhat (D_obs,): Emission mean.
+    """
+    m_Y = lambda w: y_cond_mean(w, x)
+    
+    yhat = jnp.atleast_1d(m_Y(m))
+    H = _jacrev_2d(m_Y, m)
+    W_tilde = jnp.hstack([Sigma * U, (H.T).reshape(U.shape[0], -1)])
+
+    # Update the U matrix
+    u, s, _ = jnp.linalg.svd(W_tilde, full_matrices=False)
+    U_cond = u[:, :U.shape[1]]
+    Sigma_cond = s[:U.shape[1]]
+
+    lamb = (Sigma_cond**2)/(eta**2 * jnp.ones(Sigma_cond.shape) + eta * Sigma_cond**2)
+    K = H.T/eta - (lamb * U_cond) @ (U_cond.T @ H.T)
+
+    m_cond = m + K @ (y - yhat)
+
+    return m_cond, U_cond, Sigma_cond
+
+
+def _lofi_marginalize(m, U, Sigma, eta, y_cond_mean, x, y, nu, rho):
     """Marginalization step of the low-rank filter with adaptive observation variance.
 
     Args:
@@ -424,7 +463,7 @@ def low_rank_filter_with_adaptive_observation_variance(
             )
 
         # Marginalize
-        nu, rho, tau = _aov_lofi_marginalize(filtered_mean, filtered_U, filtered_Sigma, eta, m_Y, x, y, nu, rho)
+        nu, rho, tau = _lofi_marginalize(filtered_mean, filtered_U, filtered_Sigma, eta, m_Y, x, y, nu, rho)
 
         return (pred_mean, filtered_U, pred_Sigma, nu, rho), (filtered_mean, filtered_U, filtered_Sigma, tau)
     
@@ -485,12 +524,12 @@ def low_rank_filter_full_svd(
 
         # Condition on the emission
         filtered_mean, filtered_U, filtered_Sigma = \
-            _aov_lofi_condition_on(
+            _full_svd_lofi_condition_on(
                 pred_mean, U, pred_Sigma, eta, m_Y, x, y, sv_threshold
             )
 
         # Marginalize
-        nu, rho, tau = _aov_lofi_marginalize(filtered_mean, filtered_U, filtered_Sigma, eta, m_Y, x, y, nu, rho)
+        nu, rho, tau = _lofi_marginalize(filtered_mean, filtered_U, filtered_Sigma, eta, m_Y, x, y, nu, rho)
 
         return (pred_mean, filtered_U, pred_Sigma, nu, rho), (filtered_mean, filtered_U, filtered_Sigma, tau)
     

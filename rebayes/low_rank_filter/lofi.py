@@ -37,14 +37,14 @@ class RebayesLoFi(Rebayes):
         self.nu, self.rho, self.tau = None, None, None
         if method == 'orfit':
             pass
-        elif method == 'lofi' or method == 'aov_lofi':
+        elif method == 'lofi' or method == 'aov_lofi' or method == 'full_svd_lofi':
             initial_cov = model_params.initial_covariance
             assert isinstance(initial_cov, float) and initial_cov > 0, "Initial covariance must be a positive scalar."
             self.eta = 1/initial_cov
             self.gamma = model_params.dynamics_weights
             assert isinstance(self.gamma, float), "Dynamics decay term must be a scalar."
             self.q = (1 - self.gamma**2) / self.eta
-            if method == 'aov_lofi':
+            if method == 'aov_lofi' or method == 'full_svd_lofi':
                 self.nu, self.rho, self.tau = 0.0, 0.0, 0.0
         else:
             raise ValueError(f"Unknown method {method}.")
@@ -72,17 +72,26 @@ class RebayesLoFi(Rebayes):
 
     @partial(jit, static_argnums=(0,))
     def predict_obs(self, bel, u):
-        m, U = bel.mean, bel.basis
+        m, U, sigma, tau = bel.mean, bel.basis, bel.sigma, bel.tau
         m_Y = lambda z: self.model_params.emission_mean_function(z, u)
         Cov_Y = lambda z: self.model_params.emission_cov_function(z, u)
         
+        # Predicted mean
         y_pred = jnp.atleast_1d(m_Y(m))
-        H =  _jacrev_2d(m_Y, m)
-        Sigma_obs = H @ H.T - (H @ U) @ (H @ U).T
 
-        if self.method == 'lofi':
-            R = jnp.atleast_2d(Cov_Y(m))
-            Sigma_obs += R
+        # Predicted covariance
+        H =  _jacrev_2d(m_Y, m)
+        if self.method == 'orfit':
+            Sigma_obs = H @ H.T - (H @ U) @ (H @ U).T
+        else:
+            lamb = (sigma**2)/(self.eta**2 * jnp.ones(sigma.shape) + self.eta * sigma**2)
+            HU = H @ U
+            HSHT = H @ H.T/self.eta - (lamb * HU) @ (HU).T
+            if self.method == 'lofi':
+                R = jnp.atleast_2d(Cov_Y(m))
+                Sigma_obs = HSHT + R
+            else:
+                Sigma_obs = tau * HSHT
         
         return Gaussian(mean=y_pred, cov=Sigma_obs) # TODO: regression/classification separation (reg:mean / var, class: dist)
 
