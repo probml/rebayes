@@ -11,7 +11,6 @@ def bbf(
     log_init_cov,
     dynamics_weights,
     log_emission_cov,
-    log_dynamics_cov,
     # Specify before running
     train,
     test,
@@ -32,7 +31,7 @@ def bbf(
         initial_mean=flat_params,
         initial_covariance=jnp.exp(log_init_cov).item(),
         dynamics_weights=dynamics_weights,
-        dynamics_covariance=jnp.exp(log_dynamics_cov),
+        dynamics_covariance=None,
         emission_mean_function=apply_fn,
         emission_cov_function=lambda w, x: jnp.exp(log_emission_cov),
     )
@@ -80,11 +79,11 @@ def create_optimizer(
         method=method
     )
     
-    # Fix log-dynamics covariance to dummy if adaptive
+    # Fix log-emission-covariance to dummy if adaptive
     if params_lofi.adaptive_variance == True:
         bbf_partial = partial(
             bbf_partial,
-            log_dynamics_cov=0.0,
+            log_emission_cov=0.0,
         )
 
     optimizer = BayesianOptimization(
@@ -99,9 +98,9 @@ def create_optimizer(
 def get_best_params(n_params, optimizer):
     max_params = optimizer.max["params"].copy()
 
-    dynamics_cov = np.exp(max_params.get("log_dynamics_cov", 0.0))
+    dynamics_cov = None
     init_cov = np.exp(max_params["log_init_cov"]).item()
-    emission_cov = np.exp(max_params["log_emission_cov"])
+    emission_cov = np.exp(max_params.get("log_emission_cov", 0.0))
     dynamics_weights = max_params["dynamics_weights"]
 
     hparams = {

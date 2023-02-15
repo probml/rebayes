@@ -8,32 +8,10 @@ from bayes_opt import BayesianOptimization
 from rebayes.extended_kalman_filter import ekf
 
 
-def transform_params(
-    initial_covariance,
-    dynamics_weights,
-    dynamics_covariance,
-    num_params,
-    method, 
-):
-    """
-    Transform parameters to be positive.
-    """
-    if method == "fdekf":
-        initial_covariance = initial_covariance * jnp.ones(num_params)
-    elif method == "fcekf":
-        Ip = jnp.eye(num_params)
-        initial_covariance = initial_covariance * Ip
-        dynamics_weights = dynamics_weights * Ip
-        dynamics_covariance = dynamics_covariance * Ip
-    
-    return initial_covariance, dynamics_weights, dynamics_covariance
-
-
 def bbf(
     log_init_cov,
     dynamics_weights,
     log_emission_cov,
-    log_dynamics_cov,
     # Specify before running
     train,
     test,
@@ -48,25 +26,9 @@ def bbf(
     X_train, y_train = train
     X_test, y_test = test
 
+    dynamics_covariance = None
     initial_covariance = jnp.exp(log_init_cov).item()
-    dynamics_covariance = jnp.exp(log_dynamics_cov) # aov-lofi dummy var
     emission_covariance = jnp.exp(log_emission_cov)
-
-    num_params = len(flat_params)
-
-    covs = transform_params(
-        initial_covariance, dynamics_covariance, dynamics_weights, num_params, method
-    )
-    initial_covariance, dynamics_covariance, dynamics_weights = covs
-
-
-    if method == "fdekf":
-        initial_covariance = initial_covariance * jnp.ones(num_params)
-    elif method == "fcekf":
-        Ip = jnp.eye(num_params)
-        initial_covariance = initial_covariance * Ip
-        dynamics_weights = dynamics_weights * Ip
-        dynamics_covariance = dynamics_covariance * Ip
 
     test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
     params_rebayes = base.RebayesParams(
@@ -129,15 +91,10 @@ def create_optimizer(
 def get_best_params(num_params, optimizer, method="fdekf"):
     max_params = optimizer.max["params"].copy()
 
+    dynamics_covariance = None
     initial_covariance = np.exp(max_params["log_init_cov"])
-    emission_cov = np.exp(max_params["log_emission_cov"])
-    dynamics_covariance = np.exp(max_params["log_dynamics_cov"])
     dynamics_weights = max_params["dynamics_weights"]
-
-    covs = transform_params(
-        initial_covariance, dynamics_covariance, dynamics_weights, num_params, method
-    )
-    initial_covariance, dynamics_covariance, dynamics_weights = covs
+    emission_cov = np.exp(max_params.get("log_emission_cov", 0.0))
 
     hparams = {
         "initial_covariance": initial_covariance,
