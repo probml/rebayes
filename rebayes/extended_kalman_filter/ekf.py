@@ -1,56 +1,85 @@
 from functools import partial
-from jax import jit
+from jax import jit, lax, jacrev, vmap
 from jax import numpy as jnp
 from jaxtyping import Float, Array
+from tensorflow_probability.substrates.jax.distributions import MultivariateNormalDiag as MVN
+import chex
 
+from dynamax.linear_gaussian_ssm.inference import PosteriorGSSMFiltered
 from rebayes.base import _jacrev_2d, Rebayes, RebayesParams, Gaussian
-from rebayes.extended_kalman_filter.ekf_inference import (
-    _full_covariance_condition_on,
-    _fully_decoupled_ekf_condition_on,
-    _variational_diagonal_ekf_condition_on,
-    _non_stationary_dynamics_diagonal_predict,
-)
+
+
+# Helper functions
+_get_params = lambda x, dim, t: x[t] if x.ndim == dim + 1 else x
+_process_fn = lambda f, u: (lambda x, y: f(x)) if u is None else f
+_process_input = lambda x, y: jnp.zeros((y,)) if x is None else x
+_jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
+
+
+@chex.dataclass
+class EKFBel:
+    mean: chex.Array
+    cov: chex.Array
+    nu: float = None
+    rho: float = None
 
 
 class RebayesEKF(Rebayes):
     def __init__(
         self,
         params: RebayesParams,
-        method: str
+        method: str,
+        adaptive_variance: bool = False,
     ):
         self.params = params
         self.method = method
         if method not in ['fcekf', 'vdekf', 'fdekf']:
             raise ValueError('unknown method ', method)
+        self.gamma = params.dynamics_weights
+        assert isinstance(self.gamma, float), "Dynamics decay term must be a scalar."
+        self.Q = params.dynamics_covariance
+        self.adaptive_variance = adaptive_variance
+        self.nu, self.rho = 0.0, 0.0
+
+    def init_bel(self):
+        return EKFBel(
+            mean=self.params.initial_mean, 
+            cov=self.params.initial_covariance,
+            nu=self.nu,
+            rho=self.rho,
+        )
 
     @partial(jit, static_argnums=(0,))
     def predict_state(self, bel):
-        if self.method == 'fcekf':
-            return super().predict_state(bel)
-
-        # Diagonal EKF: assume that dynamics weights are given by a float decay factor.
-        m, P = bel.mean, bel.cov 
-        gamma = self.params.dynamics_weights
-        Q = self.params.dynamics_covariance
-        pred_mean, pred_cov = _non_stationary_dynamics_diagonal_predict(m, P, Q, gamma)
-        return Gaussian(mean=pred_mean, cov=pred_cov)
+        m, P, nu, rho = bel.mean, bel.cov, bel.nu, bel.rho
+        pred_mean, pred_cov = _non_stationary_dynamics_predict(m, P, self.Q, self.gamma)
+        return EKFBel(mean=pred_mean, cov=pred_cov, nu=nu, rho=rho)
 
     @partial(jit, static_argnums=(0,))
     def predict_obs(self, bel, u):
-        if self.method == 'fcekf':
-            return super().predict_obs(bel, u)
-        
-        # Diagonal EKF: assume that dynamics weights and covariance are given by 1d vector
-        prior_mean, prior_cov = bel.mean, bel.cov 
+        prior_mean, prior_cov, nu, rho = bel.mean, bel.cov, bel.nu, bel.rho
         m_Y = lambda z: self.params.emission_mean_function(z, u)
         Cov_Y = lambda z: self.params.emission_cov_function(z, u)
 
-        yhat = jnp.atleast_1d(m_Y(prior_mean))
-        R = jnp.atleast_2d(Cov_Y(prior_mean))
-        H =  _jacrev_2d(m_Y, prior_mean)
+        # Predicted mean
+        y_pred = jnp.atleast_1d(m_Y(prior_mean))
 
-        Sigma_obs = (prior_cov * H) @ H.T + R
-        return Gaussian(mean=yhat, cov=Sigma_obs)
+        # Predicted covariance
+        H =  _jacrev_2d(m_Y, prior_mean)
+        if self.adaptive_variance:
+            R = jnp.eye(y_pred.shape[0])
+        else:
+            R = jnp.atleast_2d(Cov_Y(prior_mean))
+        tau = jnp.where(jnp.isfinite(jnp.divide(rho, nu)), jnp.divide(rho, nu), 1.0)
+        
+        if self.method == 'fcekf':
+            V_epi = H @ prior_cov @ H.T
+        else:
+            V_epi = (prior_cov * H) @ H.T
+
+        Sigma_obs = tau * V_epi + tau * R
+
+        return Gaussian(mean=y_pred, cov=Sigma_obs)
 
     @partial(jit, static_argnums=(0,))
     def update_state(self, bel, u, y):
@@ -60,6 +89,320 @@ class RebayesEKF(Rebayes):
             self.update_fn = _variational_diagonal_ekf_condition_on
         elif self.method == 'fdekf':
             self.update_fn = _fully_decoupled_ekf_condition_on
-        m, P = bel.mean, bel.cov # p(z(t) | y(1:t-1))
-        mu, Sigma = self.update_fn(m, P, self.params.emission_mean_function, self.params.emission_cov_function, u, y, num_iter=1)
-        return Gaussian(mean=mu, cov=Sigma)
+        m, P, nu, rho = bel.mean, bel.cov, bel.nu, bel.rho
+        mu, Sigma = self.update_fn(m, P, self.params.emission_mean_function, 
+                                   self.params.emission_cov_function, u, y, 
+                                   num_iter=1, adaptive_variance=self.adaptive_variance)
+        nu, rho = _ekf_update_noise(mu, Sigma, self.params.emission_mean_function, 
+                                    self.params.emission_cov_function, u, y, num_iter=1,
+                                    nu=nu, rho=rho, adaptive_variance=self.adaptive_variance)
+        return EKFBel(mean=mu, cov=Sigma, nu=nu, rho=rho)
+
+
+def _full_covariance_condition_on(m, P, y_cond_mean, y_cond_cov, u, y, num_iter, adaptive_variance=False):
+    """Condition on the emission using a full-covariance EKF.
+    Note that this method uses `jnp.linalg.lstsq()` to solve the linear system
+    to avoid numerical issues with `jnp.linalg.solve()`.
+
+    Args:
+        m (D_hid,): Prior mean.
+        P (D_hid, D_hid): Prior covariance.
+        y_cond_mean (Callable): Conditional emission mean function.
+        y_cond_cov (Callable): Conditional emission covariance function.
+        u (D_in,): Control input.
+        y (D_obs,): Emission.
+        num_iter (int): Number of re-linearizations around posterior.
+        adaptive_variance (bool): Whether to use adaptive variance.
+
+    Returns:
+        mu_cond (D_hid,): Posterior mean.
+        Sigma_cond (D_hid, D_hid): Posterior covariance.
+    """    
+    m_Y = lambda x: y_cond_mean(x, u)
+    Cov_Y = lambda x: y_cond_cov(x, u)
+
+    def _step(carry, _):
+        prior_mean, prior_cov = carry
+        yhat = jnp.atleast_1d(m_Y(prior_mean))
+        if adaptive_variance:
+            R = jnp.eye(yhat.shape[0])
+        else:
+            R = jnp.atleast_2d(Cov_Y(prior_mean))
+        H =  _jacrev_2d(m_Y, prior_mean)
+        S = R + (H @ prior_cov @ H.T)
+        C = prior_cov @ H.T
+        K = jnp.linalg.lstsq(S, C.T)[0].T
+        posterior_mean = prior_mean + K @ (y - yhat)
+        posterior_cov = prior_cov - K @ S @ K.T
+        return (posterior_mean, posterior_cov), _
+
+    # Iterate re-linearization over posterior mean and covariance
+    carry = (m, P)
+    (mu_cond, Sigma_cond), _ = lax.scan(_step, carry, jnp.arange(num_iter))
+    return mu_cond, Sigma_cond
+
+
+def _fully_decoupled_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, num_iter, adaptive_variance=False):
+    """Condition on the emission using a fully decoupled EKF.
+
+    Args:
+        m (D_hid,): Prior mean.
+        P_diag (D_hid,): Diagonal elements of prior covariance.
+        y_cond_mean (Callable): Conditional emission mean function.
+        y_cond_cov (Callable): Conditional emission covariance function.
+        u (D_in,): Control input.
+        y (D_obs,): Emission.
+        num_iter (int): Number of re-linearizations around posterior.
+        adaptive_variance (bool): Whether to use adaptive variance.
+
+    Returns:
+        mu_cond (D_hid,): Posterior mean.
+        Sigma_cond (D_hid,): Posterior covariance diagonal elements.
+    """    
+    m_Y = lambda x: y_cond_mean(x, u)
+    Cov_Y = lambda x: y_cond_cov(x, u)
+
+    def _step(carry, _):
+        prior_mean, prior_cov = carry
+        yhat = jnp.atleast_1d(m_Y(prior_mean))
+        if adaptive_variance:
+            R = jnp.eye(yhat.shape[0])
+        else:
+            R = jnp.atleast_2d(Cov_Y(prior_mean))
+        H =  _jacrev_2d(m_Y, prior_mean)
+        S = R + (vmap(lambda hh, pp: pp * jnp.outer(hh, hh), (1, 0))(H, prior_cov)).sum(axis=0)
+        K = prior_cov[:, None] * jnp.linalg.lstsq(S.T, H)[0].T
+        posterior_mean = prior_mean + K @ (y - yhat)
+        posterior_cov = prior_cov - prior_cov * vmap(lambda kk, hh: kk @ hh, (0, 1))(K, H)
+        return (posterior_mean, posterior_cov), _
+
+    # Iterate re-linearization over posterior mean and covariance
+    carry = (m, P_diag)
+    (mu_cond, Sigma_cond), _ = lax.scan(_step, carry, jnp.arange(num_iter))
+    return mu_cond, Sigma_cond
+
+
+def _variational_diagonal_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, num_iter, adaptive_variance=False):
+    """Condition on the emission using a variational diagonal EKF.
+
+    Args:
+        m (D_hid,): Prior mean.
+        P_diag (D_hid,): Diagonal elements of prior covariance.
+        y_cond_mean (Callable): Conditional emission mean function.
+        y_cond_cov (Callable): Conditional emission covariance function.
+        u (D_in,): Control input.
+        y (D_obs,): Emission.
+        num_iter (int): Number of re-linearizations around posterior.
+        adaptive_variance (bool): Whether to use adaptive variance.
+
+    Returns:
+        mu_cond (D_hid,): Posterior mean.
+        Sigma_cond (D_hid,): Posterior covariance diagonal elements.
+    """    
+    m_Y = lambda x: y_cond_mean(x, u)
+    Cov_Y = lambda x: y_cond_cov(x, u)
+
+    def _step(carry, _):
+        prior_mean, prior_cov = carry
+        yhat = jnp.atleast_1d(m_Y(prior_mean))
+        if adaptive_variance:
+            R = jnp.eye(yhat.shape[0])
+        else:
+            R = jnp.atleast_2d(Cov_Y(prior_mean))
+        H =  _jacrev_2d(m_Y, prior_mean)
+        K = jnp.linalg.lstsq((R + (prior_cov * H) @ H.T).T, prior_cov * H)[0].T
+        R_inv = jnp.linalg.lstsq(R, jnp.eye(R.shape[0]))[0]
+        posterior_cov = 1/(1/prior_cov + ((H.T @ R_inv) * H.T).sum(-1))
+        posterior_mean = prior_mean + K @(y - yhat)
+        return (posterior_mean, posterior_cov), _
+
+    # Iterate re-linearization over posterior mean and covariance
+    carry = (m, P_diag)
+    (mu_cond, Sigma_cond), _ = lax.scan(_step, carry, jnp.arange(num_iter))
+    return mu_cond, Sigma_cond
+
+
+def _stationary_dynamics_diagonal_predict(m, P_diag, Q_diag):
+    """Predict the next state using a stationary dynamics model with diagonal covariance matrices.
+
+    Args:
+        m (D_hid,): Prior mean.
+        P_diag (D_hid,): Diagonal elements of prior covariance.
+        Q_diag (D_hid,): Diagonal elements of dynamics covariance.
+
+    Returns:
+        mu_pred (D_hid,): Predicted mean.
+        Sigma_pred (D_hid,): Predicted covariance diagonal elements.
+    """
+    mu_pred = m
+    Sigma_pred = P_diag + Q_diag
+    return mu_pred, Sigma_pred
+
+
+def _non_stationary_dynamics_predict(m, P, Q, gamma):
+    """Predict the next state using a non-stationary dynamics model.
+
+    Args:
+        m (D_hid,): Prior mean.
+        P_diag (D_hid, D_hid): Prior covariance.
+        Q_diag (D_hid, D_hid): Dynamics covariance.
+        gamma (float): Dynamics decay.
+
+    Returns:
+        mu_pred (D_hid,): Predicted mean.
+        Sigma_pred (D_hid,): Predicted covariance diagonal elements.
+    """
+    mu_pred = gamma * m
+    Sigma_pred = gamma**2 * P + Q
+    return mu_pred, Sigma_pred
+
+
+def _ekf_update_noise(m, prior_cov, y_cond_mean, y_cond_cov, u, y, num_iter, nu, rho, adaptive_variance=False):
+    """Marginalization step of the extended Kalman filter with adaptive observation variance.
+
+    Args:
+        m (D_hid,): Prior mean.
+        P_diag (D_hid,): Diagonal elements of prior covariance.
+        y_cond_mean (Callable): Conditional emission mean function.
+        y_cond_cov (Callable): Conditional emission covariance function.
+        u (D_in,): Control input.
+        y (D_obs,): Emission.
+        num_iter (int): Number of re-linearizations around posterior.
+        nu (float): Posterior Student's t-distribution degrees of freedom.
+        rho (float): Posterior Student's t-distribution scale parameter.
+        adaptive_variance (bool): Whether to use adaptive variance.
+
+    Returns:
+        nu (float): Posterior Student's t-distribution degrees of freedom.
+        rho (float): Posterior Student's t-distribution scale parameter.
+    """
+    if not adaptive_variance:
+        return 1.0, 1.0
+
+    m_Y = lambda w: y_cond_mean(w, u)
+    
+    yhat = jnp.atleast_1d(m_Y(m))
+    H = _jacrev_2d(m_Y, m)
+    
+    if prior_cov.ndim == 1:
+        # Diagonal EKF
+        V_epi = (prior_cov * H) @ H.T
+    else:
+        # Full-Covariance EKF
+        V_epi = H @ prior_cov @ H.T
+
+    nu += yhat.shape[0]
+    rho += (y - yhat).T @ jnp.linalg.pinv(jnp.eye(yhat.shape[0]) + V_epi) @ (y - yhat)
+
+    return nu, rho
+
+
+def stationary_dynamics_fully_decoupled_conditional_moments_gaussian_filter(
+    model_params: RebayesParams, 
+    emissions: Float[Array, "ntime emission_dim"], 
+    num_iter: int=1, 
+    inputs: Float[Array, "ntime input_dim"]=None,
+    adaptive_variance: bool=False
+) -> PosteriorGSSMFiltered:
+    """Run a fully decoupled EKF on a stationary dynamics model.
+
+    Args:
+        model_params (RebayesParams): Model parameters.
+        emissions (T, D_hid): Sequence of emissions.
+        num_iter (int, optional): Number of linearizations around posterior for update step.
+        inputs (T, D_in, optional): Array of inputs.
+
+    Returns:
+        filtered_posterior: GSSMPosterior instance containing,
+            filtered_means (T, D_hid)
+            filtered_covariances (T, D_hid, D_hid)
+    """    
+    num_timesteps = len(emissions)
+    initial_mean, initial_cov = model_params.initial_mean, model_params.initial_covariance
+    dynamics_cov = model_params.dynamics_covariance
+
+    # Process conditional emission moments to take in control inputs
+    m_Y, Cov_Y = model_params.emission_mean_function, model_params.emission_cov_function
+    m_Y, Cov_Y  = (_process_fn(fn, inputs) for fn in (m_Y, Cov_Y))
+    inputs = _process_input(inputs, num_timesteps)
+    nu, rho = 0.0, 0.0
+
+    def _step(carry, t):
+        pred_mean, pred_cov_diag, nu, rho = carry
+
+        # Get parameters and inputs for time index t
+        Q_diag = _get_params(dynamics_cov, 1, t)
+        u = inputs[t]
+        y = emissions[t]
+
+        # Condition on the emission
+        filtered_mean, filtered_cov_diag = _fully_decoupled_ekf_condition_on(pred_mean, pred_cov_diag, m_Y, Cov_Y, u, y, num_iter)
+
+        # Update observation noise
+        nu, rho = _ekf_update_noise(filtered_mean, filtered_cov_diag, m_Y, Cov_Y, u, y, num_iter, nu, rho, adaptive_variance)
+        tau = jnp.where(jnp.isfinite(jnp.divide(rho, nu)), jnp.divide(rho, nu), 1.0)
+
+        # Predict the next state
+        pred_mean, pred_cov_diag = _stationary_dynamics_diagonal_predict(filtered_mean, filtered_cov_diag, Q_diag)
+
+        return (pred_mean, pred_cov_diag), (filtered_mean, tau*filtered_cov_diag)
+
+    # Run the general linearization filter
+    carry = (initial_mean, initial_cov)
+    _, (filtered_means, filtered_covs) = lax.scan(_step, carry, jnp.arange(num_timesteps))
+    return PosteriorGSSMFiltered(marginal_loglik=None, filtered_means=filtered_means, filtered_covariances=filtered_covs)
+
+
+def stationary_dynamics_variational_diagonal_extended_kalman_filter(
+    model_params: RebayesParams, 
+    emissions: Float[Array, "ntime emission_dim"], 
+    num_iter: int=1, 
+    inputs: Float[Array, "ntime input_dim"]=None,
+    adaptive_variance: bool=False
+) -> PosteriorGSSMFiltered:
+    """Run a variational diagonal EKF on a stationary dynamics model.
+
+    Args:
+        model_params (RebayesParams): Model parameters.
+        emissions (T, D_hid): Sequence of emissions.
+        num_iter (int, optional): Number of linearizations around posterior for update step.
+        inputs (T, D_in, optional): Array of inputs.
+
+    Returns:
+        filtered_posterior: GSSMPosterior instance containing,
+            filtered_means (T, D_hid)
+            filtered_covariances (T, D_hid, D_hid)
+    """    
+    num_timesteps = len(emissions)
+    initial_mean, initial_cov = model_params.initial_mean, model_params.initial_covariance
+    dynamics_cov = model_params.dynamics_covariance
+
+    # Process conditional emission moments to take in control inputs
+    m_Y, Cov_Y = model_params.emission_mean_function, model_params.emission_cov_function
+    m_Y, Cov_Y  = (_process_fn(fn, inputs) for fn in (m_Y, Cov_Y))
+    inputs = _process_input(inputs, num_timesteps)
+
+    def _step(carry, t):
+        pred_mean, pred_cov_diag = carry
+
+        # Get parameters and inputs for time index t
+        Q_diag = _get_params(dynamics_cov, 1, t)
+        u = inputs[t]
+        y = emissions[t]
+
+        # Condition on the emission
+        filtered_mean, filtered_cov_diag = _variational_diagonal_ekf_condition_on(pred_mean, pred_cov_diag, m_Y, Cov_Y, u, y, num_iter)
+
+        # Update observation noise
+        nu, rho = _ekf_update_noise(filtered_mean, filtered_cov_diag, m_Y, Cov_Y, u, y, num_iter, nu, rho, adaptive_variance)
+        tau = jnp.where(jnp.isfinite(jnp.divide(rho, nu)), jnp.divide(rho, nu), 1.0)
+
+        # Predict the next state
+        pred_mean, pred_cov_diag = _stationary_dynamics_diagonal_predict(filtered_mean, filtered_cov_diag, Q_diag)
+
+        return (pred_mean, pred_cov_diag), (filtered_mean, tau * filtered_cov_diag)
+
+    # Run the general linearization filter
+    carry = (initial_mean, initial_cov)
+    _, (filtered_means, filtered_covs) = lax.scan(_step, carry, jnp.arange(num_timesteps))
+    return PosteriorGSSMFiltered(marginal_loglik=None, filtered_means=filtered_means, filtered_covariances=filtered_covs)

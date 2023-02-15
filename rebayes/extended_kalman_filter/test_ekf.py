@@ -95,7 +95,7 @@ def setup_ssm():
     params = RebayesParams(
         initial_mean=mu0,
         initial_covariance=Sigma0,
-        dynamics_weights = jnp.eye(nparams),
+        dynamics_weights = 1.0,
         dynamics_covariance = jnp.zeros((nparams, nparams)),
         emission_mean_function = lambda w, x: apply_fn(w, x),
         emission_cov_function = lambda w, x: obs_var
@@ -107,7 +107,7 @@ def setup_ssm():
 def test_rebayes_loop():
     (X, Y) = make_data()
     params  = setup_ssm()
-    estimator = RebayesEKF(params, method = 'fcekf')
+    estimator = RebayesEKF(params, method='fcekf', adaptive_variance=False)
 
     lgssm_posterior = run_kalman()
     mu_kf = lgssm_posterior.filtered_means
@@ -134,14 +134,14 @@ def test_rebayes_loop():
 def test_rebayes_scan():
     (X, Y) = make_data()
     params  = setup_ssm()
-    estimator = RebayesEKF(params, method = 'fcekf')
+    estimator = RebayesEKF(params, method='fcekf', adaptive_variance=False)
 
     lgssm_posterior = run_kalman()
     mu_kf = lgssm_posterior.filtered_means
     cov_kf = lgssm_posterior.filtered_covariances
     ll_kf = lgssm_posterior.marginal_loglik
 
-    def callback(pred_obs, bel, t, u, y):
+    def callback(bel, pred_obs, t, u, y):
         m, P = pred_obs.mean, pred_obs.cov
         ll = MVN(m, P).log_prob(jnp.atleast_1d(y))
         return ll
