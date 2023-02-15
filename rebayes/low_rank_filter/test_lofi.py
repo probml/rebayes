@@ -5,8 +5,7 @@ import time
 
 from rebayes.utils import datasets
 from rebayes.utils.utils import get_mlp_flattened_params
-from rebayes.low_rank_filter.lofi import RebayesLoFi
-from rebayes.low_rank_filter.lofi_inference import LoFiParams, orthogonal_recursive_fitting
+from rebayes.low_rank_filter.lofi import RebayesLoFi, LoFiParams, orthogonal_recursive_fitting
 from dynamax.generalized_gaussian_ssm.models import ParamsGGSSM
 from dynamax.generalized_gaussian_ssm.inference import EKFIntegrals, conditional_moments_gaussian_filter
 from rebayes.base import RebayesParams
