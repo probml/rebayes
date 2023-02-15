@@ -100,9 +100,9 @@ def create_optimizer(
 ):
     key = jax.random.PRNGKey(random_state)
     X_train, _ = train
-    _, n_params = X_train.shape
+    _, n_features = X_train.shape
 
-    batch_init = jnp.ones((1, n_params))
+    batch_init = jnp.ones((1, n_features))
     params_init = model.init(key, batch_init)
     flat_params, recfn = ravel_pytree(params_init)
 
@@ -123,7 +123,7 @@ def create_optimizer(
         random_state=random_state,
     )
 
-    return optimizer, apply_fn, n_params
+    return optimizer, apply_fn, n_features
 
 
 def get_best_params(num_params, optimizer, method="fdekf"):
