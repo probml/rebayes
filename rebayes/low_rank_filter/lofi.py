@@ -338,7 +338,6 @@ def _lofi_update_noise(m, U, Sigma, eta, y_cond_mean, x, y, nu, rho, adaptive_va
     Returns:
         nu (float): Posterior Student's t-distribution degrees of freedom.
         rho (float): Posterior Student's t-distribution scale parameter.
-        tau (float): Posterior mean of precision.
     """
     if not adaptive_variance:
         return 1.0, 1.0
