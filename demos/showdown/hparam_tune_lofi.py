@@ -19,7 +19,7 @@ def bbf(
     callback,
     apply_fn,
     params_lofi,
-    method="lofi"
+    method="full_svd_lofi"
 ):
     """
     Black-box function for Bayesian optimization.
@@ -58,7 +58,7 @@ def create_optimizer(
     test,
     params_lofi,
     callback=None,
-    method="lofi"
+    method="full_svd_lofi"
 ):
     key = jax.random.PRNGKey(random_state)
     X_train, _ = train
@@ -79,6 +79,13 @@ def create_optimizer(
         params_lofi=params_lofi,
         method=method
     )
+    
+    # Fix log-dynamics covariance to dummy if adaptive
+    if params_lofi.adaptive_variance == True:
+        bbf_partial = partial(
+            bbf_partial,
+            log_dynamics_cov=0.0,
+        )
 
     optimizer = BayesianOptimization(
         f=bbf_partial,
@@ -92,9 +99,9 @@ def create_optimizer(
 def get_best_params(n_params, optimizer):
     max_params = optimizer.max["params"].copy()
 
+    dynamics_cov = np.exp(max_params.get("log_dynamics_cov", 0.0))
     init_cov = np.exp(max_params["log_init_cov"]).item()
     emission_cov = np.exp(max_params["log_emission_cov"])
-    dynamics_cov = np.exp(max_params["log_dynamics_cov"])
     dynamics_weights = max_params["dynamics_weights"]
 
     hparams = {
@@ -107,7 +114,7 @@ def get_best_params(n_params, optimizer):
     return hparams
 
 
-def build_estimator(init_mean, hparams, params_lofi, apply_fn, method="lofi"):
+def build_estimator(init_mean, hparams, params_lofi, apply_fn, method="full_svd_lofi"):
     params = base.RebayesParams(
         initial_mean=init_mean,
         emission_mean_function=apply_fn,
