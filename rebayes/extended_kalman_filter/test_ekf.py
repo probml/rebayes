@@ -94,9 +94,9 @@ def setup_ssm():
     
     params = RebayesParams(
         initial_mean=mu0,
-        initial_covariance=Sigma0,
+        initial_covariance=1.0,
         dynamics_weights = 1.0,
-        dynamics_covariance = jnp.zeros((nparams, nparams)),
+        dynamics_covariance = None,
         emission_mean_function = lambda w, x: apply_fn(w, x),
         emission_cov_function = lambda w, x: obs_var
     )

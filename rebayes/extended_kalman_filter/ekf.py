@@ -35,16 +35,23 @@ class RebayesEKF(Rebayes):
         self.method = method
         if method not in ['fcekf', 'vdekf', 'fdekf']:
             raise ValueError('unknown method ', method)
+        initial_cov = params.initial_covariance
+        assert isinstance(initial_cov, float) and initial_cov > 0, "Initial covariance must be a positive scalar."
+        self.eta = 1/initial_cov
         self.gamma = params.dynamics_weights
         assert isinstance(self.gamma, float), "Dynamics decay term must be a scalar."
-        self.Q = params.dynamics_covariance
+        self.q = (1 - self.gamma**2) / self.eta
         self.adaptive_variance = adaptive_variance
         self.nu, self.rho = 0.0, 0.0
 
     def init_bel(self):
+        if self.method == 'fcekf':
+            cov = self.params.initial_covariance * jnp.eye(self.params.initial_mean.shape[0])
+        else:
+            cov = self.params.initial_covariance * jnp.ones(self.params.initial_mean.shape[0])
         return EKFBel(
             mean=self.params.initial_mean, 
-            cov=self.params.initial_covariance,
+            cov=cov,
             nu=self.nu,
             rho=self.rho,
         )
@@ -52,7 +59,7 @@ class RebayesEKF(Rebayes):
     @partial(jit, static_argnums=(0,))
     def predict_state(self, bel):
         m, P, nu, rho = bel.mean, bel.cov, bel.nu, bel.rho
-        pred_mean, pred_cov = _non_stationary_dynamics_predict(m, P, self.Q, self.gamma)
+        pred_mean, pred_cov = _non_stationary_dynamics_predict(m, P, self.q, self.gamma)
         return EKFBel(mean=pred_mean, cov=pred_cov, nu=nu, rho=rho)
 
     @partial(jit, static_argnums=(0,))
@@ -239,13 +246,13 @@ def _stationary_dynamics_diagonal_predict(m, P_diag, Q_diag):
     return mu_pred, Sigma_pred
 
 
-def _non_stationary_dynamics_predict(m, P, Q, gamma):
+def _non_stationary_dynamics_predict(m, P, q, gamma):
     """Predict the next state using a non-stationary dynamics model.
 
     Args:
         m (D_hid,): Prior mean.
-        P_diag (D_hid, D_hid): Prior covariance.
-        Q_diag (D_hid, D_hid): Dynamics covariance.
+        P (D_hid, D_hid): Prior covariance.
+        q (float): Dynamics covariance factor.
         gamma (float): Dynamics decay.
 
     Returns:
@@ -253,7 +260,11 @@ def _non_stationary_dynamics_predict(m, P, Q, gamma):
         Sigma_pred (D_hid,): Predicted covariance diagonal elements.
     """
     mu_pred = gamma * m
-    Sigma_pred = gamma**2 * P + Q
+    Sigma_pred = gamma**2 * P
+    if P.ndim == 1:
+        Sigma_pred += jnp.ones(mu_pred.shape[0]) * q
+    else:
+        Sigma_pred += jnp.eye(mu_pred.shape[0]) * q
     return mu_pred, Sigma_pred
 
 
