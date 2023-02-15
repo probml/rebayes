@@ -97,7 +97,6 @@ def get_best_params(n_params, optimizer):
     dynamics_cov = np.exp(max_params["log_dynamics_cov"])
     dynamics_weights = max_params["dynamics_weights"]
 
-    v1 = jnp.ones(n_params)
     hparams = {
         "initial_covariance": init_cov,
         "dynamics_covariance": dynamics_cov,
