@@ -465,7 +465,7 @@ def low_rank_filter_orthogonal_svd(
 
         # Update noise
         nu, rho = _lofi_update_noise(filtered_mean, filtered_U, filtered_Sigma, eta, m_Y, x, y, nu, rho, adaptive_variance)
-        tau = nu / rho
+        tau = jnp.where(jnp.isfinite(jnp.divide(rho, nu)), jnp.divide(rho, nu), 1.0)
 
         return (pred_mean, filtered_U, pred_Sigma, nu, rho), (filtered_mean, filtered_U, filtered_Sigma, tau)
     
@@ -532,7 +532,7 @@ def low_rank_filter_full_svd(
 
         # Marginalize
         nu, rho = _lofi_update_noise(filtered_mean, filtered_U, filtered_Sigma, eta, m_Y, x, y, nu, rho, adaptive_variance)
-        tau = nu / rho
+        tau = jnp.where(jnp.isfinite(jnp.divide(rho, nu)), jnp.divide(rho, nu), 1.0)
 
         return (pred_mean, filtered_U, pred_Sigma, nu, rho), (filtered_mean, filtered_U, filtered_Sigma, tau)
     
