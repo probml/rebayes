@@ -26,8 +26,9 @@ class LoFiBel:
     mean: chex.Array
     basis: chex.Array
     sigma: chex.Array
-    nu: float = None
-    rho: float = None
+    sse: float=None
+    nobs: int=None
+    obs_noise_var: float=None
 
 
 class LoFiParams(NamedTuple):
@@ -44,8 +45,6 @@ class PosteriorLoFiFiltered(NamedTuple):
     filtered_means: Float[Array, "ntime state_dim"]
     filtered_bases: Float[Array, "ntime state_dim memory_size"]
     filtered_sigmas: Float[Array, "ntime memory_size"] = None
-    filtered_covariances: Float[Array, "ntime state_dim state_dim"] = None
-    filtered_taus: float = None
 
 
 class RebayesLoFi(Rebayes):
@@ -67,7 +66,7 @@ class RebayesLoFi(Rebayes):
         else:
             raise ValueError(f"Unknown method {method}.")
         self.method = method
-        self.nu, self.rho = 0.0, 0.0
+        self.sse, self.nobs, self.obs_noise_var = 0.0, 0, 0.0
         self.model_params = model_params
         self.m, self.sv_threshold, self.adaptive_variance = orfit_params
         self.U0 = jnp.zeros((len(model_params.initial_mean), self.m))
@@ -75,23 +74,29 @@ class RebayesLoFi(Rebayes):
 
     def init_bel(self):
         return LoFiBel(
-            mean=self.model_params.initial_mean, basis=self.U0, sigma=self.Sigma0, nu=self.nu, rho=self.rho
+            mean=self.model_params.initial_mean, basis=self.U0, sigma=self.Sigma0,
+            sse=self.sse, nobs=self.nobs, obs_noise_var=self.obs_noise_var,
         )
     
     @partial(jit, static_argnums=(0,))
     def predict_state(self, bel):
-        m, U, Sigma, nu, rho = bel.mean, bel.basis, bel.sigma, bel.nu, bel.rho
+        m, U, Sigma, sse, nobs, obs_noise_var = \
+            bel.mean, bel.basis, bel.sigma, bel.sse, bel.nobs, bel.obs_noise_var
         if self.method == 'orfit':
             return bel
         else:
             m_pred, Sigma_pred = _lofi_predict(m, Sigma, self.gamma, self.q)
             U_pred = U
 
-        return LoFiBel(mean=m_pred, basis=U_pred, sigma=Sigma_pred, nu=nu, rho=rho)
+        return LoFiBel(
+            mean=m_pred, basis=U_pred, sigma=Sigma_pred,
+            sse=sse, nobs=nobs, obs_noise_var=obs_noise_var,
+        )
 
     @partial(jit, static_argnums=(0,))
     def predict_obs(self, bel, u):
-        m, U, sigma, nu, rho = bel.mean, bel.basis, bel.sigma, bel.nu, bel.rho
+        m, U, sigma, sse, nobs, obs_noise_var = \
+            bel.mean, bel.basis, bel.sigma, bel.sse, bel.nobs, bel.obs_noise_var
         m_Y = lambda z: self.model_params.emission_mean_function(z, u)
         Cov_Y = lambda z: self.model_params.emission_cov_function(z, u)
         
@@ -104,45 +109,46 @@ class RebayesLoFi(Rebayes):
             Sigma_obs = H @ H.T - (H @ U) @ (H @ U).T
         else:
             if self.adaptive_variance:
-                R = jnp.eye(y_pred.shape[0])
+                R = jnp.eye(y_pred.shape[0]) * obs_noise_var
             else:
                 R = jnp.atleast_2d(Cov_Y(m))
-            tau = jnp.where(jnp.isfinite(jnp.divide(rho, nu)), jnp.divide(rho, nu), 1.0)
             D = (sigma**2)/(self.eta**2 * jnp.ones(sigma.shape) + self.eta * sigma**2)
             HU = H @ U
             V_epi = H @ H.T/self.eta - (D * HU) @ (HU).T
-            Sigma_obs = tau * V_epi + tau * R
+            Sigma_obs = V_epi + R
         
         return Gaussian(mean=y_pred, cov=Sigma_obs) # TODO: non-Gaussian distribution support
 
     @partial(jit, static_argnums=(0,))
     def update_state(self, bel, u, y):
-        m, U, Sigma, nu, rho = bel.mean, bel.basis, bel.sigma, bel.nu, bel.rho
+        m, U, Sigma, sse, nobs, obs_noise_var = \
+            bel.mean, bel.basis, bel.sigma, bel.sse, bel.nobs, bel.obs_noise_var
         if self.method == 'orfit':
             m_cond, U_cond, Sigma_cond = _orfit_condition_on(
                 m, U, Sigma, self.model_params.emission_mean_function, u, y, self.sv_threshold
             )
-        elif self.method == 'full_svd_lofi':
-            m_cond, U_cond, Sigma_cond = _lofi_full_svd_condition_on(
-                m, U, Sigma, self.eta, self.model_params.emission_mean_function, 
-                self.model_params.emission_cov_function, u, y, self.sv_threshold, 
-                self.adaptive_variance
+        else:
+            if self.method == 'full_svd_lofi':
+                m_cond, U_cond, Sigma_cond = _lofi_full_svd_condition_on(
+                    m, U, Sigma, self.eta, self.model_params.emission_mean_function, 
+                    self.model_params.emission_cov_function, u, y, self.sv_threshold, 
+                    self.adaptive_variance, obs_noise_var,
+                )
+            elif self.method == 'orth_svd_lofi':
+                m_cond, U_cond, Sigma_cond = _lofi_orth_svd_condition_on(
+                    m, U, Sigma, self.eta, self.model_params.emission_mean_function, 
+                    self.model_params.emission_cov_function, u, y, self.sv_threshold, 
+                    self.adaptive_variance
+                )
+            sse, nobs, obs_noise_var = _lofi_estimate_noise(
+                m_cond, self.model_params.emission_mean_function,
+                u, y, sse, nobs, obs_noise_var, self.adaptive_variance
             )
-            nu, rho = _lofi_update_noise(
-                m_cond, U_cond, Sigma_cond, self.eta, self.model_params.emission_mean_function,
-                u, y, nu, rho, self.adaptive_variance
-            )
-        elif self.method == 'orth_svd_lofi':
-            m_cond, U_cond, Sigma_cond = _lofi_orth_svd_condition_on(
-                m, U, Sigma, self.eta, self.model_params.emission_mean_function, 
-                self.model_params.emission_cov_function, u, y, self.sv_threshold, 
-                self.adaptive_variance
-            )
-            nu, rho = _lofi_update_noise(
-                m_cond, U_cond, Sigma_cond, self.eta, self.model_params.emission_mean_function,
-                u, y, nu, rho, self.adaptive_variance
-            )
-        return LoFiBel(mean=m_cond, basis=U_cond, sigma=Sigma_cond, nu=nu, rho=rho)
+
+        return LoFiBel(
+            mean=m_cond, basis=U_cond, sigma=Sigma_cond, sse=sse, nobs=nobs, 
+            obs_noise_var=obs_noise_var
+        )
 
 
 def _invert_2x2_block_matrix(M, lr_block_dim):
@@ -214,7 +220,7 @@ def _orfit_condition_on(m, U, Sigma, apply_fn, x, y, sv_threshold):
     return m_cond, U_cond, Sigma_cond
 
 
-def _lofi_orth_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False):
+def _lofi_orth_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=0.0):
     """Condition step of the low-rank filter algorithm based on orthogonal SVD method.
 
     Args:
@@ -239,11 +245,11 @@ def _lofi_orth_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y,
     
     yhat = jnp.atleast_1d(m_Y(m))
     if adaptive_variance:
-        A = jnp.eye(yhat.shape[0])
+        R = jnp.eye(yhat.shape[0]) * obs_noise_var
     else:
         R = jnp.atleast_2d(Cov_Y(m))
-        L = jnp.linalg.cholesky(R)
-        A = jnp.linalg.lstsq(L, jnp.eye(L.shape[0]))[0].T
+    L = jnp.linalg.cholesky(R)
+    A = jnp.linalg.lstsq(L, jnp.eye(L.shape[0]))[0].T
     H = _jacrev_2d(m_Y, m)
     W_tilde = jnp.hstack([Sigma * U, (H.T @ A).reshape(U.shape[0], -1)])
     S = eta*jnp.eye(W_tilde.shape[1]) + W_tilde.T @ W_tilde
@@ -273,7 +279,7 @@ def _lofi_orth_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y,
     return m_cond, U_cond, Sigma_cond
 
 
-def _lofi_full_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False):
+def _lofi_full_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=0.0):
     """Condition step of the low-rank filter with adaptive observation variance.
 
     Args:
@@ -299,11 +305,11 @@ def _lofi_full_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y,
     
     yhat = jnp.atleast_1d(m_Y(m))
     if adaptive_variance:
-        A = jnp.eye(yhat.shape[0])
+        R = jnp.eye(yhat.shape[0]) * obs_noise_var
     else:
         R = jnp.atleast_2d(Cov_Y(m))
-        L = jnp.linalg.cholesky(R)
-        A = jnp.linalg.lstsq(L, jnp.eye(L.shape[0]))[0].T
+    L = jnp.linalg.cholesky(R)
+    A = jnp.linalg.lstsq(L, jnp.eye(L.shape[0]))[0].T
     H = _jacrev_2d(m_Y, m)
     W_tilde = jnp.hstack([Sigma * U, (H.T @ A).reshape(U.shape[0], -1)])
 
@@ -321,40 +327,72 @@ def _lofi_full_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y,
     return m_cond, U_cond, Sigma_cond
 
 
-def _lofi_update_noise(m, U, Sigma, eta, y_cond_mean, x, y, nu, rho, adaptive_variance=False):
-    """Marginalization step of the low-rank filter with adaptive observation variance.
+# def _lofi_update_noise(m, U, Sigma, eta, y_cond_mean, x, y, nu, rho, adaptive_variance=False):
+#     """Marginalization step of the low-rank filter with adaptive observation variance.
+
+#     Args:
+#         m (D_hid,): Prior mean.
+#         U (D_hid, D_mem,): Prior basis.
+#         Sigma (D_mem,): Prior singular values.
+#         eta (float): Prior precision.
+#         y_cond_mean (Callable): Conditional emission mean function.
+#         x (D_in,): Control input.
+#         y (D_obs,): Emission.
+#         nu (float): Student's t-distribution degrees of freedom.
+#         rho (float): Student's t-distribution scale parameter.
+
+#     Returns:
+#         nu (float): Posterior Student's t-distribution degrees of freedom.
+#         rho (float): Posterior Student's t-distribution scale parameter.
+#     """
+#     if not adaptive_variance:
+#         return 1.0, 1.0
+
+#     m_Y = lambda w: y_cond_mean(w, x)
+    
+#     yhat = jnp.atleast_1d(m_Y(m))
+#     H = _jacrev_2d(m_Y, m)
+
+#     lamb = (Sigma**2)/(eta**2 * jnp.ones(Sigma.shape) + eta * Sigma**2)
+#     HU = H @ U
+#     V_epi = H @ H.T/eta - (lamb * HU) @ (HU).T
+
+#     nu += yhat.shape[0]
+#     rho += (y - yhat).T @ jnp.linalg.pinv(jnp.eye(yhat.shape[0]) + V_epi) @ (y - yhat)
+
+#     return nu, rho
+
+
+def _lofi_estimate_noise(m, y_cond_mean, u, y, sse, nobs, obs_noise_var, adaptive_variance=False):
+    """Estimate observation noise based on empirical residual errors.
 
     Args:
         m (D_hid,): Prior mean.
-        U (D_hid, D_mem,): Prior basis.
-        Sigma (D_mem,): Prior singular values.
-        eta (float): Prior precision.
         y_cond_mean (Callable): Conditional emission mean function.
-        x (D_in,): Control input.
+        u (D_in,): Control input.
         y (D_obs,): Emission.
-        nu (float): Student's t-distribution degrees of freedom.
-        rho (float): Student's t-distribution scale parameter.
+        sse (float): Cumulative sum of squared errors.
+        nobs (int): Number of observations seen so far.
+        obs_noise_var (float): Current estimate of observation noise.
+        adaptive_variance (bool): Whether to use adaptive variance.
 
     Returns:
-        nu (float): Posterior Student's t-distribution degrees of freedom.
-        rho (float): Posterior Student's t-distribution scale parameter.
+        sse (float): Updated cumulative sum of squared errors.
+        nobs (int): Updated number of observations seen so far.
+        obs_noise_var (float): Updated estimate of observation noise.
     """
     if not adaptive_variance:
-        return 1.0, 1.0
+        return 0.0, 0, 0.0
 
-    m_Y = lambda w: y_cond_mean(w, x)
-    
+    m_Y = lambda w: y_cond_mean(w, u)
     yhat = jnp.atleast_1d(m_Y(m))
-    H = _jacrev_2d(m_Y, m)
+    
+    sqerr = ((yhat - y)**2).squeeze()
+    sse += sqerr
+    nobs += 1
+    obs_noise_var = jnp.min(jnp.array([0.001, sse/nobs]))
 
-    lamb = (Sigma**2)/(eta**2 * jnp.ones(Sigma.shape) + eta * Sigma**2)
-    HU = H @ U
-    V_epi = H @ H.T/eta - (lamb * HU) @ (HU).T
-
-    nu += yhat.shape[0]
-    rho += (y - yhat).T @ jnp.linalg.pinv(jnp.eye(yhat.shape[0]) + V_epi) @ (y - yhat)
-
-    return nu, rho
+    return sse, nobs, obs_noise_var
 
 
 def _lofi_predict(m, Sigma, gamma, q):
@@ -446,13 +484,13 @@ def low_rank_filter_orthogonal_svd(
     m_Y, Cov_Y = model_params.emission_mean_function, model_params.emission_cov_function
     gamma = model_params.dynamics_weights
     assert isinstance(gamma, float), "Dynamics decay term must be a scalar."
-    nu, rho = 0.0, 0.0
+    sse, nobs, obs_noise_var = 0.0, 0, 0.0
     
     # Steady-state constraint
     q = (1 - gamma**2) / eta
 
     def _step(carry, t):
-        mean, U, Sigma, nu, rho = carry
+        mean, U, Sigma, sse, nobs, obs_noise_var = carry
 
         # Get input and emission and compute Jacobians
         x, y = inputs[t], emissions[t]
@@ -461,22 +499,20 @@ def low_rank_filter_orthogonal_svd(
         pred_mean, pred_Sigma = _lofi_predict(mean, Sigma, gamma, q)
 
         # Condition on the emission
-        filtered_mean, filtered_U, filtered_Sigma = _lofi_orth_svd_condition_on(pred_mean, U, pred_Sigma, eta, m_Y, Cov_Y, x, y, sv_threshold, adaptive_variance)
+        filtered_mean, filtered_U, filtered_Sigma = _lofi_orth_svd_condition_on(pred_mean, U, pred_Sigma, eta, m_Y, Cov_Y, x, y, sv_threshold, adaptive_variance, obs_noise_var)
 
         # Update noise
-        nu, rho = _lofi_update_noise(filtered_mean, filtered_U, filtered_Sigma, eta, m_Y, x, y, nu, rho, adaptive_variance)
-        tau = jnp.where(jnp.isfinite(jnp.divide(rho, nu)), jnp.divide(rho, nu), 1.0)
+        sse, nobs, obs_noise_var = _lofi_estimate_noise(filtered_mean, filtered_U, m_Y, x, y, sse, nobs, obs_noise_var, adaptive_variance)
 
-        return (pred_mean, filtered_U, pred_Sigma, nu, rho), (filtered_mean, filtered_U, filtered_Sigma, tau)
+        return (pred_mean, filtered_U, pred_Sigma, sse, nobs, obs_noise_var), (filtered_mean, filtered_U, filtered_Sigma)
     
     # Run ORFit
-    carry = (initial_mean, U, Sigma, nu, rho)
-    _, (filtered_means, filtered_bases, filtered_Sigmas, filtered_taus) = scan(_step, carry, jnp.arange(len(inputs)))
+    carry = (initial_mean, U, Sigma, sse, nobs, obs_noise_var)
+    _, (filtered_means, filtered_bases, filtered_Sigmas) = scan(_step, carry, jnp.arange(len(inputs)))
     filtered_posterior = PosteriorLoFiFiltered(
         filtered_means=filtered_means, 
         filtered_bases=filtered_bases,
         filtered_sigmas=filtered_Sigmas,
-        filtered_taus=filtered_taus,
     )
 
     return filtered_posterior
@@ -510,13 +546,13 @@ def low_rank_filter_full_svd(
     m_Y, Cov_Y = model_params.emission_mean_function, model_params.emission_cov_function
     gamma = model_params.dynamics_weights
     assert isinstance(gamma, float), "Dynamics decay term must be a scalar."
-    nu, rho = 0.0, 0.0
+    sse, nobs, obs_noise_var = 0.0, 0, 0.0
     
     # Steady-state constraint
     q = (1 - gamma**2) / eta
 
     def _step(carry, t):
-        mean, U, Sigma, nu, rho = carry
+        mean, U, Sigma, sse, nobs, obs_noise_var = carry
 
         # Get input and emission and compute Jacobians
         x, y = inputs[t], emissions[t]
@@ -527,23 +563,21 @@ def low_rank_filter_full_svd(
         # Condition on the emission
         filtered_mean, filtered_U, filtered_Sigma = \
             _lofi_full_svd_condition_on(
-                pred_mean, U, pred_Sigma, eta, m_Y, Cov_Y, x, y, sv_threshold, adaptive_variance
+                pred_mean, U, pred_Sigma, eta, m_Y, Cov_Y, x, y, sv_threshold, adaptive_variance, obs_noise_var
             )
 
-        # Marginalize
-        nu, rho = _lofi_update_noise(filtered_mean, filtered_U, filtered_Sigma, eta, m_Y, x, y, nu, rho, adaptive_variance)
-        tau = jnp.where(jnp.isfinite(jnp.divide(rho, nu)), jnp.divide(rho, nu), 1.0)
+        # Update noise
+        sse, nobs, obs_noise_var = _lofi_estimate_noise(filtered_mean, filtered_U, m_Y, x, y, sse, nobs, obs_noise_var, adaptive_variance)
 
-        return (pred_mean, filtered_U, pred_Sigma, nu, rho), (filtered_mean, filtered_U, filtered_Sigma, tau)
+        return (pred_mean, filtered_U, pred_Sigma, sse, nobs, obs_noise_var), (filtered_mean, filtered_U, filtered_Sigma)
     
     # Run ORFit
-    carry = (initial_mean, U, Sigma, nu, rho)
-    _, (filtered_means, filtered_bases, filtered_Sigmas, filtered_taus) = scan(_step, carry, jnp.arange(len(inputs)))
+    carry = (initial_mean, U, Sigma, sse, nobs, obs_noise_var)
+    _, (filtered_means, filtered_bases, filtered_Sigmas) = scan(_step, carry, jnp.arange(len(inputs)))
     filtered_posterior = PosteriorLoFiFiltered(
         filtered_means=filtered_means, 
         filtered_bases=filtered_bases,
         filtered_sigmas=filtered_Sigmas,
-        filtered_taus=filtered_taus,
     )
 
     return filtered_posterior

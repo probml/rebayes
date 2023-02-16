@@ -20,8 +20,9 @@ _jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
 class EKFBel:
     mean: chex.Array
     cov: chex.Array
-    nu: float = None
-    rho: float = None
+    sse: float=None
+    nobs: int=None
+    obs_noise_var: float=None
 
 
 class RebayesEKF(Rebayes):
@@ -42,7 +43,7 @@ class RebayesEKF(Rebayes):
         assert isinstance(self.gamma, float), "Dynamics decay term must be a scalar."
         self.q = (1 - self.gamma**2) / self.eta
         self.adaptive_variance = adaptive_variance
-        self.nu, self.rho = 0.0, 0.0
+        self.sse, self.nobs, self.obs_noise_var = 0.0, 0, 0.0
 
     def init_bel(self):
         if self.method == 'fcekf':
@@ -52,19 +53,20 @@ class RebayesEKF(Rebayes):
         return EKFBel(
             mean=self.params.initial_mean, 
             cov=cov,
-            nu=self.nu,
-            rho=self.rho,
+            sse=self.sse,
+            nobs=self.nobs,
+            obs_noise_var=self.obs_noise_var,
         )
 
     @partial(jit, static_argnums=(0,))
     def predict_state(self, bel):
-        m, P, nu, rho = bel.mean, bel.cov, bel.nu, bel.rho
+        m, P, sse, nobs, obs_noise_var = bel.mean, bel.cov, bel.sse, bel.nobs, bel.obs_noise_var
         pred_mean, pred_cov = _non_stationary_dynamics_predict(m, P, self.q, self.gamma)
-        return EKFBel(mean=pred_mean, cov=pred_cov, nu=nu, rho=rho)
+        return EKFBel(mean=pred_mean, cov=pred_cov, sse=sse, nobs=nobs, obs_noise_var=obs_noise_var)
 
     @partial(jit, static_argnums=(0,))
     def predict_obs(self, bel, u):
-        prior_mean, prior_cov, nu, rho = bel.mean, bel.cov, bel.nu, bel.rho
+        prior_mean, prior_cov, sse, nobs, obs_noise_var = bel.mean, bel.cov, bel.sse, bel.nobs, bel.obs_noise_var
         m_Y = lambda z: self.params.emission_mean_function(z, u)
         Cov_Y = lambda z: self.params.emission_cov_function(z, u)
 
@@ -74,17 +76,16 @@ class RebayesEKF(Rebayes):
         # Predicted covariance
         H =  _jacrev_2d(m_Y, prior_mean)
         if self.adaptive_variance:
-            R = jnp.eye(y_pred.shape[0])
+            R = jnp.eye(y_pred.shape[0]) * obs_noise_var
         else:
             R = jnp.atleast_2d(Cov_Y(prior_mean))
-        tau = jnp.where(jnp.isfinite(jnp.divide(rho, nu)), jnp.divide(rho, nu), 1.0)
         
         if self.method == 'fcekf':
             V_epi = H @ prior_cov @ H.T
         else:
             V_epi = (prior_cov * H) @ H.T
 
-        Sigma_obs = tau * V_epi + tau * R
+        Sigma_obs = V_epi + R
 
         return Gaussian(mean=y_pred, cov=Sigma_obs)
 
@@ -96,17 +97,18 @@ class RebayesEKF(Rebayes):
             self.update_fn = _variational_diagonal_ekf_condition_on
         elif self.method == 'fdekf':
             self.update_fn = _fully_decoupled_ekf_condition_on
-        m, P, nu, rho = bel.mean, bel.cov, bel.nu, bel.rho
+        m, P, sse, nobs, obs_noise_var = bel.mean, bel.cov, bel.sse, bel.nobs, bel.obs_noise_var
         mu, Sigma = self.update_fn(m, P, self.params.emission_mean_function, 
                                    self.params.emission_cov_function, u, y, 
-                                   num_iter=1, adaptive_variance=self.adaptive_variance)
-        nu, rho = _ekf_update_noise(mu, Sigma, self.params.emission_mean_function, 
-                                    self.params.emission_cov_function, u, y, num_iter=1,
-                                    nu=nu, rho=rho, adaptive_variance=self.adaptive_variance)
-        return EKFBel(mean=mu, cov=Sigma, nu=nu, rho=rho)
+                                   num_iter=1, adaptive_variance=self.adaptive_variance,
+                                   obs_noise_var=obs_noise_var)
+        sse, nobs, obs_noise_var = _ekf_estimate_noise(mu, self.params.emission_mean_function, 
+                                                       u, y, sse, nobs, obs_noise_var,
+                                                       adaptive_variance=self.adaptive_variance)
+        return EKFBel(mean=mu, cov=Sigma, sse=sse, nobs=nobs, obs_noise_var=obs_noise_var)
 
 
-def _full_covariance_condition_on(m, P, y_cond_mean, y_cond_cov, u, y, num_iter, adaptive_variance=False):
+def _full_covariance_condition_on(m, P, y_cond_mean, y_cond_cov, u, y, num_iter, adaptive_variance=False, obs_noise_var=0.0):
     """Condition on the emission using a full-covariance EKF.
     Note that this method uses `jnp.linalg.lstsq()` to solve the linear system
     to avoid numerical issues with `jnp.linalg.solve()`.
@@ -132,7 +134,7 @@ def _full_covariance_condition_on(m, P, y_cond_mean, y_cond_cov, u, y, num_iter,
         prior_mean, prior_cov = carry
         yhat = jnp.atleast_1d(m_Y(prior_mean))
         if adaptive_variance:
-            R = jnp.eye(yhat.shape[0])
+            R = jnp.eye(yhat.shape[0]) * obs_noise_var
         else:
             R = jnp.atleast_2d(Cov_Y(prior_mean))
         H =  _jacrev_2d(m_Y, prior_mean)
@@ -149,7 +151,7 @@ def _full_covariance_condition_on(m, P, y_cond_mean, y_cond_cov, u, y, num_iter,
     return mu_cond, Sigma_cond
 
 
-def _fully_decoupled_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, num_iter, adaptive_variance=False):
+def _fully_decoupled_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, num_iter, adaptive_variance=False, obs_noise_var=0.0):
     """Condition on the emission using a fully decoupled EKF.
 
     Args:
@@ -173,7 +175,7 @@ def _fully_decoupled_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, 
         prior_mean, prior_cov = carry
         yhat = jnp.atleast_1d(m_Y(prior_mean))
         if adaptive_variance:
-            R = jnp.eye(yhat.shape[0])
+            R = jnp.eye(yhat.shape[0]) * obs_noise_var
         else:
             R = jnp.atleast_2d(Cov_Y(prior_mean))
         H =  _jacrev_2d(m_Y, prior_mean)
@@ -189,7 +191,7 @@ def _fully_decoupled_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, 
     return mu_cond, Sigma_cond
 
 
-def _variational_diagonal_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, num_iter, adaptive_variance=False):
+def _variational_diagonal_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, num_iter, adaptive_variance=False, obs_noise_var=0.0):
     """Condition on the emission using a variational diagonal EKF.
 
     Args:
@@ -213,7 +215,7 @@ def _variational_diagonal_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u
         prior_mean, prior_cov = carry
         yhat = jnp.atleast_1d(m_Y(prior_mean))
         if adaptive_variance:
-            R = jnp.eye(yhat.shape[0])
+            R = jnp.eye(yhat.shape[0]) * obs_noise_var
         else:
             R = jnp.atleast_2d(Cov_Y(prior_mean))
         H =  _jacrev_2d(m_Y, prior_mean)
@@ -268,44 +270,36 @@ def _non_stationary_dynamics_predict(m, P, q, gamma):
     return mu_pred, Sigma_pred
 
 
-def _ekf_update_noise(m, prior_cov, y_cond_mean, y_cond_cov, u, y, num_iter, nu, rho, adaptive_variance=False):
-    """Marginalization step of the extended Kalman filter with adaptive observation variance.
+def _ekf_estimate_noise(m, y_cond_mean, u, y, sse, nobs, obs_noise_var, adaptive_variance=False):
+    """Estimate observation noise based on empirical residual errors.
 
     Args:
         m (D_hid,): Prior mean.
-        P_diag (D_hid,): Diagonal elements of prior covariance.
         y_cond_mean (Callable): Conditional emission mean function.
-        y_cond_cov (Callable): Conditional emission covariance function.
         u (D_in,): Control input.
         y (D_obs,): Emission.
-        num_iter (int): Number of re-linearizations around posterior.
-        nu (float): Posterior Student's t-distribution degrees of freedom.
-        rho (float): Posterior Student's t-distribution scale parameter.
+        sse (float): Cumulative sum of squared errors.
+        nobs (int): Number of observations seen so far.
+        obs_noise_var (float): Current estimate of observation noise.
         adaptive_variance (bool): Whether to use adaptive variance.
 
     Returns:
-        nu (float): Posterior Student's t-distribution degrees of freedom.
-        rho (float): Posterior Student's t-distribution scale parameter.
+        sse (float): Updated cumulative sum of squared errors.
+        nobs (int): Updated number of observations seen so far.
+        obs_noise_var (float): Updated estimate of observation noise.
     """
     if not adaptive_variance:
-        return 1.0, 1.0
+        return 0.0, 0, 0.0
 
     m_Y = lambda w: y_cond_mean(w, u)
-    
     yhat = jnp.atleast_1d(m_Y(m))
-    H = _jacrev_2d(m_Y, m)
     
-    if prior_cov.ndim == 1:
-        # Diagonal EKF
-        V_epi = (prior_cov * H) @ H.T
-    else:
-        # Full-Covariance EKF
-        V_epi = H @ prior_cov @ H.T
+    sqerr = ((yhat - y)**2).squeeze()
+    sse += sqerr
+    nobs += 1
+    obs_noise_var = jnp.min(jnp.array([0.001, sse/nobs]))
 
-    nu += yhat.shape[0]
-    rho += (y - yhat).T @ jnp.linalg.pinv(jnp.eye(yhat.shape[0]) + V_epi) @ (y - yhat)
-
-    return nu, rho
+    return sse, nobs, obs_noise_var
 
 
 def stationary_dynamics_fully_decoupled_conditional_moments_gaussian_filter(
@@ -336,10 +330,10 @@ def stationary_dynamics_fully_decoupled_conditional_moments_gaussian_filter(
     m_Y, Cov_Y = model_params.emission_mean_function, model_params.emission_cov_function
     m_Y, Cov_Y  = (_process_fn(fn, inputs) for fn in (m_Y, Cov_Y))
     inputs = _process_input(inputs, num_timesteps)
-    nu, rho = 0.0, 0.0
+    sse, nobs, obs_noise_var = 0.0, 0, 0.0
 
     def _step(carry, t):
-        pred_mean, pred_cov_diag, nu, rho = carry
+        pred_mean, pred_cov_diag, sse, nobs, obs_noise_var = carry
 
         # Get parameters and inputs for time index t
         Q_diag = _get_params(dynamics_cov, 1, t)
@@ -347,19 +341,20 @@ def stationary_dynamics_fully_decoupled_conditional_moments_gaussian_filter(
         y = emissions[t]
 
         # Condition on the emission
-        filtered_mean, filtered_cov_diag = _fully_decoupled_ekf_condition_on(pred_mean, pred_cov_diag, m_Y, Cov_Y, u, y, num_iter)
+        filtered_mean, filtered_cov_diag = \
+            _fully_decoupled_ekf_condition_on(pred_mean, pred_cov_diag, m_Y, Cov_Y, 
+                                              u, y, num_iter, adaptive_variance, obs_noise_var)
 
         # Update observation noise
-        nu, rho = _ekf_update_noise(filtered_mean, filtered_cov_diag, m_Y, Cov_Y, u, y, num_iter, nu, rho, adaptive_variance)
-        tau = jnp.where(jnp.isfinite(jnp.divide(rho, nu)), jnp.divide(rho, nu), 1.0)
+        sse, nobs, obs_noise_var = _ekf_estimate_noise(filtered_mean, m_Y, u, y, sse, nobs, obs_noise_var, adaptive_variance)
 
         # Predict the next state
         pred_mean, pred_cov_diag = _stationary_dynamics_diagonal_predict(filtered_mean, filtered_cov_diag, Q_diag)
 
-        return (pred_mean, pred_cov_diag), (filtered_mean, tau*filtered_cov_diag)
+        return (pred_mean, pred_cov_diag, sse, nobs, obs_noise_var), (filtered_mean, filtered_cov_diag)
 
     # Run the general linearization filter
-    carry = (initial_mean, initial_cov)
+    carry = (initial_mean, initial_cov, sse, nobs, obs_noise_var)
     _, (filtered_means, filtered_covs) = lax.scan(_step, carry, jnp.arange(num_timesteps))
     return PosteriorGSSMFiltered(marginal_loglik=None, filtered_means=filtered_means, filtered_covariances=filtered_covs)
 
@@ -392,9 +387,10 @@ def stationary_dynamics_variational_diagonal_extended_kalman_filter(
     m_Y, Cov_Y = model_params.emission_mean_function, model_params.emission_cov_function
     m_Y, Cov_Y  = (_process_fn(fn, inputs) for fn in (m_Y, Cov_Y))
     inputs = _process_input(inputs, num_timesteps)
+    sse, nobs, obs_noise_var = 0.0, 0, 0.0
 
     def _step(carry, t):
-        pred_mean, pred_cov_diag = carry
+        pred_mean, pred_cov_diag, sse, nobs, obs_noise_var = carry
 
         # Get parameters and inputs for time index t
         Q_diag = _get_params(dynamics_cov, 1, t)
@@ -402,18 +398,20 @@ def stationary_dynamics_variational_diagonal_extended_kalman_filter(
         y = emissions[t]
 
         # Condition on the emission
-        filtered_mean, filtered_cov_diag = _variational_diagonal_ekf_condition_on(pred_mean, pred_cov_diag, m_Y, Cov_Y, u, y, num_iter)
+        filtered_mean, filtered_cov_diag = \
+            _variational_diagonal_ekf_condition_on(pred_mean, pred_cov_diag, m_Y, 
+                                                   Cov_Y, u, y, num_iter, adaptive_variance,
+                                                   obs_noise_var)
 
         # Update observation noise
-        nu, rho = _ekf_update_noise(filtered_mean, filtered_cov_diag, m_Y, Cov_Y, u, y, num_iter, nu, rho, adaptive_variance)
-        tau = jnp.where(jnp.isfinite(jnp.divide(rho, nu)), jnp.divide(rho, nu), 1.0)
+        sse, nobs, obs_noise_var = _ekf_estimate_noise(filtered_mean, m_Y, u, y, sse, nobs, obs_noise_var, adaptive_variance)
 
         # Predict the next state
         pred_mean, pred_cov_diag = _stationary_dynamics_diagonal_predict(filtered_mean, filtered_cov_diag, Q_diag)
 
-        return (pred_mean, pred_cov_diag), (filtered_mean, tau * filtered_cov_diag)
+        return (pred_mean, pred_cov_diag, sse, nobs, obs_noise_var), (filtered_mean, filtered_cov_diag)
 
     # Run the general linearization filter
-    carry = (initial_mean, initial_cov)
+    carry = (initial_mean, initial_cov, sse, nobs, obs_noise_var)
     _, (filtered_means, filtered_covs) = lax.scan(_step, carry, jnp.arange(num_timesteps))
     return PosteriorGSSMFiltered(marginal_loglik=None, filtered_means=filtered_means, filtered_covariances=filtered_covs)

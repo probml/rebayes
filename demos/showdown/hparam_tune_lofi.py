@@ -18,7 +18,9 @@ def bbf(
     callback,
     apply_fn,
     params_lofi,
-    method="full_svd_lofi"
+    method="full_svd_lofi",
+    emission_mean_function=None,
+    emission_cov_function=None,
 ):
     """
     Black-box function for Bayesian optimization.
@@ -26,14 +28,21 @@ def bbf(
     X_train, y_train = train
     X_test, y_test = test
 
+    dynamics_covariance = None
+    initial_covariance = jnp.exp(log_init_cov).item()
+    if emission_mean_function is None:
+        emission_mean_function = apply_fn
+    if emission_cov_function is None:
+        emission_cov_function = lambda w, x: jnp.exp(log_emission_cov)
+
     test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
     params_rebayes = base.RebayesParams(
         initial_mean=flat_params,
-        initial_covariance=jnp.exp(log_init_cov).item(),
+        initial_covariance=initial_covariance,
         dynamics_weights=dynamics_weights,
-        dynamics_covariance=None,
-        emission_mean_function=apply_fn,
-        emission_cov_function=lambda w, x: jnp.exp(log_emission_cov),
+        dynamics_covariance=dynamics_covariance,
+        emission_mean_function=emission_mean_function,
+        emission_cov_function=emission_cov_function,
     )
 
     estimator = lofi.RebayesLoFi(params_rebayes, params_lofi, method=method)
@@ -57,13 +66,15 @@ def create_optimizer(
     test,
     params_lofi,
     callback=None,
-    method="full_svd_lofi"
+    method="full_svd_lofi",
+    emission_mean_function=None,
+    emission_cov_function=None,
 ):
     key = jax.random.PRNGKey(random_state)
     X_train, _ = train
-    _, n_params = X_train.shape
+    _, *n_params = X_train.shape
 
-    batch_init = jnp.ones((1, n_params))
+    batch_init = jnp.ones((1, *n_params))
     params_init = model.init(key, batch_init)
     flat_params, recfn = ravel_pytree(params_init)
 
@@ -76,11 +87,13 @@ def create_optimizer(
         callback=callback,
         apply_fn=apply_fn,
         params_lofi=params_lofi,
-        method=method
+        method=method,
+        emission_mean_function=emission_mean_function,
+        emission_cov_function=emission_cov_function
     )
     
     # Fix log-emission-covariance to dummy if adaptive
-    if params_lofi.adaptive_variance == True:
+    if emission_cov_function is not None or params_lofi.adaptive_variance == True:
         bbf_partial = partial(
             bbf_partial,
             log_emission_cov=0.0,
@@ -113,12 +126,23 @@ def get_best_params(n_params, optimizer):
     return hparams
 
 
-def build_estimator(init_mean, hparams, params_lofi, apply_fn, method="full_svd_lofi"):
-    params = base.RebayesParams(
-        initial_mean=init_mean,
-        emission_mean_function=apply_fn,
-        **hparams,
-    )
+def build_estimator(init_mean, hparams, params_lofi, apply_fn, method="full_svd_lofi",
+                    emission_mean_function=None, emission_cov_function=None):
+    if emission_mean_function is None:
+        emission_mean_function = apply_fn
+    if emission_cov_function is None:
+        params = base.RebayesParams(
+            initial_mean=init_mean,
+            emission_mean_function=emission_mean_function,
+            **hparams,
+        )
+    else:
+        params = base.RebayesParams(
+            initial_mean=init_mean,
+            emission_mean_function=emission_mean_function,
+            emission_cov_function=emission_cov_function,
+            **hparams,
+        )
 
     estimator = lofi.RebayesLoFi(params, params_lofi, method)
     return estimator

@@ -120,7 +120,6 @@ class Rebayes(ABC):
     ) -> Tuple[Gaussian, Any]:
         """Apply filtering to entire sequence of data. Return final belief state and outputs from callback."""
         num_timesteps = X.shape[0]
-        
         def step(bel, t):
             bel = self.predict_state(bel)
             pred_obs = self.predict_obs(bel, X[t])
