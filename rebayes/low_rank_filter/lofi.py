@@ -327,42 +327,6 @@ def _lofi_full_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y,
     return m_cond, U_cond, Sigma_cond
 
 
-# def _lofi_update_noise(m, U, Sigma, eta, y_cond_mean, x, y, nu, rho, adaptive_variance=False):
-#     """Marginalization step of the low-rank filter with adaptive observation variance.
-
-#     Args:
-#         m (D_hid,): Prior mean.
-#         U (D_hid, D_mem,): Prior basis.
-#         Sigma (D_mem,): Prior singular values.
-#         eta (float): Prior precision.
-#         y_cond_mean (Callable): Conditional emission mean function.
-#         x (D_in,): Control input.
-#         y (D_obs,): Emission.
-#         nu (float): Student's t-distribution degrees of freedom.
-#         rho (float): Student's t-distribution scale parameter.
-
-#     Returns:
-#         nu (float): Posterior Student's t-distribution degrees of freedom.
-#         rho (float): Posterior Student's t-distribution scale parameter.
-#     """
-#     if not adaptive_variance:
-#         return 1.0, 1.0
-
-#     m_Y = lambda w: y_cond_mean(w, x)
-    
-#     yhat = jnp.atleast_1d(m_Y(m))
-#     H = _jacrev_2d(m_Y, m)
-
-#     lamb = (Sigma**2)/(eta**2 * jnp.ones(Sigma.shape) + eta * Sigma**2)
-#     HU = H @ U
-#     V_epi = H @ H.T/eta - (lamb * HU) @ (HU).T
-
-#     nu += yhat.shape[0]
-#     rho += (y - yhat).T @ jnp.linalg.pinv(jnp.eye(yhat.shape[0]) + V_epi) @ (y - yhat)
-
-#     return nu, rho
-
-
 def _lofi_estimate_noise(m, y_cond_mean, u, y, sse, nobs, obs_noise_var, adaptive_variance=False):
     """Estimate observation noise based on empirical residual errors.
 
