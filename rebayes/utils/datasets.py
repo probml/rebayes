@@ -19,7 +19,10 @@ from multiprocessing import Pool
 from sklearn.datasets import make_moons
 
 
-def showdown_preprocess(train, test, n_warmup=1000, n_test_warmup=100, xaxis=0):
+def showdown_preprocess(
+        train, test, n_warmup=1000, n_test_warmup=100, xaxis=0,
+        normalise_target=True, normalise_features=True,
+):
     (X_train, y_train) = train
     (X_test, y_test) = test
 
@@ -38,21 +41,29 @@ def showdown_preprocess(train, test, n_warmup=1000, n_test_warmup=100, xaxis=0):
     y_learn = y_train[n_warmup:]
 
     # Obtain mean and std of the warmup train set
-    ymean = y_warmup_train.mean().item()
-    ystd = y_warmup_train.std().item()
-    Xmean = X_warmup_train.mean(axis=xaxis, keepdims=True)
-    Xstd = X_warmup_train.std(axis=xaxis, keepdims=True)
+    if normalise_target:
+        ymean = y_warmup_train.mean().item()
+        ystd = y_warmup_train.std().item()
+    else:
+        ymean, ystd = 0.0, 1.0
     
-    # Normalise target values
-    y_warmup_train = (y_warmup_train - ymean) / ystd
-    y_warmup_test = (y_warmup_test - ymean) / ystd
-    y_learn = (y_learn - ymean) / ystd
-    y_test = (y_test - ymean) / ystd
+
+    if normalise_features:
+        Xmean = X_warmup_train.mean(axis=xaxis, keepdims=True)
+        Xstd = X_warmup_train.std(axis=xaxis, keepdims=True)
+    else:
+        Xmean, Xstd = 0.0, 1.0
+    
     # Normalise input values
     X_warmup_train = (X_warmup_train - Xmean) / Xstd
     X_warmup_test = (X_warmup_test - Xmean) / Xstd
     X_learn = (X_learn - Xmean) / Xstd
     X_test = (X_test - Xmean) / Xstd
+    # Normalise target values
+    y_warmup_train = (y_warmup_train - ymean) / ystd
+    y_warmup_test = (y_warmup_test - ymean) / ystd
+    y_learn = (y_learn - ymean) / ystd
+    y_test = (y_test - ymean) / ystd
 
     warmup_train = (X_warmup_train, y_warmup_train)
     warmup_test = (X_warmup_test, y_warmup_test)
