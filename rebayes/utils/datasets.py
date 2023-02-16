@@ -308,7 +308,7 @@ def load_1d_synthetic_dataset(n_train=100, n_test=100, key=0, trenches=False, so
     return (X_train, y_train), (X_test, y_test)
 
 
-def normalise_dataset(data, target_variable, frac_train, seed, target_normalise=True):
+def normalise_dataset(data, target_variable, frac_train, seed, feature_normalise=False, target_normalise=False):
     """
     Randomise a dataframe, normalise by column and transform to jax arrays
     """
@@ -329,8 +329,9 @@ def normalise_dataset(data, target_variable, frac_train, seed, target_normalise=
     mean_y = y_train.mean()
     std_y = y_train.std()
 
-    X_train = (X_train - mean) / std
-    X_test = (X_test - mean) / std
+    if feature_normalise:
+        X_train = (X_train - mean) / std
+        X_test = (X_test - mean) / std
 
     if target_normalise:
         y_train = (y_train - mean_y) / std_y
