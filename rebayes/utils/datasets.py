@@ -18,6 +18,62 @@ from typing import Union
 from multiprocessing import Pool
 
 
+def showdown_preprocess(train, test, n_warmup=1000, n_test_warmup=100, xaxis=0):
+    (X_train, y_train) = train
+    (X_test, y_test) = test
+
+    y_train = y_train.ravel()
+    y_test = y_test.ravel()
+
+    X_warmup = X_train[:n_warmup]
+    y_warmup = y_train[:n_warmup]
+
+    X_warmup_train = X_warmup[:-n_test_warmup]
+    y_warmup_train = y_warmup[:-n_test_warmup]
+    X_warmup_test = X_warmup[-n_test_warmup:]
+    y_warmup_test = y_warmup[-n_test_warmup:]
+
+    X_learn = X_train[n_warmup:]
+    y_learn = y_train[n_warmup:]
+
+    # Obtain mean and std of the warmup train set
+    ymean = y_warmup_train.mean().item()
+    ystd = y_warmup_train.std().item()
+    Xmean = X_warmup_train.mean(axis=xaxis, keepdims=True)
+    Xstd = X_warmup_train.std(axis=xaxis, keepdims=True)
+    
+    # Normalise target values
+    y_warmup_train = (y_warmup_train - ymean) / ystd
+    y_warmup_test = (y_warmup_test - ymean) / ystd
+    y_learn = (y_learn - ymean) / ystd
+    y_test = (y_test - ymean) / ystd
+    # Normalise input values
+    X_warmup_train = (X_warmup_train - Xmean) / Xstd
+    X_warmup_test = (X_warmup_test - Xmean) / Xstd
+    X_learn = (X_learn - Xmean) / Xstd
+    X_test = (X_test - Xmean) / Xstd
+
+    warmup_train = (X_warmup_train, y_warmup_train)
+    warmup_test = (X_warmup_test, y_warmup_test)
+    train = (X_learn, y_learn)
+    test = (X_test, y_test)
+
+    data = {
+        "warmup_train": warmup_train,
+        "warmup_test": warmup_test,
+        "train": train,
+        "test": test,
+    }
+    norm_cst = {
+        "ymean": ymean,
+        "ystd": ystd,
+        "Xmean": Xmean,
+        "Xstd": Xstd,
+    }
+
+    return data, norm_cst
+
+
 class DataAugmentationFactory:
     """
     This is a base library to process / transform the elements of a numpy
@@ -138,7 +194,6 @@ def load_rotated_mnist(
     frac_train: Union[float, None] = None,
     seed: int = 314,
     sort_by_angle: bool = False,
-    normalise: bool = True,
 ):
     """
     """
@@ -174,17 +229,6 @@ def load_rotated_mnist(
 
     X_train, y_train = X[:num_train], y[:num_train]
     X_test, y_test = X[num_train:], y[num_train:]
-
-    if normalise:
-        mean = X_train.mean()
-        std = X_train.std()
-        mean_y = y_train.mean()
-        std_y = y_train.std()
-
-        X_train = (X_train - mean) / std
-        X_test = (X_test - mean) / std
-        y_train = (y_train - mean_y) / std_y
-        y_test = (y_test - mean_y) / std_y
 
     if sort_by_angle:
         ix_sort = jnp.argsort(y_train)
