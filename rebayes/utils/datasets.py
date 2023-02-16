@@ -16,6 +16,7 @@ from jax import vmap
 from augly import image
 from typing import Union
 from multiprocessing import Pool
+from sklearn.datasets import make_moons
 
 
 def showdown_preprocess(train, test, n_warmup=1000, n_test_warmup=100, xaxis=0):
@@ -309,6 +310,7 @@ def load_1d_synthetic_dataset(n_train=100, n_test=100, key=0, trenches=False, so
 
 
 def normalise_dataset(data, target_variable, frac_train, seed, feature_normalise=False, target_normalise=False):
+    #TODO: rename to uci_preprocess
     """
     Randomise a dataframe, normalise by column and transform to jax arrays
     """
@@ -477,3 +479,18 @@ def load_uci_spam(frac_train=0.8, seed=314):
     data = pd.read_csv(url, header=None)
     data = normalise_dataset(data, target_variable, frac_train, seed, target_normalise=False)
     return data
+
+
+def make_showdown_moons(n_train, n_test, n_train_warmup, n_test_warmup, noise, seed=314):
+    np.random.seed(seed)
+    train = make_moons(n_samples=n_train, noise=noise)
+    test = make_moons(n_samples=n_test, noise=noise)
+    warmup_train = make_moons(n_samples=n_train_warmup, noise=noise)
+    warmup_test = make_moons(n_samples=n_test_warmup, noise=noise)
+
+    train = jax.tree_map(jnp.array, train)
+    test = jax.tree_map(jnp.array, test)
+    warmup_train = jax.tree_map(jnp.array, warmup_train)
+    warmup_test = jax.tree_map(jnp.array, warmup_test)
+
+    return train, test, warmup_train, warmup_test
