@@ -66,7 +66,7 @@ class RebayesLoFi(Rebayes):
         else:
             raise ValueError(f"Unknown method {method}.")
         self.method = method
-        self.sse, self.nobs, self.obs_noise_var = 0.0, 0, 0.0
+        self.sse, self.nobs, self.obs_noise_var = 0.0, 0, 1.0
         self.model_params = model_params
         self.m, self.sv_threshold, self.adaptive_variance = orfit_params
         self.U0 = jnp.zeros((len(model_params.initial_mean), self.m))
@@ -220,7 +220,7 @@ def _orfit_condition_on(m, U, Sigma, apply_fn, x, y, sv_threshold):
     return m_cond, U_cond, Sigma_cond
 
 
-def _lofi_orth_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=0.0):
+def _lofi_orth_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=1.0):
     """Condition step of the low-rank filter algorithm based on orthogonal SVD method.
 
     Args:
@@ -279,7 +279,7 @@ def _lofi_orth_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y,
     return m_cond, U_cond, Sigma_cond
 
 
-def _lofi_full_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=0.0):
+def _lofi_full_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=1.0):
     """Condition step of the low-rank filter with adaptive observation variance.
 
     Args:
@@ -382,7 +382,7 @@ def _lofi_estimate_noise(m, y_cond_mean, u, y, sse, nobs, obs_noise_var, adaptiv
         obs_noise_var (float): Updated estimate of observation noise.
     """
     if not adaptive_variance:
-        return 0.0, 0, 0.0
+        return 0.0, 0, 1.0
 
     m_Y = lambda w: y_cond_mean(w, u)
     yhat = jnp.atleast_1d(m_Y(m))
@@ -390,7 +390,8 @@ def _lofi_estimate_noise(m, y_cond_mean, u, y, sse, nobs, obs_noise_var, adaptiv
     sqerr = ((yhat - y)**2).squeeze()
     sse += sqerr
     nobs += 1
-    obs_noise_var = jnp.min(jnp.array([0.001, sse/nobs]))
+    # obs_noise_var = jnp.min(jnp.array([0.001, sse/nobs]))
+    obs_noise_var = sse/nobs
 
     return sse, nobs, obs_noise_var
 
@@ -484,7 +485,7 @@ def low_rank_filter_orthogonal_svd(
     m_Y, Cov_Y = model_params.emission_mean_function, model_params.emission_cov_function
     gamma = model_params.dynamics_weights
     assert isinstance(gamma, float), "Dynamics decay term must be a scalar."
-    sse, nobs, obs_noise_var = 0.0, 0, 0.0
+    sse, nobs, obs_noise_var = 0.0, 0, 1.0
     
     # Steady-state constraint
     q = (1 - gamma**2) / eta
@@ -546,7 +547,7 @@ def low_rank_filter_full_svd(
     m_Y, Cov_Y = model_params.emission_mean_function, model_params.emission_cov_function
     gamma = model_params.dynamics_weights
     assert isinstance(gamma, float), "Dynamics decay term must be a scalar."
-    sse, nobs, obs_noise_var = 0.0, 0, 0.0
+    sse, nobs, obs_noise_var = 0.0, 0, 1.0
     
     # Steady-state constraint
     q = (1 - gamma**2) / eta
