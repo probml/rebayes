@@ -458,30 +458,30 @@ class LRVGA(Rebayes):
         # XXtr = jnp.einsum("nji,njk->ik", coeffs, coeffs) / num_samples
         return coeffs
 
-    def _step_lrvga(self, state, obs):
+    def _step_lrvga(self, bel, obs):
         """
         Iterated RVGA (§4.2.1). We omit the second iteration of the covariance matrix
         """
         key, x, y = obs
         key_fisher, key_est, key_mu_final = jax.random.split(key, 3)
 
-        X = sample_half_fisher(key_fisher, x, state, n_samples, model, reconstruct_fn)
-        def fa_partial(_, new_state):
-            new_state = fa_approx_step(X, new_state, state, alpha, beta)
-            return new_state
+        X = self._sample_half_fisher(key_fisher, x, bel)
+        def fa_partial(_, new_bel):
+            new_bel = self._fa_approx_step(X, new_bel, bel)
+            return new_bel
 
-        # Algorithm 1 in §3.2 of L-RVGA states that 1 to 3 loops may be enough in
+        # Algorithm 1 in §3.2 of L-RVGA suggests that 1 to 3 loops may be enough in
         # the inner (fa-update) loop
-        state_update = jax.lax.fori_loop(0, n_inner, fa_partial, state)
+        bel_update = jax.lax.fori_loop(0, n_inner, fa_partial, bel)
         # First mu update
-        mu_add = mu_update(key_est, x, y, state, state_update, n_samples, model, reconstruct_fn)
-        mu_new = state.mu + mu_add
-        state_update = state_update.replace(mu=mu_new)
-        # Second mu update: we use the updated state to estimate the gradient
-        mu_add = mu_update(key_mu_final, x, y, state_update, state_update, n_samples, model, reconstruct_fn)
-        mu_new = state.mu + mu_add
-        state_update = state_update.replace(mu=mu_new)
-        return state_update, state_update.mu
+        mu_add = mu_update(key_est, x, y, bel, bel_update, n_samples, model, reconstruct_fn)
+        mu_new = bel.mu + mu_add
+        bel_update = bel_update.replace(mu=mu_new)
+        # Second mu update: we use the updated bel to estimate the gradient
+        mu_add = mu_update(key_mu_final, x, y, bel_update, bel_update, n_samples, model, reconstruct_fn)
+        mu_new = bel.mu + mu_add
+        bel_update = bel_update.replace(mu=mu_new)
+        return bel_update, bel_update.mu
 
     def init_bel(self):
         raise NotImplementedError
