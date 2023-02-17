@@ -9,8 +9,6 @@ Retrieved from https://hal.inria.fr/hal-03501920
 """
 
 import jax
-import chex
-import flax.linen as nn
 import jax.numpy as jnp
 from typing import Callable
 from functools import partial
@@ -52,7 +50,7 @@ def _init_lowrank(key, eps, sigma2, dim_params, dim_latent):
     return W_init, Psi_init
     
 
-def init_lrvga(key, model, X_init, dim_rank, eps, sigma2):
+def init_lrvga(key, model, X_init, dim_rank, std, eps, sigma2):
     key_W, key_mu, key_carry = jax.random.split(key, 3)
 
     mu_init = model.init(key_mu, X_init)
@@ -68,6 +66,7 @@ def init_lrvga(key, model, X_init, dim_rank, eps, sigma2):
         mu=mu_init,
         W=W_init,
         Psi=Psi_init,
+        sigma=std,
     )
 
     return bel_init, reconstruct_fn
@@ -95,35 +94,6 @@ class LRVGA(Rebayes):
         self.n_inner = n_inner # Solve for FA approximation
         self.n_samples = n_samples
         self.grad_log_prob = jax.grad(log_prob, argnums=0)
-
-
-    @staticmethod
-    def _init_lowrank(key, eps, sigma2, dim_params, dim_latent):
-        """
-        Initialise low-rank variational Gaussian approximation
-        components W adn Ps sigma2,
-        See §5.1.2 for initialisation details
-        """
-        psi0 = (1 - eps) / sigma2
-        
-        w0 = jnp.sqrt((eps * dim_params) / (dim_latent * sigma2))
-        
-        W_init = jax.random.normal(key, (dim_params, dim_latent))
-        W_init = W_init / jnp.linalg.norm(W_init, axis=0) * w0
-        Psi_init = jnp.ones(dim_params) * psi0
-        return W_init, Psi_init
-        
-    def init(self, key, model, X_init, dim_rank, eps, sigma2):
-        key_W, key_mu, key_carry = jax.random.split(key, 3)
-
-        mu_init = model.init(key_mu, X_init)
-        mu_init, reconstruct_fn = ravel_pytree(mu_init)
-        mu_init = jnp.array(mu_init)
-        dim_params = len(mu_init)
-
-        W_init, Psi_init = self._init_lowrank(key_mu, eps, sigma2, dim_params, dim_rank)
-        return W_init
-
 
     @staticmethod
     def _sample_lr_params(key, bel):
@@ -170,7 +140,7 @@ class LRVGA(Rebayes):
         E[∇ logp(y|x,θ)]
         """
         mu_sample = self._sample_lr_params(key, bel)
-        grads = self.grad_log_prob(mu_sample, x, y)
+        grads = self.grad_log_prob(mu_sample, bel, x, y)
         return grads
 
     @partial(jax.vmap, in_axes=(None, 0, None, None))
