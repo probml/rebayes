@@ -446,6 +446,32 @@ class LRVGA(Rebayes):
             Psi=Psi
         )
         return new_bel
+
+    def _mu_update(
+        self,
+        key,
+        x: Float[Array, "dim_obs"],
+        y: float,
+        bel_prev: LRVGAState,
+        bel: LRVGAState,
+    ) -> Float[Array, "dim_obs"]:
+        """
+        TODO: Optimise for lower compilation time:
+            1. Refactor sample_predictions
+            2. Refactor sample_grad_expected_log_prob
+        TODO: Rewrite the V term using the Woodbury matrix identity
+        """
+        W = bel.W
+        Psi_inv = 1 / bel.Psi
+        dim_full, _ = W.shape
+        I = jnp.eye(dim_full)
+
+        keys_grad = jax.random.split(key, self.n_samples)
+
+        V = W @ W.T + bel.Psi * I
+        exp_grads_log_prob = self._sample_grad_expected_log_prob(keys_grad, bel_prev, x, y).mean(axis=0)
+        gain = jnp.linalg.solve(V, exp_grads_log_prob)
+        return gain
         
     @partial(jax.jit, static_argnums=(0,))
     def _sample_half_fisher(self, key, x, bel):
@@ -472,7 +498,7 @@ class LRVGA(Rebayes):
 
         # Algorithm 1 in §3.2 of L-RVGA suggests that 1 to 3 loops may be enough in
         # the inner (fa-update) loop
-        bel_update = jax.lax.fori_loop(0, n_inner, fa_partial, bel)
+        bel_update = jax.lax.fori_loop(0, self.n_inner, fa_partial, bel)
         # First mu update
         mu_add = mu_update(key_est, x, y, bel, bel_update, n_samples, model, reconstruct_fn)
         mu_new = bel.mu + mu_add
