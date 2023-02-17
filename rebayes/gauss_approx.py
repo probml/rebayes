@@ -459,6 +459,8 @@ class LRVGA(Rebayes):
         bel: LRVGAState,
     ) -> Float[Array, "dim_obs"]:
         """
+        Obtain gain matrix-vector multiplication for the mean update.
+
         TODO: Optimise for lower compilation time:
             1. Refactor sample_predictions
             2. Refactor sample_grad_expected_log_prob
@@ -476,7 +478,6 @@ class LRVGA(Rebayes):
         gain = jnp.linalg.solve(V, exp_grads_log_prob)
         return gain
         
-    @partial(jax.jit, static_argnums=(0,))
     def _sample_half_fisher(self, key, x, bel):
         """
         Estimate X such that
@@ -499,13 +500,16 @@ class LRVGA(Rebayes):
             return new_bel
 
         # Algorithm 1 in §3.2 of L-RVGA suggests that 1 to 3 loops may be enough in
-        # the inner (fa-update) loop
-        bel_update = jax.lax.fori_loop(0, self.n_inner, fa_partial, bel)
-        # First mu update
+        # the inner (fa-update) loop (See comments in Algorithm 1)
+
+        # Estimate hat{P} (Eq 36 - 1)
+        bel_update = jax.lax.fori_loop(0, self.n_inner_fa, fa_partial, bel)
+        # First mu update (Eq 36 - 2)
         mu_add = self._mu_update(key_est, x, y, bel, bel_update)
         mu_new = bel.mu + mu_add
         bel_update = bel_update.replace(mu=mu_new)
-        # Second mu update: we use the updated bel to estimate the gradient
+        # Second mu update (Eq 36 - 4)
+        # we use the updated bel to estimate the gradient
         mu_add = self._mu_update(key_mu_final, x, y, bel_update, bel_update)
         mu_new = bel.mu + mu_add
         bel_update = bel_update.replace(mu=mu_new, step=bel_update.step + 1)
@@ -527,5 +531,10 @@ class LRVGA(Rebayes):
 
     def update_state(self, bel, Xt, yt):
         key = jax.random.fold_in(bel.key, bel.step)
-        bel = self._step_lrvga(bel, key, Xt, yt)
+
+        def _step(i, bel):
+            key_i = jax.random.fold_in(key, i)
+            bel = self._step_lrvga(bel, key_i, Xt, yt)
+            return bel
+        bel = jax.lax.fori_loop(0, self.n_inner, _step, bel)
         return bel
