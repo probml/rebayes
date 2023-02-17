@@ -31,10 +31,12 @@ class LRVGAState:
 # Homoskedastic case (we estimate sigma at a warmup stage)
 @struct.dataclass
 class FlaxLRVGAState:
+    key: jax.random.PRNGKey
     mu: Float[Array, "dim_params"]
     W: Float[Array, "dim_params dim_subspace"]
     Psi: Float[Array, "dim_params"]
     sigma: float = 1.0
+    step: int = 0
 
     @property
     def mean(self):
@@ -64,7 +66,7 @@ class Config:
 
 
 def init_state_lrvga(key, model, X, dim_latent, sigma2_init, num_samples, eps):
-    key_W, key_mu = jax.random.split(key)
+    key_W, key_mu, key_carry = jax.random.split(key, 3)
 
     mu_init = model.init(key_mu, X)
     mu_init, reconstruct_fn = ravel_pytree(mu_init)
@@ -79,6 +81,7 @@ def init_state_lrvga(key, model, X, dim_latent, sigma2_init, num_samples, eps):
     Psi_init = jnp.ones(dim_params) * psi0
     
     state_init = FlaxLRVGAState(
+        key=key_carry,
         mu=mu_init,
         W=W_init,
         Psi=Psi_init,
@@ -484,11 +487,10 @@ class LRVGA(Rebayes):
         # XXtr = jnp.einsum("nji,njk->ik", coeffs, coeffs) / num_samples
         return coeffs
 
-    def _step_lrvga(self, bel, obs):
+    def _step_lrvga(self, bel, key, x, y):
         """
         Iterated RVGA (§4.2.1). We omit the second iteration of the covariance matrix
         """
-        key, x, y = obs
         key_fisher, key_est, key_mu_final = jax.random.split(key, 3)
 
         X = self._sample_half_fisher(key_fisher, x, bel)
@@ -500,20 +502,20 @@ class LRVGA(Rebayes):
         # the inner (fa-update) loop
         bel_update = jax.lax.fori_loop(0, self.n_inner, fa_partial, bel)
         # First mu update
-        mu_add = mu_update(key_est, x, y, bel, bel_update, n_samples, model, reconstruct_fn)
+        mu_add = self._mu_update(key_est, x, y, bel, bel_update)
         mu_new = bel.mu + mu_add
         bel_update = bel_update.replace(mu=mu_new)
         # Second mu update: we use the updated bel to estimate the gradient
-        mu_add = mu_update(key_mu_final, x, y, bel_update, bel_update, n_samples, model, reconstruct_fn)
+        mu_add = self._mu_update(key_mu_final, x, y, bel_update, bel_update)
         mu_new = bel.mu + mu_add
-        bel_update = bel_update.replace(mu=mu_new)
-        return bel_update, bel_update.mu
+        bel_update = bel_update.replace(mu=mu_new, step=bel_update.step + 1)
+        return bel_update
 
     def init_bel(self):
         raise NotImplementedError
 
     def predict_obs(self, bel, X):
-        yhat = self.fwd_link(bel, X)
+        yhat = self.fwd_link(bel.mean, bel, X)[0]
         return yhat
 
     def predict_state(self, bel):
@@ -524,4 +526,6 @@ class LRVGA(Rebayes):
         return bel
 
     def update_state(self, bel, Xt, yt):
-        ...
+        key = jax.random.fold_in(bel.key, bel.step)
+        bel = self._step_lrvga(bel, key, Xt, yt)
+        return bel
