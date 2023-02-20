@@ -30,6 +30,25 @@ class LoFiBel:
     nobs: int=None
     obs_noise_var: float=None
 
+    eta: float=None
+    gamma: float=None
+    q: float=None
+
+    @property
+    def cov(self):
+        """
+        For large-dimensional systems,
+        use at your own risk.
+        """
+        num_features = len(self.mean)
+        D = self.sigma ** 2 / (self.eta * (self.eta + self.sigma ** 2))
+        D = jnp.diag(D)
+
+        I = jnp.eye(num_features)
+        cov = I / self.eta - self.basis @ D @ self.basis.T
+        return cov
+
+
 
 class LoFiParams(NamedTuple):
     """Lightweight container for ORFit parameters.
@@ -76,6 +95,7 @@ class RebayesLoFi(Rebayes):
         return LoFiBel(
             mean=self.model_params.initial_mean, basis=self.U0, sigma=self.Sigma0,
             sse=self.sse, nobs=self.nobs, obs_noise_var=self.obs_noise_var,
+            eta=self.eta, gamma=self.gamma, q=self.q,
         )
     
     @partial(jit, static_argnums=(0,))
@@ -88,7 +108,7 @@ class RebayesLoFi(Rebayes):
             m_pred, Sigma_pred = _lofi_predict(m, Sigma, self.gamma, self.q)
             U_pred = U
 
-        return LoFiBel(
+        return bel.replace(
             mean=m_pred, basis=U_pred, sigma=Sigma_pred,
             sse=sse, nobs=nobs, obs_noise_var=obs_noise_var,
         )
@@ -145,7 +165,7 @@ class RebayesLoFi(Rebayes):
                 u, y, sse, nobs, obs_noise_var, self.adaptive_variance
             )
 
-        return LoFiBel(
+        return bel.replace(
             mean=m_cond, basis=U_cond, sigma=Sigma_cond, sse=sse, nobs=nobs, 
             obs_noise_var=obs_noise_var
         )
