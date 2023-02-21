@@ -74,7 +74,9 @@ class RebayesLoFi(Rebayes):
         method: str,
     ):
         if method == 'orfit':
-            pass
+            self.eta = None
+            self.gamma = None
+            self.q = None
         elif method == 'full_svd_lofi' or method == 'orth_svd_lofi':
             initial_cov = model_params.initial_covariance
             assert isinstance(initial_cov, float) and initial_cov > 0, "Initial covariance must be a positive scalar."
@@ -371,10 +373,10 @@ def _lofi_estimate_noise(m, y_cond_mean, u, y, sse, nobs, obs_noise_var, adaptiv
     m_Y = lambda w: y_cond_mean(w, u)
     yhat = jnp.atleast_1d(m_Y(m))
     
-    sqerr = ((yhat - y)**2).squeeze()
+    sqerr = ((yhat - y) @ (yhat - y)).squeeze()
     sse += sqerr
     nobs += 1
-    obs_noise_var = jnp.max(jnp.array([0.01, sse/nobs]))
+    obs_noise_var = jnp.max(jnp.array([0.01, obs_noise_var + 1/nobs * (sse/nobs - obs_noise_var)]))
 
     return sse, nobs, obs_noise_var
 
