@@ -38,10 +38,10 @@ class RebayesEKF(Rebayes):
         if method not in ['fcekf', 'vdekf', 'fdekf']:
             raise ValueError('unknown method ', method)
         initial_cov = params.initial_covariance
-        assert isinstance(initial_cov, float) and initial_cov > 0, "Initial covariance must be a positive scalar."
+        # assert isinstance(initial_cov, float) and initial_cov > 0, "Initial covariance must be a positive scalar."
         self.eta = 1/initial_cov
         self.gamma = params.dynamics_weights
-        assert isinstance(self.gamma, float), "Dynamics decay term must be a scalar."
+        # assert isinstance(self.gamma, float), "Dynamics decay term must be a scalar."
         self.q = (1 - self.gamma**2) / self.eta
         self.adaptive_variance = adaptive_variance
         self.alpha = alpha

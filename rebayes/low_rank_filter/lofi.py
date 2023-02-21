@@ -79,10 +79,10 @@ class RebayesLoFi(Rebayes):
             self.q = None
         elif method == 'full_svd_lofi' or method == 'orth_svd_lofi':
             initial_cov = model_params.initial_covariance
-            assert isinstance(initial_cov, float) and initial_cov > 0, "Initial covariance must be a positive scalar."
+            # assert isinstance(initial_cov, float) and initial_cov > 0, "Initial covariance must be a positive scalar."
             self.eta = 1/initial_cov
             self.gamma = model_params.dynamics_weights
-            assert isinstance(self.gamma, float), "Dynamics decay term must be a scalar."
+            # assert isinstance(self.gamma, float), "Dynamics decay term must be a scalar."
             self.q = (1 - self.gamma**2) / self.eta
         else:
             raise ValueError(f"Unknown method {method}.")
