@@ -70,8 +70,9 @@ class RebayesLoFi(Rebayes):
     def __init__(
         self,
         model_params: RebayesParams,
-        orfit_params: LoFiParams,
+        lofi_params: LoFiParams,
         method: str,
+        alpha: float=0.0 # Covariance inflation factor for M-LoFi
     ):
         if method == 'orfit':
             self.eta = None
@@ -89,9 +90,10 @@ class RebayesLoFi(Rebayes):
         self.method = method
         self.sse, self.nobs, self.obs_noise_var = 0.0, 0, 1.0
         self.model_params = model_params
-        self.m, self.sv_threshold, self.adaptive_variance = orfit_params
+        self.m, self.sv_threshold, self.adaptive_variance = lofi_params
         self.U0 = jnp.zeros((len(model_params.initial_mean), self.m))
         self.Sigma0 = jnp.zeros((self.m,))
+        self.alpha = alpha
 
     def init_bel(self):
         return LoFiBel(
@@ -154,13 +156,13 @@ class RebayesLoFi(Rebayes):
                 m_cond, U_cond, Sigma_cond = _lofi_full_svd_condition_on(
                     m, U, Sigma, self.eta, self.model_params.emission_mean_function, 
                     self.model_params.emission_cov_function, u, y, self.sv_threshold, 
-                    self.adaptive_variance, obs_noise_var,
+                    self.adaptive_variance, obs_noise_var, self.alpha
                 )
             elif self.method == 'orth_svd_lofi':
                 m_cond, U_cond, Sigma_cond = _lofi_orth_svd_condition_on(
                     m, U, Sigma, self.eta, self.model_params.emission_mean_function, 
                     self.model_params.emission_cov_function, u, y, self.sv_threshold, 
-                    self.adaptive_variance
+                    self.adaptive_variance, obs_noise_var, self.alpha
                 )
             sse, nobs, obs_noise_var = _lofi_estimate_noise(
                 m_cond, self.model_params.emission_mean_function,
@@ -242,7 +244,7 @@ def _orfit_condition_on(m, U, Sigma, apply_fn, x, y, sv_threshold):
     return m_cond, U_cond, Sigma_cond
 
 
-def _lofi_orth_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=1.0):
+def _lofi_orth_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=1.0, alpha=0.0):
     """Condition step of the low-rank filter algorithm based on orthogonal SVD method.
 
     Args:
@@ -256,6 +258,7 @@ def _lofi_orth_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y,
         y (D_obs,): Emission.
         sv_threshold (float): Threshold for singular values.
         adaptive_variance (bool): Whether to use adaptive variance.
+        alpha (float): Covariance inflation factor.
 
     Returns:
         m_cond (D_hid,): Posterior mean.
@@ -297,11 +300,12 @@ def _lofi_orth_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y,
         return (U_cond, Sigma_cond), (U_cond, Sigma_cond)
 
     (U_cond, Sigma_cond), _ = scan(_update_basis, (U, Sigma), jnp.arange(yhat.shape[0]))
+    Sigma_cond = (1.0-alpha) * Sigma_cond # Covariance inflation
 
     return m_cond, U_cond, Sigma_cond
 
 
-def _lofi_full_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=1.0):
+def _lofi_full_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=1.0, alpha=0.0):
     """Condition step of the low-rank filter with adaptive observation variance.
 
     Args:
@@ -315,6 +319,7 @@ def _lofi_full_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y,
         y (D_obs,): Emission.
         sv_threshold (float): Threshold for singular values.
         adaptive_variance (bool): Whether to use adaptive variance.
+        alpha (float): Covariance inflation factor.
 
     Returns:
         m_cond (D_hid,): Posterior mean.
@@ -343,6 +348,7 @@ def _lofi_full_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y,
 
     U_cond = u[:, :U.shape[1]]
     Sigma_cond = lamb[:U.shape[1]]
+    Sigma_cond *= (1-alpha) # Covariance inflation
 
     m_cond = m + K @ (y - yhat)
 
