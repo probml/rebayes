@@ -33,6 +33,11 @@ class LRVGAState:
     def mean(self):
         return self.mu
 
+    @property
+    def cov(self):
+        precision_matrix = self.W @ self.W.T + jnp.diag(self.Psi)
+        return jnp.linalg.inv(precision_matrix)
+
 
 def _init_lowrank(key, eps, sigma2, dim_params, dim_latent):
     """
@@ -41,14 +46,14 @@ def _init_lowrank(key, eps, sigma2, dim_params, dim_latent):
     See §5.1.2 for initialisation details
     """
     psi0 = (1 - eps) / sigma2
-    
+
     w0 = jnp.sqrt((eps * dim_params) / (dim_latent * sigma2))
-    
+
     W_init = jax.random.normal(key, (dim_params, dim_latent))
     W_init = W_init / jnp.linalg.norm(W_init, axis=0) * w0
     Psi_init = jnp.ones(dim_params) * psi0
     return W_init, Psi_init
-    
+
 
 def init_lrvga(key, model, X_init, dim_rank, std, eps, sigma2):
     key_W, key_mu, key_carry = jax.random.split(key, 3)
@@ -162,12 +167,12 @@ class LRVGA(Rebayes):
         # Load data
         W_prev, Psi_prev = bel_prev.W, bel_prev.Psi
         W, Psi = bel.W, bel.Psi
-        
+
         # Initialise basic transformations
         _, dim_latent = W.shape
         I = jnp.eye(dim_latent)
         Psi_inv = 1 / Psi
-        
+
         # Construct helper matrices
         M = I + jnp.einsum("ij,i,ik->jk", W, Psi_inv, W)
         M_inv = jnp.linalg.inv(M)
@@ -187,7 +192,7 @@ class LRVGA(Rebayes):
             self.alpha * Psi_prev -
             jnp.einsum("ij,jk,ik->i", W, M_inv, V)
         )
-        
+
         new_bel = bel.replace(
             mu=bel.mu,
             W=W,
@@ -222,7 +227,7 @@ class LRVGA(Rebayes):
         exp_grads_log_prob = self._sample_grad_expected_log_prob(keys_grad, bel_prev, x, y).mean(axis=0)
         gain = jnp.linalg.solve(V, exp_grads_log_prob)
         return gain
-        
+
     def _sample_half_fisher(self, key, x, bel):
         """
         Estimate X such that
@@ -281,5 +286,5 @@ class LRVGA(Rebayes):
             key_i = jax.random.fold_in(key, i)
             bel = self._step_lrvga(bel, key_i, Xt, yt)
             return bel
-        bel = jax.lax.fori_loop(0, self.n_inner, _step, bel)
+        bel = jax.lax.fori_loop(0, self.n_outer, _step, bel)
         return bel
