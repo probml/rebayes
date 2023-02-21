@@ -375,7 +375,7 @@ def _lofi_estimate_noise(m, y_cond_mean, u, y, sse, nobs, obs_noise_var, adaptiv
     
     sqerr = ((yhat - y).T @ (yhat - y)).squeeze() / yhat.shape[0]
     nobs += 1
-    obs_noise_var = obs_noise_var + 1/nobs * (sqerr - obs_noise_var)
+    obs_noise_var = jnp.max(jnp.array([1e-6, obs_noise_var + 1/nobs * (sqerr - obs_noise_var)]))
 
     return sse, nobs, obs_noise_var
 
