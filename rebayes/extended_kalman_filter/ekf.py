@@ -31,6 +31,7 @@ class RebayesEKF(Rebayes):
         params: RebayesParams,
         method: str,
         adaptive_variance: bool = False,
+        alpha: float=0.0 # Covariance inflation factor for M-EKF
     ):
         self.params = params
         self.method = method
@@ -108,7 +109,7 @@ class RebayesEKF(Rebayes):
         return EKFBel(mean=mu, cov=Sigma, sse=sse, nobs=nobs, obs_noise_var=obs_noise_var)
 
 
-def _full_covariance_condition_on(m, P, y_cond_mean, y_cond_cov, u, y, num_iter, adaptive_variance=False, obs_noise_var=0.0):
+def _full_covariance_condition_on(m, P, y_cond_mean, y_cond_cov, u, y, num_iter, adaptive_variance=False, obs_noise_var=0.0, alpha=0.0):
     """Condition on the emission using a full-covariance EKF.
     Note that this method uses `jnp.linalg.lstsq()` to solve the linear system
     to avoid numerical issues with `jnp.linalg.solve()`.
@@ -122,6 +123,7 @@ def _full_covariance_condition_on(m, P, y_cond_mean, y_cond_cov, u, y, num_iter,
         y (D_obs,): Emission.
         num_iter (int): Number of re-linearizations around posterior.
         adaptive_variance (bool): Whether to use adaptive variance.
+        alpha (float): Covariance inflation factor.
 
     Returns:
         mu_cond (D_hid,): Posterior mean.
@@ -142,7 +144,7 @@ def _full_covariance_condition_on(m, P, y_cond_mean, y_cond_cov, u, y, num_iter,
         C = prior_cov @ H.T
         K = jnp.linalg.lstsq(S, C.T)[0].T
         posterior_mean = prior_mean + K @ (y - yhat)
-        posterior_cov = prior_cov - K @ S @ K.T
+        posterior_cov = (1+alpha) * (prior_cov - K @ S @ K.T)
         return (posterior_mean, posterior_cov), _
 
     # Iterate re-linearization over posterior mean and covariance
@@ -151,7 +153,7 @@ def _full_covariance_condition_on(m, P, y_cond_mean, y_cond_cov, u, y, num_iter,
     return mu_cond, Sigma_cond
 
 
-def _fully_decoupled_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, num_iter, adaptive_variance=False, obs_noise_var=0.0):
+def _fully_decoupled_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, num_iter, adaptive_variance=False, obs_noise_var=0.0, alpha=0.0):
     """Condition on the emission using a fully decoupled EKF.
 
     Args:
@@ -163,6 +165,7 @@ def _fully_decoupled_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, 
         y (D_obs,): Emission.
         num_iter (int): Number of re-linearizations around posterior.
         adaptive_variance (bool): Whether to use adaptive variance.
+        alpha (float): Covariance inflation factor.
 
     Returns:
         mu_cond (D_hid,): Posterior mean.
@@ -182,7 +185,7 @@ def _fully_decoupled_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, 
         S = R + (vmap(lambda hh, pp: pp * jnp.outer(hh, hh), (1, 0))(H, prior_cov)).sum(axis=0)
         K = prior_cov[:, None] * jnp.linalg.lstsq(S.T, H)[0].T
         posterior_mean = prior_mean + K @ (y - yhat)
-        posterior_cov = prior_cov - prior_cov * vmap(lambda kk, hh: kk @ hh, (0, 1))(K, H)
+        posterior_cov = (1+alpha) * (prior_cov - prior_cov * vmap(lambda kk, hh: kk @ hh, (0, 1))(K, H))
         return (posterior_mean, posterior_cov), _
 
     # Iterate re-linearization over posterior mean and covariance
@@ -191,7 +194,7 @@ def _fully_decoupled_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, 
     return mu_cond, Sigma_cond
 
 
-def _variational_diagonal_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, num_iter, adaptive_variance=False, obs_noise_var=0.0):
+def _variational_diagonal_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, num_iter, adaptive_variance=False, obs_noise_var=0.0, alpha=0.0):
     """Condition on the emission using a variational diagonal EKF.
 
     Args:
@@ -203,6 +206,7 @@ def _variational_diagonal_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u
         y (D_obs,): Emission.
         num_iter (int): Number of re-linearizations around posterior.
         adaptive_variance (bool): Whether to use adaptive variance.
+        alpha (float): Covariance inflation factor.
 
     Returns:
         mu_cond (D_hid,): Posterior mean.
@@ -222,7 +226,7 @@ def _variational_diagonal_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u
         K = jnp.linalg.lstsq((R + (prior_cov * H) @ H.T).T, prior_cov * H)[0].T
         R_inv = jnp.linalg.lstsq(R, jnp.eye(R.shape[0]))[0]
         posterior_cov = 1/(1/prior_cov + ((H.T @ R_inv) * H.T).sum(-1))
-        posterior_mean = prior_mean + K @(y - yhat)
+        posterior_mean = (1+alpha) * (prior_mean + K @(y - yhat))
         return (posterior_mean, posterior_cov), _
 
     # Iterate re-linearization over posterior mean and covariance
@@ -294,10 +298,10 @@ def _ekf_estimate_noise(m, y_cond_mean, u, y, sse, nobs, obs_noise_var, adaptive
     m_Y = lambda w: y_cond_mean(w, u)
     yhat = jnp.atleast_1d(m_Y(m))
     
-    sqerr = ((yhat - y)**2).squeeze()
+    sqerr = ((yhat - y) @ (yhat - y)).squeeze()
     sse += sqerr
     nobs += 1
-    obs_noise_var = jnp.max(jnp.array([0.001, sse/nobs]))
+    obs_noise_var = jnp.max(jnp.array([0.01, obs_noise_var + 1/nobs * (sse/nobs - obs_noise_var)]))
 
     return sse, nobs, obs_noise_var
 
