@@ -44,6 +44,7 @@ class RebayesEKF(Rebayes):
         assert isinstance(self.gamma, float), "Dynamics decay term must be a scalar."
         self.q = (1 - self.gamma**2) / self.eta
         self.adaptive_variance = adaptive_variance
+        self.alpha = alpha
         self.sse, self.nobs, self.obs_noise_var = 0.0, 0, 0.0
 
     def init_bel(self):
@@ -102,7 +103,7 @@ class RebayesEKF(Rebayes):
         mu, Sigma = self.update_fn(m, P, self.params.emission_mean_function, 
                                    self.params.emission_cov_function, u, y, 
                                    num_iter=1, adaptive_variance=self.adaptive_variance,
-                                   obs_noise_var=obs_noise_var)
+                                   obs_noise_var=obs_noise_var, alpha=self.alpha)
         sse, nobs, obs_noise_var = _ekf_estimate_noise(mu, self.params.emission_mean_function, 
                                                        u, y, sse, nobs, obs_noise_var,
                                                        adaptive_variance=self.adaptive_variance)
@@ -298,10 +299,9 @@ def _ekf_estimate_noise(m, y_cond_mean, u, y, sse, nobs, obs_noise_var, adaptive
     m_Y = lambda w: y_cond_mean(w, u)
     yhat = jnp.atleast_1d(m_Y(m))
     
-    sqerr = ((yhat - y) @ (yhat - y)).squeeze()
-    sse += sqerr
+    sqerr = ((yhat - y).T @ (yhat - y)).squeeze() / yhat.shape[0]
     nobs += 1
-    obs_noise_var = jnp.max(jnp.array([0.01, obs_noise_var + 1/nobs * (sse/nobs - obs_noise_var)]))
+    obs_noise_var = obs_noise_var + 1/nobs * (sqerr - obs_noise_var)
 
     return sse, nobs, obs_noise_var
 
