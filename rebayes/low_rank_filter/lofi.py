@@ -104,17 +104,17 @@ class RebayesLoFi(Rebayes):
     
     @partial(jit, static_argnums=(0,))
     def predict_state(self, bel):
-        m, U, Sigma, sse, nobs, obs_noise_var = \
-            bel.mean, bel.basis, bel.sigma, bel.sse, bel.nobs, bel.obs_noise_var
+        m, U, Sigma, sse, nobs, obs_noise_var, eta = \
+            bel.mean, bel.basis, bel.sigma, bel.sse, bel.nobs, bel.obs_noise_var, bel.eta
         if self.method == 'orfit':
             return bel
         else:
-            m_pred, Sigma_pred = _lofi_predict(m, Sigma, self.gamma, self.q)
+            m_pred, Sigma_pred, eta_pred = _lofi_predict(m, Sigma, self.gamma, self.q, eta)
             U_pred = U
 
         return bel.replace(
             mean=m_pred, basis=U_pred, sigma=Sigma_pred,
-            sse=sse, nobs=nobs, obs_noise_var=obs_noise_var,
+            sse=sse, nobs=nobs, obs_noise_var=obs_noise_var, eta=eta_pred
         )
 
     @partial(jit, static_argnums=(0,))
@@ -343,7 +343,7 @@ def _lofi_full_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y,
     # Update the U matrix
     u, lamb, _ = jnp.linalg.svd(W_tilde, full_matrices=False)
 
-    D = (lamb**2)/(eta**2 * jnp.ones(lamb.shape) + eta * lamb**2)
+    D = (lamb**2)/(eta**2 + eta * lamb**2)
     K = (H.T @ A) @ A.T/eta - (D * u) @ (u.T @ ((H.T @ A) @ A.T))
 
     U_cond = u[:, :U.shape[1]]
@@ -386,7 +386,7 @@ def _lofi_estimate_noise(m, y_cond_mean, u, y, sse, nobs, obs_noise_var, adaptiv
     return sse, nobs, obs_noise_var
 
 
-def _lofi_predict(m, Sigma, gamma, q):
+def _lofi_predict(m, Sigma, gamma, q, eta):
     """Predict step of the low-rank filter algorithm.
 
     Args:
@@ -394,15 +394,18 @@ def _lofi_predict(m, Sigma, gamma, q):
         Sigma (D_mem,): Prior singluar values.
         gamma (float): Dynamics decay factor.
         q (float): Dynamics noise factor.
+        eta (float): Prior precision.
 
     Returns:
         m_pred (D_hid,): Predicted mean.
         Sigma_pred (D_mem,): Predicted singular values.
+        eta_pred (float): Predicted precision.
     """
     m_pred = gamma * m
-    Sigma_pred = jnp.sqrt((gamma**2 * Sigma**2)/(jnp.ones(Sigma.shape) + q * Sigma**2))
+    Sigma_pred = jnp.sqrt((gamma**2 * Sigma**2)/((gamma**2 + q * eta) * (gamma**2 + q*eta + q*Sigma**2)))
+    eta_pred = eta/(gamma**2 + q*eta)
 
-    return m_pred, Sigma_pred
+    return m_pred, Sigma_pred, eta_pred
 
 
 def orthogonal_recursive_fitting(
@@ -481,16 +484,16 @@ def low_rank_filter_orthogonal_svd(
     q = (1 - gamma**2) / eta
 
     def _step(carry, t):
-        mean, U, Sigma, sse, nobs, obs_noise_var = carry
+        mean, U, Sigma, eta, sse, nobs, obs_noise_var = carry
 
         # Get input and emission and compute Jacobians
         x, y = inputs[t], emissions[t]
 
         # Predict the next state
-        pred_mean, pred_Sigma = _lofi_predict(mean, Sigma, gamma, q)
+        pred_mean, pred_Sigma, pred_eta = _lofi_predict(mean, Sigma, gamma, q, eta)
 
         # Condition on the emission
-        filtered_mean, filtered_U, filtered_Sigma = _lofi_orth_svd_condition_on(pred_mean, U, pred_Sigma, eta, m_Y, Cov_Y, x, y, sv_threshold, adaptive_variance, obs_noise_var)
+        filtered_mean, filtered_U, filtered_Sigma = _lofi_orth_svd_condition_on(pred_mean, U, pred_Sigma, pred_eta, m_Y, Cov_Y, x, y, sv_threshold, adaptive_variance, obs_noise_var)
 
         # Update noise
         sse, nobs, obs_noise_var = _lofi_estimate_noise(filtered_mean, filtered_U, m_Y, x, y, sse, nobs, obs_noise_var, adaptive_variance)
@@ -498,7 +501,7 @@ def low_rank_filter_orthogonal_svd(
         return (pred_mean, filtered_U, pred_Sigma, sse, nobs, obs_noise_var), (filtered_mean, filtered_U, filtered_Sigma)
     
     # Run ORFit
-    carry = (initial_mean, U, Sigma, sse, nobs, obs_noise_var)
+    carry = (initial_mean, U, Sigma, eta, sse, nobs, obs_noise_var)
     _, (filtered_means, filtered_bases, filtered_Sigmas) = scan(_step, carry, jnp.arange(len(inputs)))
     filtered_posterior = PosteriorLoFiFiltered(
         filtered_means=filtered_means, 
@@ -543,18 +546,18 @@ def low_rank_filter_full_svd(
     q = (1 - gamma**2) / eta
 
     def _step(carry, t):
-        mean, U, Sigma, sse, nobs, obs_noise_var = carry
+        mean, U, Sigma, eta, sse, nobs, obs_noise_var = carry
 
         # Get input and emission and compute Jacobians
         x, y = inputs[t], emissions[t]
 
         # Predict the next state
-        pred_mean, pred_Sigma = _lofi_predict(mean, Sigma, gamma, q)
+        pred_mean, pred_Sigma, pred_eta = _lofi_predict(mean, Sigma, gamma, q, eta)
 
         # Condition on the emission
         filtered_mean, filtered_U, filtered_Sigma = \
             _lofi_full_svd_condition_on(
-                pred_mean, U, pred_Sigma, eta, m_Y, Cov_Y, x, y, sv_threshold, adaptive_variance, obs_noise_var
+                pred_mean, U, pred_Sigma, pred_eta, m_Y, Cov_Y, x, y, sv_threshold, adaptive_variance, obs_noise_var
             )
 
         # Update noise
@@ -563,7 +566,7 @@ def low_rank_filter_full_svd(
         return (pred_mean, filtered_U, pred_Sigma, sse, nobs, obs_noise_var), (filtered_mean, filtered_U, filtered_Sigma)
     
     # Run ORFit
-    carry = (initial_mean, U, Sigma, sse, nobs, obs_noise_var)
+    carry = (initial_mean, U, Sigma, eta, sse, nobs, obs_noise_var)
     _, (filtered_means, filtered_bases, filtered_Sigmas) = scan(_step, carry, jnp.arange(len(inputs)))
     filtered_posterior = PosteriorLoFiFiltered(
         filtered_means=filtered_means, 
