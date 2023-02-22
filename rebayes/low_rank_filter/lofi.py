@@ -150,6 +150,10 @@ class RebayesLoFi(Rebayes):
                 m, U, Sigma, self.model_params.emission_mean_function, u, y, self.sv_threshold
             )
         else:
+            nobs, obs_noise_var = _lofi_estimate_noise(
+                m, self.model_params.emission_mean_function,
+                u, y, nobs, obs_noise_var, self.adaptive_variance
+            )
             if self.method == 'full_svd_lofi':
                 m_cond, U_cond, Sigma_cond = _lofi_full_svd_condition_on(
                     m, U, Sigma, self.eta, self.model_params.emission_mean_function, 
@@ -162,10 +166,6 @@ class RebayesLoFi(Rebayes):
                     self.model_params.emission_cov_function, u, y, self.sv_threshold, 
                     self.adaptive_variance, obs_noise_var
                 )
-            nobs, obs_noise_var = _lofi_estimate_noise(
-                m_cond, self.model_params.emission_mean_function,
-                u, y, nobs, obs_noise_var, self.adaptive_variance
-            )
 
         return bel.replace(
             mean=m_cond, basis=U_cond, sigma=Sigma_cond, nobs=nobs, 
