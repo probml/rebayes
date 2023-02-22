@@ -96,7 +96,7 @@ def setup_ssm():
         initial_mean=mu0,
         initial_covariance=1.0,
         dynamics_weights = 1.0,
-        dynamics_covariance = None,
+        dynamics_covariance = 0.0,
         emission_mean_function = lambda w, x: apply_fn(w, x),
         emission_cov_function = lambda w, x: obs_var
     )
@@ -107,7 +107,7 @@ def setup_ssm():
 def test_rebayes_loop():
     (X, Y) = make_data()
     params  = setup_ssm()
-    estimator = RebayesEKF(params, method='fcekf', adaptive_variance=False)
+    estimator = RebayesEKF(params, method='fcekf')
 
     lgssm_posterior = run_kalman()
     mu_kf = lgssm_posterior.filtered_means
@@ -134,7 +134,7 @@ def test_rebayes_loop():
 def test_rebayes_scan():
     (X, Y) = make_data()
     params  = setup_ssm()
-    estimator = RebayesEKF(params, method='fcekf', adaptive_variance=False)
+    estimator = RebayesEKF(params, method='fcekf')
 
     lgssm_posterior = run_kalman()
     mu_kf = lgssm_posterior.filtered_means
