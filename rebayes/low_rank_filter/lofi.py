@@ -366,7 +366,7 @@ def _lofi_estimate_noise(m, y_cond_mean, u, y, nobs, obs_noise_var, adaptive_var
         obs_noise_var (float): Updated estimate of observation noise.
     """
     if not adaptive_variance:
-        return 0.0, 0, 1.0
+        return 0, 0.0
 
     m_Y = lambda w: y_cond_mean(w, u)
     yhat = jnp.atleast_1d(m_Y(m))
@@ -396,7 +396,7 @@ def _lofi_predict(m, Sigma, gamma, q, eta, alpha=0.0):
     """
     m_pred = gamma * m
     Sigma_pred = jnp.sqrt((gamma**2 * Sigma**2)/((gamma**2 + q * eta) * (gamma**2 + q*eta + q*Sigma**2)))
-    Sigma_pred = (1.0-alpha) * Sigma_pred # Covariance inflation
+    Sigma_pred = Sigma_pred/(1.0+alpha) # Covariance inflation
     eta_pred = eta/(gamma**2 + q*eta)
 
     return m_pred, Sigma_pred, eta_pred
