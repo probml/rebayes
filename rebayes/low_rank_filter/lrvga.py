@@ -12,11 +12,10 @@ import jax
 import jax.numpy as jnp
 from typing import Callable
 from functools import partial
-from dataclasses import dataclass
 from jaxtyping import Array, Float
-from jax.flatten_util import ravel_pytree
-from rebayes.base import Rebayes
 from flax import struct
+from rebayes.base import Rebayes, Gaussian
+from jax.flatten_util import ravel_pytree
 
 
 # Homoskedastic case (we estimate sigma at a warmup stage)
@@ -269,8 +268,8 @@ class LRVGA(Rebayes):
         raise NotImplementedError
 
     def predict_obs(self, bel, X):
-        yhat = self.fwd_link(bel.mean, bel, X)[0]
-        return yhat
+        yhat, var = self.fwd_link(bel.mean, bel, X)
+        return Gaussian(mean=yhat, cov=var)
 
     def predict_state(self, bel):
         """
