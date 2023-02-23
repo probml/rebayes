@@ -59,7 +59,10 @@ class RebayesEKF(Rebayes):
     @partial(jit, static_argnums=(0,))
     def predict_state(self, bel):
         m, P, nobs, obs_noise_var = bel.mean, bel.cov, bel.nobs, bel.obs_noise_var
-        pred_mean, pred_cov = _non_stationary_dynamics_predict(m, P, self.q, self.gamma, self.alpha)
+        if self.method == 'fcekf':
+            pred_mean, pred_cov = _full_covariance_dynamics_predict(m, P, self.q, self.gamma, self.alpha)
+        else:
+            pred_mean, pred_cov = _diagonal_dynamics_predict(m, P, self.q, self.gamma, self.alpha)
         return EKFBel(mean=pred_mean, cov=pred_cov, nobs=nobs, obs_noise_var=obs_noise_var)
 
     @partial(jit, static_argnums=(0,))
@@ -246,7 +249,7 @@ def _stationary_dynamics_diagonal_predict(m, P_diag, Q_diag):
     return mu_pred, Sigma_pred
 
 
-def _non_stationary_dynamics_predict(m, P, q, gamma, alpha):
+def _full_covariance_dynamics_predict(m, P, q, gamma, alpha):
     """Predict the next state using a non-stationary dynamics model.
 
     Args:
@@ -262,7 +265,29 @@ def _non_stationary_dynamics_predict(m, P, q, gamma, alpha):
     """
     mu_pred = gamma * m
     Sigma_pred = gamma**2 * P
-    Q = jnp.where(P.ndim == 1, jnp.ones(mu_pred.shape[0]) * q, jnp.eye(mu_pred.shape[0]) * q)
+    Q = jnp.eye(mu_pred.shape[0]) * q
+    Sigma_pred += Q
+    Sigma_pred += alpha * Sigma_pred # Covariance inflation
+    return mu_pred, Sigma_pred
+
+
+def _diagonal_dynamics_predict(m, P, q, gamma, alpha):
+    """Predict the next state using a non-stationary dynamics model.
+
+    Args:
+        m (D_hid,): Prior mean.
+        P (D_hid, D_hid): Prior covariance.
+        q (float): Dynamics covariance factor.
+        gamma (float): Dynamics decay.
+        alpha (float): Covariance inflation factor.
+
+    Returns:
+        mu_pred (D_hid,): Predicted mean.
+        Sigma_pred (D_hid,): Predicted covariance diagonal elements.
+    """
+    mu_pred = gamma * m
+    Sigma_pred = gamma**2 * P
+    Q = jnp.ones(mu_pred.shape[0]) * q
     Sigma_pred += Q
     Sigma_pred += alpha * Sigma_pred # Covariance inflation
     return mu_pred, Sigma_pred
