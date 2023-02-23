@@ -396,8 +396,11 @@ def _lofi_predict(m, Sigma, gamma, q, eta, alpha=0.0):
     """
     m_pred = gamma * m
     Sigma_pred = jnp.sqrt((gamma**2 * Sigma**2)/((gamma**2 + q * eta) * (gamma**2 + q*eta + q*Sigma**2)))
-    Sigma_pred = Sigma_pred/(1.0+alpha) # Covariance inflation
     eta_pred = eta/(gamma**2 + q*eta)
+    
+    # Covariance inflation
+    eta_pred = eta_pred / (1 + alpha)
+    Sigma_pred = Sigma_pred / jnp.sqrt(1 + alpha)
 
     return m_pred, Sigma_pred, eta_pred
 
