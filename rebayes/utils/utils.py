@@ -18,15 +18,16 @@ _jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
 
 class MLP(nn.Module):
     features: Sequence[int]
+    activation: nn.Module = nn.relu
 
     @nn.compact
     def __call__(self, x):
         for feat in self.features[:-1]:
-            x = nn.relu(nn.Dense(feat)(x))
+            x = self.activation(nn.Dense(feat)(x))
         x = nn.Dense(self.features[-1])(x)
         return x
 
-def get_mlp_flattened_params(model_dims, key=0):
+def get_mlp_flattened_params(model_dims, key=0, activation=nn.relu):
     """Generate MLP model, initialize it using dummy input, and
     return the model, its flattened initial parameters, function
     to unflatten parameters, and apply function for the model.
@@ -44,7 +45,7 @@ def get_mlp_flattened_params(model_dims, key=0):
 
     # Define MLP model
     input_dim, features = model_dims[0], model_dims[1:]
-    model = MLP(features)
+    model = MLP(features, activation)
     dummy_input = jnp.ones((input_dim,))
 
     # Initialize parameters using dummy input
