@@ -93,7 +93,7 @@ def create_optimizer(
     )
     
     # Fix log-emission-covariance to dummy if adaptive
-    if emission_cov_function is not None or params_lofi.adaptive_variance == True:
+    if emission_cov_function is not None:
         bbf_partial = partial(
             bbf_partial,
             log_emission_cov=0.0,

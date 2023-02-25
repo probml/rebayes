@@ -12,6 +12,7 @@ def bbf(
     log_init_cov,
     dynamics_weights,
     log_emission_cov,
+    dynamics_log_cov,
     # Specify before running
     train,
     test,
@@ -21,7 +22,6 @@ def bbf(
     method="fdekf",
     emission_mean_function=None,
     emission_cov_function=None,
-    adaptive_variance=False
 ):
     """
     Black-box function for Bayesian optimization.
@@ -29,7 +29,7 @@ def bbf(
     X_train, y_train = train
     X_test, y_test = test
 
-    dynamics_covariance = None
+    dynamics_covariance = jnp.exp(dynamics_log_cov).item()
     initial_covariance = jnp.exp(log_init_cov).item()
     if emission_mean_function is None:
         emission_mean_function = apply_fn
@@ -46,7 +46,7 @@ def bbf(
         emission_cov_function=emission_cov_function,
     )
 
-    estimator = ekf.RebayesEKF(params_rebayes, method=method, adaptive_variance=adaptive_variance)
+    estimator = ekf.RebayesEKF(params_rebayes, method=method)
 
     bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
     metric = callback(bel, **test_callback_kwargs)["test"].item()
@@ -67,7 +67,6 @@ def create_optimizer(
     method="fdekf",
     emission_mean_function=None,
     emission_cov_function=None,
-    adaptive_variance=False,
 ):
     key = jax.random.PRNGKey(random_state)
     X_train, _ = train
@@ -88,13 +87,7 @@ def create_optimizer(
         method=method,
         emission_mean_function=emission_mean_function,
         emission_cov_function=emission_cov_function,
-        adaptive_variance=adaptive_variance,
     )
-    if emission_cov_function is not None or adaptive_variance == True:
-        bbf_partial = partial(
-            bbf_partial,
-            log_emission_cov=0.0,
-        )
 
     optimizer = BayesianOptimization(
         f=bbf_partial,
@@ -108,7 +101,7 @@ def create_optimizer(
 def get_best_params(num_params, optimizer, method="fdekf"):
     max_params = optimizer.max["params"].copy()
 
-    dynamics_covariance = None
+    dynamics_covariance = 0.0
     initial_covariance = np.exp(max_params["log_init_cov"])
     dynamics_weights = max_params["dynamics_weights"]
     emission_cov = np.exp(max_params.get("log_emission_cov", 0.0))
@@ -123,14 +116,13 @@ def get_best_params(num_params, optimizer, method="fdekf"):
     return hparams
 
 def build_estimator(init_mean, hparams, _, apply_fn, method="fdekf",
-                    emission_mean_function=None, emission_cov_function=None,
-                    adaptive_variance=False):
+                    emission_mean_function=None, emission_cov_function=None):
     """
     _ is a dummy parameter for compatibility with lofi 
     """
     if emission_mean_function is None:
         emission_mean_function = apply_fn
-    if emission_cov_function is None or adaptive_variance == True:
+    if emission_cov_function is None:
         params = base.RebayesParams(
             initial_mean=init_mean,
             emission_mean_function=emission_mean_function,
@@ -144,5 +136,5 @@ def build_estimator(init_mean, hparams, _, apply_fn, method="fdekf",
             **hparams,
         )
 
-    estimator = ekf.RebayesEKF(params, method=method, adaptive_variance=adaptive_variance)
+    estimator = ekf.RebayesEKF(params, method=method)
     return estimator
