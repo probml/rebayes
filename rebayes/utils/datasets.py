@@ -5,6 +5,7 @@ import re
 import io
 import os
 import jax
+import chex
 import zipfile
 import requests
 import torchvision
@@ -15,8 +16,80 @@ import jax.random as jr
 from jax import vmap
 from augly import image
 from typing import Union
+from jaxtyping import  Float, Array
 from multiprocessing import Pool
 from sklearn.datasets import make_moons
+
+@chex.dataclass
+class LRState:
+    params: Float[Array, "dim_input"]
+    cov: Float[Array, "dim_input dim_input"]
+
+class LRDataset:
+    """
+    L-RVGA's linear regression dataset
+    Based on https://github.com/marc-h-lambert/L-RVGA
+    """
+    def __init__(self, dim_inputs, sigma, scale, condition_number, mean=None, rotate=True, normalize=False):
+        self.dim_inputs = dim_inputs
+        self.sigma = sigma
+        self.scale = scale
+        self.condition_number = condition_number
+        self.rotate = rotate
+        self.normalize = normalize
+        self.mean = jnp.zeros(dim_inputs) if mean is None else mean
+    
+    def _normalize_if(self, normalize, array):
+        if normalize:
+            norm2 = jnp.linalg.norm(array) ** 2
+            array = array / norm2
+        return array
+    
+    def sample_covariance(self, key, normalize):
+        diag = jnp.arange(1, self.dim_inputs + 1) ** self.condition_number
+        diag = self.scale / diag
+        diag = self._normalize_if(normalize, diag)
+        
+        cov = jnp.diag(diag)
+        if self.dim_inputs > 1 and self.rotate:
+            Q = jax.random.orthogonal(key, self.dim_inputs)
+            cov = jnp.einsum("ji,jk,kl->il", Q, cov, Q)
+        
+        return cov
+    
+    def sample_inputs(self, key, mean, cov, n_obs):
+        X = jax.random.multivariate_normal(key, mean, cov, (n_obs,))
+        return X
+    
+    def sample_outputs(self, key, params, X):
+        n_obs = len(X)
+        err = jax.random.normal(key, (n_obs,))
+        y = jnp.einsum("m,...m->...", params, X) + err * self.sigma
+        return y
+    
+    def sample_train(self, key, num_obs):
+        key_cov, key_x, key_params, key_y  = jax.random.split(key, 4)
+        cov = self.sample_covariance(key_cov, self.normalize)
+        
+        params = jax.random.uniform(key_params, (self.dim_inputs,), minval=-1, maxval=1)
+        params = params / jnp.linalg.norm(params)
+        
+        X = self.sample_inputs(key_x, self.mean, cov, num_obs)
+        y = self.sample_outputs(key_y, params, X)
+        
+        state = LRState(
+            params=params,
+            cov=cov
+        )
+        
+        return state, (X, y)
+    
+    def sample_test(self, key:jax.random.PRNGKey, state:LRState, num_obs:int):
+        key_x, key_y = jax.random.split(key)
+        X = self.sample_inputs(key_x, self.mean, state.cov, num_obs)
+        y = self.sample_outputs(key_y, state.params, X)
+        return X, y
+
 
 
 def showdown_preprocess(
