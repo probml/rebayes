@@ -37,10 +37,7 @@ class Gaussian:
     mean: chex.Array
     cov: chex.Array
 
-@chex.dataclass
-class Belief:
-    dummy: float
-    # Can be over-ridden by other representations (e.g., MCMC samples or memory buffer)
+Belief = Gaussian # Can be over-ridden by other representations (e.g., MCMC samples or memory buffer)
 
 class RebayesParams(NamedTuple):
     initial_mean: Float[Array, "state_dim"]
@@ -64,35 +61,53 @@ class Rebayes(ABC):
         params: RebayesParams,
     ):
         self.params = params
+        #self.emission_mean_function = lambda z, u: self.emission_function(z, u)
+        #self.emission_cov_function = lambda z, u: self.params.emission_covariance
 
+    def init_bel(self):
+        return Gaussian(mean=self.params.initial_mean, cov=self.params.initial_covariance)
 
-    def init_bel(self) -> Belief:
-        raise NotImplementedError
-
-    #@partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,))
     def predict_state(
         self,
-        bel: Belief
-    ) -> Belief:
+        bel: Gaussian
+    ) -> Gaussian:
         """Given bel(t-1|t-1) = p(z(t-1) | D(1:t-1)), return bel(t|t-1) = p(z(t) | z(t-1), D(1:t-1)).
+        This is cheap, since the dyanmics model is linear-Gaussian.
         """
-        raise NotImplementedError
+        m, P = bel.mean, bel.cov 
+        F = self.params.dynamics_weights
+        Q = self.params.dynamics_covariance
+        pred_mean = F @ m
+        pred_cov = F @ P @ F.T + Q
+        return Gaussian(mean=pred_mean, cov=pred_cov)
 
-    #@partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,))
     def predict_obs(
         self,
-        bel: Belief,
-        X: Float[Array, "input_dim"]
-    ) -> Float[Array, "output_dim"]: 
-        """Given bel(t|t-1) = p(z(t) | D(1:t-1)), return predicted-obs(t|t-1) = E(y(t) | u(t), D(1:t-1))"""
-        raise NotImplementedError
+        bel: Gaussian,
+        u: Float[Array, "input_dim"]
+    ) -> Gaussian: # TODO: replace output with emission_dist
+        """Given bel(t|t-1) = p(z(t) | D(1:t-1)), return obs(t|t-1) = p(y(t) | u(t), D(1:t-1))"""
+        prior_mean, prior_cov = bel.mean, bel.cov # p(z(t) | y(1:t-1))
+        # Partially apply fn to the input u so it just depends on hidden state z
+        m_Y = lambda z: self.params.emission_mean_function(z, u)
+        Cov_Y = lambda z: self.params.emission_cov_function(z, u)
 
+        yhat = jnp.atleast_1d(m_Y(prior_mean))
+        R = jnp.atleast_2d(Cov_Y(prior_mean))
+        H =  _jacrev_2d(m_Y, prior_mean)
+
+        Sigma_obs = H @ prior_cov @ H.T + R
+        return Gaussian(mean=yhat, cov=Sigma_obs)
+
+    @abstractmethod
     def update_state(
         self,
-        bel: Belief,
-        X: Float[Array, "input_dim"],
+        bel: Gaussian,
+        u: Float[Array, "input_dim"],
         y: Float[Array, "obs_dim"]
-    ) -> Belief:
+    ) -> Gaussian:
         """Return bel(t|t) = p(z(t) | u(t), y(t), D(1:t-1)) using bel(t|t-1)"""
         raise NotImplementedError
 
@@ -104,7 +119,7 @@ class Rebayes(ABC):
         bel=None,
         progress_bar=True,
         **kwargs
-    ) -> Tuple[Belief, Any]:
+    ) -> Tuple[Gaussian, Any]:
         """Apply filtering to entire sequence of data. Return final belief state and outputs from callback."""
         num_timesteps = X.shape[0]
         def step(bel, t):
