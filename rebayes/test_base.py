@@ -7,7 +7,6 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 import time
-
 from functools import partial
 
 from jax import jit
@@ -25,6 +24,7 @@ import torchvision.datasets as datasets
 import torchvision.transforms as T
 
 from rebayes.base import RebayesParams, Rebayes, Belief, make_rebayes_params
+from rebayes.utils.utils import dataloader_to_numpy
 
 class RebayesSum(Rebayes):
     """The belief state is the sum of all the input X_t values."""
@@ -63,7 +63,7 @@ def make_data():
     return X, Y
 
 
-def callback_scan(bel, pred_obs, t, X, Y, **kwargs):
+def callback_scan(bel, pred_obs, t, X, Y, bel_pred, **kwargs):
     jax.debug.print("callback with t={t}", t=t)
     return t
 
@@ -99,7 +99,7 @@ def test_update_batch():
 
 
     
-def callback_dl(bel, bel_pre_update, b, Xtr, Ytr, Xte, Yte, **kwargs):
+def callback_dl(bel, b, Xtr, Ytr, Xte, Yte, **kwargs):
     jax.debug.print("callback on batch {b}", b=b)
     jax.debug.print("Xtr shape {x1}, Ytr shape {y1}", x1=Xtr.shape, y1=Ytr.shape)
     jax.debug.print("Xte shape {x1}, Yte shape {y1}", x1=Xte.shape, y1=Yte.shape)
@@ -125,19 +125,7 @@ def test_scan_dataloaders():
     print(bel, Xsum)
     assert jnp.allclose(bel.dummy, Xsum)
 
-def dataloader_to_numpy(dataloader):
-  # is there a faster way?
-  # data = np.array(train_dataloader.dataset) # mangles the shapes
-  all_X = []
-  all_y = []
-  for X, y in dataloader:
-    all_X.append(X)
-    all_y.append(y)
-  X = torch.cat(all_X, dim=0).numpy()
-  y = torch.cat(all_y, dim=0).numpy()
-  if y.ndim == 1:
-      y = y[:, None]
-  return X, y
+
 
 def make_mnist_data():
     # convert PIL to pytorch tensor, flatten (1,28,28) to (784), standardize values

@@ -11,6 +11,8 @@ import chex
 from jax_tqdm import scan_tqdm
 from itertools import cycle
 
+from rebayes.utils.utils import flatten
+
 _jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
 
 import tensorflow_probability.substrates.jax as tfp
@@ -165,6 +167,8 @@ class Rebayes(ABC):
         callback=None,
         bel=None,
         verbose=False,
+        has_task_id=False,
+        flatten_data=False,
         **kwargs
     ) -> Tuple[Belief, Any]:
         """Scan over pytorch dataloaders."""
@@ -174,15 +178,26 @@ class Rebayes(ABC):
             test_iter = cycle(iter(test_dl)) # ensure test stream is infinite
         else:
             test_iter = None
-        def get_batch():
-            # convert from pytorch tensor to jax array
-            Xtr, Ytr = next(train_iter)
-            Xtr, Ytr = jnp.array(Xtr.numpy()), jnp.array(Ytr.numpy())
-            if test_iter is not None:
-                    Xte, Yte = next(test_iter)
-                    Xte, Yte = jnp.array(Xte.numpy()), jnp.array(Yte.numpy())
+
+
+        def get_batch(has_task_id):
+            # avalanche attaches task id to each tuple
+            if has_task_id:
+                Xtr, Ytr, task_tr = next(train_iter)
             else:
-                    Xte, Yte = None, None
+                Xtr, Ytr = next(train_iter)
+            # convert from pytorch tensor to jax array
+            Xtr, Ytr = jnp.array(Xtr.numpy()), jnp.array(Ytr.numpy())
+            if flatten_data: Xtr = flatten(Xtr)
+            if test_iter is not None:
+                if has_task_id:
+                    Xte, Yte, task_te = next(test_iter)
+                else:
+                    Xte, Yte = next(test_iter)
+                Xte, Yte = jnp.array(Xte.numpy()), jnp.array(Yte.numpy())
+                if flatten_data: Xte = flatten(Xte)
+            else:
+                Xte, Yte = None, None
             return Xtr, Ytr, Xte, Yte
         
         if bel is None:
@@ -190,12 +205,11 @@ class Rebayes(ABC):
         outputs = []
         for b in jnp.arange(num_batches):
             if verbose: print('batch ', b)
-            bel_pre_update = bel
-            Xtr, Ytr, Xte, Yte = get_batch()
+            Xtr, Ytr, Xte, Yte = get_batch(has_task_id)
             bel = self.update_state_batch(bel, Xtr, Ytr)
             if callback is None:
                 out = None
             else:
-                out = callback(bel, bel_pre_update, b, Xtr, Ytr, Xte, Yte, **kwargs)
+                out = callback(bel, b, Xtr, Ytr, Xte, Yte, **kwargs)
                 outputs.append(out)
         return bel, outputs

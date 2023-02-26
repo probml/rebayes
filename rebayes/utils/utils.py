@@ -9,6 +9,7 @@ import flax.linen as nn
 from jax.flatten_util import ravel_pytree
 from jax.experimental import host_callback
 from jax import jacrev
+import torch
 
 from dynamax.generalized_gaussian_ssm.models import ParamsGGSSM
 
@@ -112,3 +113,38 @@ def loss_optax(params, x, y, loss_fn, apply_fn):
 
 # Define SGD optimizer
 sgd_optimizer = optax.sgd(learning_rate=1e-2)
+
+## Pytorch
+
+def dataloader_to_numpy(dataloader):
+  # data = np.array(train_dataloader.dataset) # mangles the shapes
+  all_X = []
+  all_y = []
+  for X, y in dataloader:
+    all_X.append(X)
+    all_y.append(y)
+  X = torch.cat(all_X, dim=0).numpy()
+  y = torch.cat(all_y, dim=0).numpy()
+  if y.ndim == 1:
+      y = y[:, None]
+  return X, y
+
+def avalanche_dataloader_to_numpy(dataloader):
+  # data = np.array(train_dataloader.dataset) # mangles the shapes
+  all_X = []
+  all_y = []
+  for X, y, t in dataloader:
+    all_X.append(X)
+    all_y.append(y)
+  X = torch.cat(all_X, dim=0).numpy()
+  y = torch.cat(all_y, dim=0).numpy()
+  if y.ndim == 1:
+      y = y[:, None]
+  return X, y
+
+def flatten(Xtr):
+    sz = Xtr.shape
+    batch_size  = sz[0]
+    other_size = sz[1]*sz[2]*sz[3]
+    Xtr = Xtr.flatten().reshape(batch_size, other_size)
+    return Xtr
