@@ -120,6 +120,14 @@ class RebayesLoFi(Rebayes):
         m, U, sigma, obs_noise_var = \
             bel.mean, bel.basis, bel.sigma, bel.obs_noise_var
         m_Y = lambda z: self.model_params.emission_mean_function(z, u)
+        y_pred = jnp.atleast_1d(m_Y(m))
+        return y_pred
+    
+    @partial(jit, static_argnums=(0,))
+    def predict_obs_cov(self, bel, u):
+        m, U, sigma, obs_noise_var = \
+            bel.mean, bel.basis, bel.sigma, bel.obs_noise_var
+        m_Y = lambda z: self.model_params.emission_mean_function(z, u)
         Cov_Y = lambda z: self.model_params.emission_cov_function(z, u)
         
         # Predicted mean
@@ -139,7 +147,7 @@ class RebayesLoFi(Rebayes):
             V_epi = H @ H.T/self.eta - (D * HU) @ (HU).T
             Sigma_obs = V_epi + R
         
-        return Gaussian(mean=y_pred, cov=Sigma_obs) # TODO: non-Gaussian distribution support
+        return Sigma_obs
 
     @partial(jit, static_argnums=(0,))
     def update_state(self, bel, u, y):

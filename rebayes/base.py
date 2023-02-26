@@ -94,7 +94,16 @@ class Rebayes(ABC):
         bel: Belief,
         X: Float[Array, "input_dim"]
     ) -> Union[Float[Array, "output_dim"], Any]: 
-        """Given bel(t|t-1) = p(z(t) | D(1:t-1)), return predicted-obs(t|t-1) = E(y(t) | u(t), D(1:t-1))"""
+        """Return E(y(t) | X(t), D(1:t-1))"""
+        return None
+    
+    @partial(jit, static_argnums=(0,))
+    def predict_obs_cov(
+        self,
+        bel: Belief,
+        X: Float[Array, "input_dim"]
+    ) -> Union[Float[Array, "output_dim output_dim"], Any]: 
+        """Return Cov(y(t) | X(t), D(1:t-1))"""
         return None
 
     def update_state(
@@ -126,18 +135,18 @@ class Rebayes(ABC):
         Y: Float[Array, "ntime emission_dim"],
         callback=None,
         bel=None,
-        progress_bar=True,
+        progress_bar=False,
         **kwargs
     ) -> Tuple[Belief, Any]:
         """Apply filtering to entire sequence of data. Return final belief state and outputs from callback."""
         num_timesteps = X.shape[0]
         def step(bel, t):
-            bel = self.predict_state(bel)
+            bel_pred = self.predict_state(bel)
             pred_obs = self.predict_obs(bel, X[t])
-            bel = self.update_state(bel, X[t], Y[t])
+            bel = self.update_state(bel_pred, X[t], Y[t])
             out = None
             if callback is not None:
-                out = callback(bel, pred_obs, t, X[t], Y[t], **kwargs)
+                out = callback(bel, pred_obs, t, X[t], Y[t], bel_pred, **kwargs)
             return bel, out
         carry = bel
         if bel is None:

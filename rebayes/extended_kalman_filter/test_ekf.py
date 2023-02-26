@@ -113,21 +113,24 @@ def test_rebayes_loop():
     mu_kf = lgssm_posterior.filtered_means
     cov_kf = lgssm_posterior.filtered_covariances
     ll_kf = lgssm_posterior.marginal_loglik
-    def callback(pred_obs, bel, t, u, y):
-        m, P = pred_obs.mean, pred_obs.cov
+    def callback(bel, pred_obs, t, u, y, bel_pred):
+        m = estimator.predict_obs(bel_pred, u)
+        assert allclose(pred_obs, m)
+        P = estimator.predict_obs_cov(bel_pred, u)
+        #m, P = pred_obs.mean, pred_obs.cov
         ll = MVN(m, P).log_prob(jnp.atleast_1d(y))
         assert allclose(bel.mean, mu_kf[t])
         assert allclose(bel.cov, cov_kf[t])
-        return ll
+        return  ll
 
     bel = estimator.init_bel()
     T = X.shape[0]
     ll = 0
     for t in range(T):
         pred_obs = estimator.predict_obs(bel, X[t])
-        bel = estimator.predict_state(bel)
-        bel = estimator.update_state(bel, X[t], Y[t]) 
-        ll += callback(pred_obs, bel, t, X[t], Y[t])  
+        bel_pred = estimator.predict_state(bel)
+        bel = estimator.update_state(bel_pred, X[t], Y[t]) 
+        ll += callback(bel, pred_obs, t, X[t], Y[t], bel_pred)  
     assert jnp.allclose(ll, ll_kf, atol=1e-1)
 
 
@@ -141,8 +144,10 @@ def test_rebayes_scan():
     cov_kf = lgssm_posterior.filtered_covariances
     ll_kf = lgssm_posterior.marginal_loglik
 
-    def callback(bel, pred_obs, t, u, y):
-        m, P = pred_obs.mean, pred_obs.cov
+    def callback(bel, pred_obs, t, u, y, bel_pred):
+        m = estimator.predict_obs(bel_pred, u)
+        P = estimator.predict_obs_cov(bel_pred, u)
+        #m, P = pred_obs.mean, pred_obs.cov
         ll = MVN(m, P).log_prob(jnp.atleast_1d(y))
         return ll
 

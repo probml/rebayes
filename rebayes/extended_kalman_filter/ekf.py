@@ -69,26 +69,26 @@ class RebayesEKF(Rebayes):
     def predict_obs(self, bel, u):
         prior_mean, prior_cov, obs_noise_var = bel.mean, bel.cov, bel.obs_noise_var
         m_Y = lambda z: self.params.emission_mean_function(z, u)
-        Cov_Y = lambda z: self.params.emission_cov_function(z, u)
-
-        # Predicted mean
         y_pred = jnp.atleast_1d(m_Y(prior_mean))
-
-        # Predicted covariance
+        return y_pred
+    
+    @partial(jit, static_argnums=(0,))
+    def predict_obs_cov(self, bel, u):
+        prior_mean, prior_cov, obs_noise_var = bel.mean, bel.cov, bel.obs_noise_var
+        m_Y = lambda z: self.params.emission_mean_function(z, u)
+        Cov_Y = lambda z: self.params.emission_cov_function(z, u)
         H =  _jacrev_2d(m_Y, prior_mean)
+        y_pred = jnp.atleast_1d(m_Y(prior_mean))
         if self.adaptive_variance:
             R = jnp.eye(y_pred.shape[0]) * obs_noise_var
         else:
             R = jnp.atleast_2d(Cov_Y(prior_mean))
-        
         if self.method == 'fcekf':
             V_epi = H @ prior_cov @ H.T
         else:
             V_epi = (prior_cov * H) @ H.T
-
         Sigma_obs = V_epi + R
-
-        return Gaussian(mean=y_pred, cov=Sigma_obs)
+        return Sigma_obs
 
     @partial(jit, static_argnums=(0,))
     def update_state(self, bel, u, y):
