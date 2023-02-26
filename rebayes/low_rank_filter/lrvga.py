@@ -269,7 +269,8 @@ class LRVGA(Rebayes):
 
     def predict_obs(self, bel, X):
         yhat, var = self.fwd_link(bel.mean, bel, X)
-        return Gaussian(mean=yhat, cov=var)
+        # return Gaussian(mean=yhat, cov=var)
+        return yhat
 
     def predict_state(self, bel):
         """
