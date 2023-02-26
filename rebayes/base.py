@@ -9,6 +9,7 @@ from jaxtyping import Float, Array
 from typing import Callable, NamedTuple, Union, Tuple, Any
 import chex
 from jax_tqdm import scan_tqdm
+from itertools import cycle
 
 _jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
 
@@ -28,9 +29,6 @@ EmissionDistFn = Callable[ [Float[Array, "state_dim"], Float[Array, "state_dim s
 
 CovMat = Union[float, Float[Array, "dim"], Float[Array, "dim dim"]]
 
-class GaussianBroken(NamedTuple):
-    mean: Float[Array, "state_dim"]
-    cov: Union[Float[Array, "state_dim state_dim"], Float[Array, "state_dim"]]
 
 @chex.dataclass
 class Gaussian:
@@ -40,7 +38,8 @@ class Gaussian:
 @chex.dataclass
 class Belief:
     dummy: float
-    # Can be over-ridden by other representations (e.g., MCMC samples or memory buffer)
+    # The belief state can be a Gaussian or some other representation (eg samples)
+    # This must be a chex dataclass so that it works with lax.scan as a return type for carry
 
 class RebayesParams(NamedTuple):
     initial_mean: Float[Array, "state_dim"]
@@ -56,7 +55,17 @@ class RebayesParams(NamedTuple):
     adaptive_emission_cov: bool=False
     dynamics_covariance_inflation_factor: float=0.0
 
-
+def make_rebayes_params():
+    # dummy constructor
+    model_params = RebayesParams(
+        initial_mean=None,
+        initial_covariance=None,
+        dynamics_weights=None,
+        dynamics_covariance=None,
+        emission_mean_function=None,
+        emission_cov_function=None,
+    ) 
+    return model_params
 
 class Rebayes(ABC):
     def __init__(
@@ -69,23 +78,24 @@ class Rebayes(ABC):
     def init_bel(self) -> Belief:
         raise NotImplementedError
 
-    #@partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,))
     def predict_state(
         self,
         bel: Belief
     ) -> Belief:
-        """Given bel(t-1|t-1) = p(z(t-1) | D(1:t-1)), return bel(t|t-1) = p(z(t) | z(t-1), D(1:t-1)).
+        """Return bel(t|t-1) = p(z(t) | z(t-1), D(1:t-1)) given bel(t-1|t-1).
+        By default, we assume a stationary model, so the belief is unchanged.
         """
-        raise NotImplementedError
+        return bel
 
-    #@partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,))
     def predict_obs(
         self,
         bel: Belief,
         X: Float[Array, "input_dim"]
-    ) -> Float[Array, "output_dim"]: 
+    ) -> Union[Float[Array, "output_dim"], Any]: 
         """Given bel(t|t-1) = p(z(t) | D(1:t-1)), return predicted-obs(t|t-1) = E(y(t) | u(t), D(1:t-1))"""
-        raise NotImplementedError
+        return None
 
     def update_state(
         self,
@@ -93,9 +103,23 @@ class Rebayes(ABC):
         X: Float[Array, "input_dim"],
         y: Float[Array, "obs_dim"]
     ) -> Belief:
-        """Return bel(t|t) = p(z(t) | u(t), y(t), D(1:t-1)) using bel(t|t-1)"""
+        """Return bel(t|t) = p(z(t) | X(t), y(t), D(1:t-1)) using bel(t|t-1) and Yt"""
         raise NotImplementedError
 
+    def update_state_batch(
+        self,
+        bel: Belief, 
+        X: Float[Array, "batch_size input_dim"],
+        Y: Float[Array, "batch_size emission_dim"]
+    ) -> Tuple[Belief, Any]:
+        batch_size = X.shape[0]
+        def step(bel, i):
+            bel = self.predict_state(bel)
+            bel = self.update_state(bel, X[i], Y[i])
+            return bel, None
+        bel, _ = scan(step, bel, jnp.arange(batch_size))
+        return bel
+    
     def scan(
         self,
         X: Float[Array, "ntime input_dim"],
@@ -125,3 +149,44 @@ class Rebayes(ABC):
         bel, outputs = scan(step, carry, jnp.arange(num_timesteps))
         return bel, outputs
     
+    def scan_dataloader(
+        self,
+        train_dl,
+        test_dl,
+        callback=None,
+        bel=None,
+        verbose=False,
+        **kwargs
+    ) -> Tuple[Belief, Any]:
+        """Scan over pytorch dataloaders."""
+        train_iter = iter(train_dl)
+        num_batches = len(train_iter)
+        if test_dl is not None:
+            test_iter = cycle(iter(test_dl)) # ensure test stream is infinite
+        else:
+            test_iter = None
+        def get_batch():
+            # convert from pytorch tensor to jax array
+            Xtr, Ytr = next(train_iter)
+            Xtr, Ytr = jnp.array(Xtr.numpy()), jnp.array(Ytr.numpy())
+            if test_iter is not None:
+                    Xte, Yte = next(test_iter)
+                    Xte, Yte = jnp.array(Xte.numpy()), jnp.array(Yte.numpy())
+            else:
+                    Xte, Yte = None, None
+            return Xtr, Ytr, Xte, Yte
+        
+        if bel is None:
+            bel = self.init_bel()
+        outputs = []
+        for b in jnp.arange(num_batches):
+            if verbose: print('batch ', b)
+            bel_pre_update = bel
+            Xtr, Ytr, Xte, Yte = get_batch()
+            bel = self.update_state_batch(bel, Xtr, Ytr)
+            if callback is None:
+                out = None
+            else:
+                out = callback(bel, bel_pre_update, b, Xtr, Ytr, Xte, Yte, **kwargs)
+                outputs.append(out)
+        return bel, outputs
