@@ -12,9 +12,9 @@ import jax
 import jax.numpy as jnp
 from typing import Callable
 from functools import partial
-from jaxtyping import Array, Float
 from flax import struct
-from rebayes.base import Rebayes, Gaussian
+from jaxtyping import Array, Float
+from rebayes.base import Rebayes
 from jax.flatten_util import ravel_pytree
 
 
@@ -88,7 +88,7 @@ class LRVGA(Rebayes):
             beta: float = 1.0,
             n_outer: int = 3,
             n_inner: int = 3,
-            n_samples: int = 6
+            n_samples: int = 6,
     ):
         self.fwd_link = fwd_link
         self.log_prob = log_prob
@@ -136,6 +136,7 @@ class LRVGA(Rebayes):
     @staticmethod
     def _get_coef(params, bel, x, fwd_link):
         c, std = jax.jacfwd(fwd_link, has_aux=True)(params, bel, x)
+        std = jnp.sqrt(std)
         return c * std
 
     @partial(jax.vmap, in_axes=(None, 0, None, None, None))
@@ -216,7 +217,6 @@ class LRVGA(Rebayes):
         TODO: Rewrite the V term using the Woodbury matrix identity
         """
         W = bel.W
-        Psi_inv = 1 / bel.Psi
         dim_full, _ = W.shape
         I = jnp.eye(dim_full)
 
@@ -266,6 +266,10 @@ class LRVGA(Rebayes):
 
     def init_bel(self):
         raise NotImplementedError
+        # TODO: Implement initialisation.
+        # TODO: Modify base class to allow for initialisation kwargs
+        if self.key is None:
+            raise ValueError("Must provide a key to initialise belief")
 
     def predict_obs(self, bel, X):
         yhat, var = self.fwd_link(bel.mean, bel, X)
