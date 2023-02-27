@@ -124,7 +124,7 @@ def test_rebayes_orfit_scan():
     # Run Infinite-memory ORFit
     model_params, orfit_params = setup_orfit(n_train)
     estimator = RebayesLoFi(model_params, orfit_params, method='orfit')
-    def callback(bel, pred_obs, t, x, y):
+    def callback(bel, pred_obs, t, x, y, _, **kwargs):
         return bel.mean
     orfit_before_time = time.time()
     bel, outputs = estimator.scan(X_train, y_train, callback)
