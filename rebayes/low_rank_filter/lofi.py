@@ -8,7 +8,7 @@ from jax.lax import scan
 from jaxtyping import Float, Array
 import chex
 
-from rebayes.base import RebayesParams, Rebayes, Gaussian
+from rebayes.base import RebayesParams, Rebayes, Gaussian, CovMat
 
 
 # Helper functions
@@ -30,7 +30,7 @@ class LoFiBel:
     nobs: int=None
     obs_noise_var: float=None
 
-    eta: float=None
+    eta: CovMat=None
     gamma: float=None
     q: float=None
 
@@ -76,13 +76,15 @@ class RebayesLoFi(Rebayes):
             self.eta = None
             self.gamma = None
             self.q = None
-        elif method == 'full_svd_lofi' or method == 'orth_svd_lofi':
+        elif method == 'full_svd_lofi' or method == 'orth_svd_lofi' or method == 'generalized_lofi':
             initial_cov = model_params.initial_covariance
             # assert isinstance(initial_cov, float) and initial_cov > 0, "Initial covariance must be a positive scalar."
             self.eta = 1/initial_cov
+            if method == 'generalized_lofi':
+                self.eta = jnp.ones(len(model_params.initial_mean)) * self.eta
             self.gamma = model_params.dynamics_weights
             # assert isinstance(self.gamma, float), "Dynamics decay term must be a scalar."
-            self.q = (1 - self.gamma**2) / self.eta
+            self.q = model_params.dynamics_covariance
         else:
             raise ValueError(f"Unknown method {method}.")
         self.method = method
@@ -107,9 +109,11 @@ class RebayesLoFi(Rebayes):
             bel.mean, bel.basis, bel.sigma, bel.nobs, bel.obs_noise_var, bel.eta
         if self.method == 'orfit':
             return bel
-        else:
+        elif self.method == 'orth_svd_lofi' or self.method == 'full_svd_lofi':
             m_pred, Sigma_pred, eta_pred = _lofi_predict(m, Sigma, self.gamma, self.q, eta, self.alpha)
             U_pred = U
+        else:
+            m_pred, U_pred, Sigma_pred, eta_pred = _generalized_lofi_predict(m, U, Sigma, self.gamma, self.q, eta, self.alpha)
 
         return bel.replace(
             mean=m_pred, basis=U_pred, sigma=Sigma_pred,
@@ -126,8 +130,8 @@ class RebayesLoFi(Rebayes):
     
     @partial(jit, static_argnums=(0,))
     def predict_obs_cov(self, bel, u):
-        m, U, sigma, obs_noise_var = \
-            bel.mean, bel.basis, bel.sigma, bel.obs_noise_var
+        m, U, sigma, obs_noise_var, eta = \
+            bel.mean, bel.basis, bel.sigma, bel.obs_noise_var, bel.eta
         m_Y = lambda z: self.model_params.emission_mean_function(z, u)
         Cov_Y = lambda z: self.model_params.emission_cov_function(z, u)
         
@@ -143,17 +147,25 @@ class RebayesLoFi(Rebayes):
                 R = jnp.eye(y_pred.shape[0]) * obs_noise_var
             else:
                 R = jnp.atleast_2d(Cov_Y(m))
-            D = (sigma**2)/(self.eta**2 * jnp.ones(sigma.shape) + self.eta * sigma**2)
-            HU = H @ U
-            V_epi = H @ H.T/self.eta - (D * HU) @ (HU).T
+            if self.method == 'orth_svd_lofi' or self.method == 'full_svd_lofi':
+                D = (sigma**2)/(self.eta * (self.eta + sigma**2))
+                HU = H @ U
+                V_epi = H @ H.T/self.eta - (D * HU) @ (HU).T
+            else:
+                W = U * sigma
+                D = jnp.linalg.pinv(jnp.eye(W.shape[1]) + (1/eta * W.T) @ W)
+                HW = H/eta @ W
+                V_epi = H @ H.T/self.eta - (HW @ D) @ (HW).T
+    
             Sigma_obs = V_epi + R
+            
         
         return Sigma_obs
 
     @partial(jit, static_argnums=(0,))
     def update_state(self, bel, u, y):
-        m, U, Sigma, nobs, obs_noise_var = \
-            bel.mean, bel.basis, bel.sigma, bel.nobs, bel.obs_noise_var
+        m, U, Sigma, nobs, obs_noise_var, eta_cond = \
+            bel.mean, bel.basis, bel.sigma, bel.nobs, bel.obs_noise_var, bel.eta
         if self.method == 'orfit':
             m_cond, U_cond, Sigma_cond = _orfit_condition_on(
                 m, U, Sigma, self.model_params.emission_mean_function, u, y, self.sv_threshold
@@ -175,10 +187,16 @@ class RebayesLoFi(Rebayes):
                     self.model_params.emission_cov_function, u, y, self.sv_threshold, 
                     self.adaptive_variance, obs_noise_var, nobs
                 )
+            elif self.method == 'generalized_lofi':
+                m_cond, U_cond, Sigma_cond, eta_cond = _generalized_lofi_condition_on(
+                    m, U, Sigma, self.eta, self.model_params.emission_mean_function, 
+                    self.model_params.emission_cov_function, u, y, self.sv_threshold, 
+                    self.adaptive_variance, obs_noise_var
+                )
 
         return bel.replace(
             mean=m_cond, basis=U_cond, sigma=Sigma_cond, nobs=nobs, 
-            obs_noise_var=obs_noise_var
+            obs_noise_var=obs_noise_var, eta=eta_cond
         )
 
 
@@ -334,7 +352,6 @@ def _lofi_full_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y,
         m_cond (D_hid,): Posterior mean.
         U_cond (D_hid, D_mem,): Posterior basis.
         Sigma_cond (D_mem,): Posterior singular values.
-        yhat (D_obs,): Emission mean.
     """
     m_Y = lambda w: y_cond_mean(w, x)
     Cov_Y = lambda w: y_cond_cov(w, x)
@@ -361,6 +378,53 @@ def _lofi_full_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y,
     m_cond = m + K @ (y - yhat)
 
     return m_cond, U_cond, Sigma_cond
+
+
+def _generalized_lofi_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=1.0):
+    """Condition step of the low-rank filter with adaptive observation variance.
+
+    Args:
+        m (D_hid,): Prior mean.
+        U (D_hid, D_mem,): Prior basis.
+        Sigma (D_mem,): Prior singular values.
+        eta (float): Prior precision. 
+        y_cond_mean (Callable): Conditional emission mean function.
+        y_cond_cov (Callable): Conditional emission covariance function.
+        x (D_in,): Control input.
+        y (D_obs,): Emission.
+        sv_threshold (float): Threshold for singular values.
+        adaptive_variance (bool): Whether to use adaptive variance.
+
+    Returns:
+        m_cond (D_hid,): Posterior mean.
+        U_cond (D_hid, D_mem,): Posterior basis.
+        Sigma_cond (D_mem,): Posterior singular values.
+    """
+    m_Y = lambda w: y_cond_mean(w, x)
+    Cov_Y = lambda w: y_cond_cov(w, x)
+    
+    yhat = jnp.atleast_1d(m_Y(m))
+    if adaptive_variance:
+        R = jnp.eye(yhat.shape[0]) * obs_noise_var
+    else:
+        R = jnp.atleast_2d(Cov_Y(m))
+    L = jnp.linalg.cholesky(R)
+    A = jnp.linalg.lstsq(L, jnp.eye(L.shape[0]))[0].T
+    H = _jacrev_2d(m_Y, m)
+    W_tilde = jnp.hstack([Sigma * U, (H.T @ A).reshape(U.shape[0], -1)])
+    
+    # Update the U matrix
+    u, lamb, _ = jnp.linalg.svd(W_tilde, full_matrices=False)
+    U_cond, U_extra = u[:, :U.shape[1]], u[:, U.shape[1]:]
+    Sigma_cond, Sigma_extra = lamb[:U.shape[1]], lamb[U.shape[1]:]
+    W_extra = Sigma_extra * U_extra
+    eta_cond = eta + jnp.einsum('ij,ij->i', W_extra, W_extra)
+    
+    D = jnp.linalg.pinv(jnp.eye(W_tilde.shape[1]) + (1/eta * W_tilde.T) @ W_tilde)
+    K = (H.T @ A) @ A.T/eta - (W_tilde/eta @ D) @ (W_tilde/eta).T @ (H.T @ A) @ A.T
+    m_cond = m + K @ (y - yhat)
+    
+    return m_cond, U_cond, Sigma_cond, eta_cond
 
 
 def _lofi_estimate_noise(m, y_cond_mean, u, y, nobs, obs_noise_var, adaptive_variance=False):
@@ -418,6 +482,38 @@ def _lofi_predict(m, Sigma, gamma, q, eta, alpha=0.0):
 
     return m_pred, Sigma_pred, eta_pred
 
+
+def _generalized_lofi_predict(m, U, Sigma, gamma, q, eta, alpha=0.0):
+    """Predict step of the generalized low-rank filter algorithm.
+
+    Args:
+        m (D_hid,): Prior mean.
+        Sigma (D_mem,): Prior singluar values.
+        gamma (float): Dynamics decay factor.
+        q (float): Dynamics noise factor.
+        eta (D_hid,): Prior precision.
+        alpha (float): Covariance inflation factor.
+
+    Returns:
+        m_pred (D_hid,): Predicted mean.
+        U_pred (D_hid, D_mem,): Predicted basis.
+        Sigma_pred (D_mem,): Predicted singular values.
+        eta_pred (float): Predicted precision.
+    """
+    m_pred = gamma * m
+    
+    eta_pred = 1/(gamma**2 * (1+alpha)/eta + q)
+    W = U * Sigma
+    chol_factor = jnp.linalg.cholesky(
+        jnp.linalg.pinv(
+            jnp.eye(W.shape[1]) + (1/(gamma**2 * (1+alpha)/q + eta) * W.T) @ W 
+        )
+    )
+    W_pred = gamma * jnp.sqrt(1+alpha)/q * (1/(gamma**2 * (1+alpha)/q + eta) * W) @ chol_factor
+    U_pred, Sigma_pred, _ = jnp.linalg.svd(W_pred, full_matrices=False)
+    
+    return m_pred, U_pred, Sigma_pred, eta_pred
+    
 
 def orthogonal_recursive_fitting(
     model_params: RebayesParams,
