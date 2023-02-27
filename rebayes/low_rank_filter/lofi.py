@@ -2,6 +2,7 @@ from functools import partial
 from typing import NamedTuple
 
 import jax.numpy as jnp
+import jax.random as jr
 from jax import jit, jacrev, vmap
 from jax.lax import scan
 from jaxtyping import Float, Array
@@ -172,7 +173,7 @@ class RebayesLoFi(Rebayes):
                 m_cond, U_cond, Sigma_cond = _lofi_orth_svd_condition_on(
                     m, U, Sigma, self.eta, self.model_params.emission_mean_function, 
                     self.model_params.emission_cov_function, u, y, self.sv_threshold, 
-                    self.adaptive_variance, obs_noise_var
+                    self.adaptive_variance, obs_noise_var, nobs
                 )
 
         return bel.replace(
@@ -250,7 +251,7 @@ def _orfit_condition_on(m, U, Sigma, apply_fn, x, y, sv_threshold):
     return m_cond, U_cond, Sigma_cond
 
 
-def _lofi_orth_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=1.0):
+def _lofi_orth_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=1.0, key=0):
     """Condition step of the low-rank filter algorithm based on orthogonal SVD method.
 
     Args:
@@ -264,12 +265,16 @@ def _lofi_orth_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y,
         y (D_obs,): Emission.
         sv_threshold (float): Threshold for singular values.
         adaptive_variance (bool): Whether to use adaptive variance.
+        key (int): Random key.
 
     Returns:
         m_cond (D_hid,): Posterior mean.
         U_cond (D_hid, D_mem,): Posterior basis.
         Sigma_cond (D_mem,): Posterior singular values.
     """
+    if isinstance(key, int):
+        key = jr.PRNGKey(key)
+    
     m_Y = lambda w: y_cond_mean(w, x)
     Cov_Y = lambda w: y_cond_cov(w, x)
     
@@ -304,7 +309,8 @@ def _lofi_orth_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y,
         )
         return (U_cond, Sigma_cond), (U_cond, Sigma_cond)
 
-    (U_cond, Sigma_cond), _ = scan(_update_basis, (U, Sigma), jnp.arange(yhat.shape[0]))
+    perm = jr.permutation(key, yhat.shape[0])
+    (U_cond, Sigma_cond), _ = scan(_update_basis, (U, Sigma), perm)
 
     return m_cond, U_cond, Sigma_cond
 
