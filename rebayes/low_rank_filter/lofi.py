@@ -148,14 +148,14 @@ class RebayesLoFi(Rebayes):
             else:
                 R = jnp.atleast_2d(Cov_Y(m))
             if self.method == 'orth_svd_lofi' or self.method == 'full_svd_lofi':
-                D = (sigma**2)/(self.eta * (self.eta + sigma**2))
+                D = (sigma**2)/(eta * (eta + sigma**2))
                 HU = H @ U
-                V_epi = H @ H.T/self.eta - (D * HU) @ (HU).T
+                V_epi = H @ H.T/eta - (D * HU) @ (HU).T
             else:
                 W = U * sigma
                 D = jnp.linalg.pinv(jnp.eye(W.shape[1]) +  W.T @ (W/eta))
                 HW = H/eta @ W
-                V_epi = H @ H.T/self.eta - (HW @ D) @ (HW).T
+                V_epi = H @ H.T/eta - (HW @ D) @ (HW).T
     
             Sigma_obs = V_epi + R
             
@@ -177,19 +177,19 @@ class RebayesLoFi(Rebayes):
             )
             if self.method == 'full_svd_lofi':
                 m_cond, U_cond, Sigma_cond = _lofi_full_svd_condition_on(
-                    m, U, Sigma, self.eta, self.model_params.emission_mean_function, 
+                    m, U, Sigma, eta_cond, self.model_params.emission_mean_function, 
                     self.model_params.emission_cov_function, u, y, self.sv_threshold, 
                     self.adaptive_variance, obs_noise_var
                 )
             elif self.method == 'orth_svd_lofi':
                 m_cond, U_cond, Sigma_cond = _lofi_orth_svd_condition_on(
-                    m, U, Sigma, self.eta, self.model_params.emission_mean_function, 
+                    m, U, Sigma, eta_cond, self.model_params.emission_mean_function, 
                     self.model_params.emission_cov_function, u, y, self.sv_threshold, 
                     self.adaptive_variance, obs_noise_var, nobs
                 )
             elif self.method == 'generalized_lofi':
                 m_cond, U_cond, Sigma_cond, eta_cond = _generalized_lofi_condition_on(
-                    m, U, Sigma, self.eta, self.model_params.emission_mean_function, 
+                    m, U, Sigma, eta_cond, self.model_params.emission_mean_function, 
                     self.model_params.emission_cov_function, u, y, self.sv_threshold, 
                     self.adaptive_variance, obs_noise_var
                 )
