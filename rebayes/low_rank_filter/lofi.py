@@ -81,7 +81,7 @@ class RebayesLoFi(Rebayes):
             # assert isinstance(initial_cov, float) and initial_cov > 0, "Initial covariance must be a positive scalar."
             self.eta = 1/initial_cov
             if method == 'generalized_lofi':
-                self.eta = jnp.ones(len(model_params.initial_mean)) * self.eta
+                self.eta = jnp.ones((len(model_params.initial_mean), 1)) * self.eta
             self.gamma = model_params.dynamics_weights
             # assert isinstance(self.gamma, float), "Dynamics decay term must be a scalar."
             self.q = model_params.dynamics_covariance
@@ -418,10 +418,10 @@ def _generalized_lofi_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x,
     U_cond, U_extra = u[:, :U.shape[1]], u[:, U.shape[1]:]
     Sigma_cond, Sigma_extra = lamb[:U.shape[1]], lamb[U.shape[1]:]
     W_extra = Sigma_extra * U_extra
-    eta_cond = eta + jnp.einsum('ij,ij->i', W_extra, W_extra)
+    eta_cond = eta + jnp.einsum('ij,ij->i', W_extra, W_extra)[:, jnp.newaxis]
     
-    D = jnp.linalg.pinv(jnp.eye(W_tilde.shape[1]) + (1/eta * W_tilde.T) @ W_tilde)
-    K = (H.T @ A) @ A.T/eta - (W_tilde/eta @ D) @ (W_tilde/eta).T @ (H.T @ A) @ A.T
+    D = jnp.linalg.pinv(jnp.eye(W_tilde.shape[1]) + W_tilde.T @ (W_tilde/eta))
+    K = (H.T @ A) @ A.T/eta - (W_tilde/eta @ D) @ ((W_tilde/eta).T @ (H.T @ A) @ A.T)
     m_cond = m + K @ (y - yhat)
     
     return m_cond, U_cond, Sigma_cond, eta_cond
@@ -506,7 +506,7 @@ def _generalized_lofi_predict(m, U, Sigma, gamma, q, eta, alpha=0.0):
     W = U * Sigma
     chol_factor = jnp.linalg.cholesky(
         jnp.linalg.pinv(
-            jnp.eye(W.shape[1]) + (1/(gamma**2 * (1+alpha)/q + eta) * W.T) @ W 
+            jnp.eye(W.shape[1]) + W.T @ (1/(gamma**2 * (1+alpha)/q + eta) * W) 
         )
     )
     W_pred = gamma * jnp.sqrt(1+alpha)/q * (1/(gamma**2 * (1+alpha)/q + eta) * W) @ chol_factor
