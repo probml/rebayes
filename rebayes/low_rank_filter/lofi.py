@@ -153,7 +153,7 @@ class RebayesLoFi(Rebayes):
                 V_epi = H @ H.T/self.eta - (D * HU) @ (HU).T
             else:
                 W = U * sigma
-                D = jnp.linalg.pinv(jnp.eye(W.shape[1]) + (1/eta * W.T) @ W)
+                D = jnp.linalg.pinv(jnp.eye(W.shape[1]) +  W.T @ (W/eta))
                 HW = H/eta @ W
                 V_epi = H @ H.T/self.eta - (HW @ D) @ (HW).T
     
