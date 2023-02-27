@@ -9,7 +9,9 @@ import flax.linen as nn
 from jax.flatten_util import ravel_pytree
 from jax.experimental import host_callback
 from jax import jacrev
+
 import torch
+from torch.utils.data import TensorDataset, DataLoader
 
 from dynamax.generalized_gaussian_ssm.models import ParamsGGSSM
 
@@ -133,7 +135,7 @@ def avalanche_dataloader_to_numpy(dataloader):
   # data = np.array(train_dataloader.dataset) # mangles the shapes
   all_X = []
   all_y = []
-  for X, y, t in dataloader:
+  for X, y, t in dataloader: # avalanche uses x,y,t
     all_X.append(X)
     all_y.append(y)
   X = torch.cat(all_X, dim=0).numpy()
@@ -142,9 +144,50 @@ def avalanche_dataloader_to_numpy(dataloader):
       y = y[:, None]
   return X, y
 
-def flatten(Xtr):
-    sz = Xtr.shape
+def make_avalanche_dataloaders(dataset, ntrain_per_dist, ntrain_per_batch, ntest_per_batch):
+    '''Make pytorch dataloaders from avalanche dataset.
+    ntrain_per_dist: number of training examples from each distribution (experience).
+    batch_size: how many training examples per batch.
+    ntest_per_batch: how many test examples per training batch.
+    '''
+    train_stream = dataset.train_stream
+    test_stream = dataset.test_stream
+    nexperiences = len(train_stream) # num. distinct distributions
+    nbatches_per_dist = int(ntrain_per_dist / ntrain_per_batch)
+    ntest_per_dist = ntest_per_batch * nbatches_per_dist
+    train_ndx, test_ndx = range(ntrain_per_dist), range(ntest_per_dist)
+
+    train_sets = []
+    test_sets = []
+    for exp in range(nexperiences):
+        ds = train_stream[exp].dataset
+        train_set = torch.utils.data.Subset(ds, train_ndx)
+        train_sets.append(train_set)
+
+        ds = test_stream[exp].dataset
+        test_set = torch.utils.data.Subset(ds, test_ndx)
+        test_sets.append(test_set)
+
+    train_set = torch.utils.data.ConcatDataset(train_sets)
+    test_set = torch.utils.data.ConcatDataset(test_sets)
+
+    train_dataloader = DataLoader(train_set, batch_size=ntrain_per_batch, shuffle=False)
+    test_dataloader = DataLoader(test_set, batch_size=ntest_per_batch, shuffle=False)
+    return train_dataloader, test_dataloader
+
+
+def make_avalanche_datasets_numpy(dataset, ntrain_per_dist, ntrain_per_batch, ntest_per_batch):
+    train_dataloader, test_dataloader = make_avalanche_dataloaders(dataset, ntrain_per_dist, ntrain_per_batch, ntest_per_batch)
+    Xtr, Ytr = avalanche_dataloader_to_numpy(train_dataloader)
+    Xte, Yte = avalanche_dataloader_to_numpy(test_dataloader)
+    #print(Xtr.shape, Ytr.shape, Xte.shape, Yte.shape, type(Xtr))
+    return Xtr, Ytr, Xte, Yte
+
+
+def flatten_batch(X):
+    if type(X)==torch.Tensor: X = jnp.array(X.numpy())
+    sz = jnp.array(list(X.shape))
     batch_size  = sz[0]
-    other_size = sz[1]*sz[2]*sz[3]
-    Xtr = Xtr.flatten().reshape(batch_size, other_size)
-    return Xtr
+    other_size = jnp.prod(sz[1:])
+    X = X.flatten().reshape(batch_size, other_size)
+    return X
