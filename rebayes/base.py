@@ -11,8 +11,6 @@ import chex
 from jax_tqdm import scan_tqdm
 from itertools import cycle
 
-from rebayes.utils.utils import flatten
-
 _jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
 
 import tensorflow_probability.substrates.jax as tfp
@@ -108,6 +106,7 @@ class Rebayes(ABC):
         """Return Cov(y(t) | X(t), D(1:t-1))"""
         return None
 
+    @partial(jit, static_argnums=(0,))
     def update_state(
         self,
         bel: Belief,
@@ -116,20 +115,6 @@ class Rebayes(ABC):
     ) -> Belief:
         """Return bel(t|t) = p(z(t) | X(t), y(t), D(1:t-1)) using bel(t|t-1) and Yt"""
         raise NotImplementedError
-
-    def update_state_batch(
-        self,
-        bel: Belief, 
-        X: Float[Array, "batch_size input_dim"],
-        Y: Float[Array, "batch_size emission_dim"]
-    ) -> Tuple[Belief, Any]:
-        batch_size = X.shape[0]
-        def step(bel, i):
-            bel = self.predict_state(bel)
-            bel = self.update_state(bel, X[i], Y[i])
-            return bel, None
-        bel, _ = scan(step, bel, jnp.arange(batch_size))
-        return bel
     
     def scan(
         self,
@@ -153,63 +138,72 @@ class Rebayes(ABC):
         carry = bel
         if bel is None:
             carry = self.init_bel()
-
         if progress_bar:
             step = scan_tqdm(num_timesteps)(step)
-
         bel, outputs = scan(step, carry, jnp.arange(num_timesteps))
         return bel, outputs
     
+    @partial(jit, static_argnums=(0,))
+    def update_state_batch(
+        self,
+        bel: Belief, 
+        X: Float[Array, "batch_size input_dim"],
+        Y: Float[Array, "batch_size emission_dim"]
+    ) -> Tuple[Belief, Any]:
+        bel, _ = self.scan(X, Y, bel=bel)
+        return bel
+    
     def scan_dataloader(
         self,
-        train_dl,
-        test_dl,
+        data_loader,
         callback=None,
         bel=None,
-        verbose=False,
-        has_task_id=False,
-        flatten_data=False,
         **kwargs
     ) -> Tuple[Belief, Any]:
-        """Scan over pytorch dataloaders."""
-        train_iter = iter(train_dl)
-        num_batches = len(train_iter)
-        if test_dl is not None:
-            test_iter = cycle(iter(test_dl)) # ensure test stream is infinite
-        else:
-            test_iter = None
-
-
-        def get_batch(has_task_id):
-            # avalanche attaches task id to each tuple
-            if has_task_id:
-                Xtr, Ytr, task_tr = next(train_iter)
-            else:
-                Xtr, Ytr = next(train_iter)
-            # convert from pytorch tensor to jax array
-            Xtr, Ytr = jnp.array(Xtr.numpy()), jnp.array(Ytr.numpy())
-            if flatten_data: Xtr = flatten(Xtr)
-            if test_iter is not None:
-                if has_task_id:
-                    Xte, Yte, task_te = next(test_iter)
-                else:
-                    Xte, Yte = next(test_iter)
-                Xte, Yte = jnp.array(Xte.numpy()), jnp.array(Yte.numpy())
-                if flatten_data: Xte = flatten(Xte)
-            else:
-                Xte, Yte = None, None
-            return Xtr, Ytr, Xte, Yte
-        
         if bel is None:
             bel = self.init_bel()
-        outputs = []
-        for b in jnp.arange(num_batches):
-            if verbose: print('batch ', b)
-            Xtr, Ytr, Xte, Yte = get_batch(has_task_id)
+        outputs = []    
+        for i, (Xtr, Ytr) in enumerate(data_loader):
+            bel_pre_update = bel
             bel = self.update_state_batch(bel, Xtr, Ytr)
             if callback is None:
                 out = None
             else:
-                out = callback(bel, b, Xtr, Ytr, Xte, Yte, **kwargs)
+                out = callback(i, bel_pre_update, bel, Xtr, Ytr,  **kwargs)
                 outputs.append(out)
         return bel, outputs
+
+    def scan_batch( # deprecated
+        self,
+        X: Float[Array, "ntime input_dim"],
+        Y: Float[Array, "ntime emission_dim"],
+        batch_size: int,
+        callback=None,
+        bel=None,
+        verbose=False,
+        **kwargs
+    ) -> Tuple[Belief, Any]:
+        if bel is None:
+            bel = self.init_bel()
+        outputs = []
+        # https://github.com/google/jax/blob/main/examples/mnist_classifier_fromscratch.py
+        num_train = X.shape[0]
+        num_complete_batches, leftover = divmod(num_train, batch_size)
+        num_batches = num_complete_batches + bool(leftover)
+        perm = jnp.arange(num_train) # sequential order
+        for i in range(num_batches):
+            if verbose: print('batch ', i)
+            start = i*batch_size
+            stop = min((i+1) * batch_size, num_train)
+            batch_idx = perm[start:stop]
+            Xtr, Ytr = X[batch_idx], Y[batch_idx]
+            bel_pre_update = bel
+            bel = self.update_state_batch(bel, Xtr, Ytr)
+            if callback is None:
+                out = None
+            else:
+                out = callback(i, bel_pre_update, bel, Xtr, Ytr,  **kwargs)
+                outputs.append(out)
+        return bel, outputs
+    
+   
