@@ -28,6 +28,43 @@ class MLP(nn.Module):
         return x
 
 
+def train_callback(bel, *args, **kwargs):
+    X_test, y_test = kwargs["X_test"], kwargs["y_test"]
+    apply_fn = kwargs["apply_fn"]
+
+    yhat = apply_fn(bel.mean, X_test).squeeze()
+    err = jnp.abs(y_test - yhat.ravel())
+    
+    res = {
+        "test": err.mean(),
+    }
+    return res
+
+
+def eval_callback(bel, pred, t, X, y, bel_pred, ymean, ystd, **kwargs):
+    X_test, y_test = kwargs["X_test"], kwargs["y_test"]
+    apply_fn = kwargs["apply_fn"]    
+
+    yhat_test = apply_fn(bel.mean, X_test).squeeze()
+    
+    # Compute errors
+    y_test = y_test * ystd + ymean
+    yhat_test = yhat_test.ravel() * ystd + ymean
+    
+    y_next = y.ravel() * ystd + ymean
+    yhat_next = pred.ravel() * ystd + ymean
+    
+    err_test = jnp.abs(y_test - yhat_test)
+    err = jnp.abs(y_next - yhat_next).sum()
+    
+    
+    res = {
+        "test": err_test.mean(),
+        "osa-error": err,
+    }
+    return res
+
+
 def prepare_dataset(train, test, n_warmup=1000, n_test_warmup=0, normalise_features=True, normalise_target=True):
     data, csts = datasets.showdown_preprocess(train, test, n_warmup=n_warmup, n_test_warmup=n_test_warmup,
                                             normalise_features=normalise_features, normalise_target=normalise_target)
@@ -47,7 +84,7 @@ def prepare_dataset(train, test, n_warmup=1000, n_test_warmup=0, normalise_featu
     data = {
         "train": (X_learn, y_learn),
         "test": (X_test, y_test),
-        "warmup": (warmup_train, warmup_test),
+        "warmup": warmup_train,
         "ymean": ymean,
         "ystd": ystd,
     }
@@ -109,7 +146,6 @@ def train_ekf_agent(params, model, method, datasets,
         **optimizer_eval_kwargs,
     )
 
-
     test_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
     hparams = hp_ekf.get_best_params(n_params, optimizer, method=method)
     agent = hp_ekf.build_estimator(flat_params, hparams, None, apply_fn, method=method)
@@ -124,7 +160,7 @@ def train_ekf_agent(params, model, method, datasets,
         "beliefs": bel,
     }
 
-    return res
+    return res, apply_fn
 
 
 def train_lofi_agent(params, params_lofi, model, method, dataset,
@@ -160,7 +196,7 @@ def train_lofi_agent(params, params_lofi, model, method, dataset,
         "beliefs": bel,
     }
 
-    return res
+    return res, apply_fn
 
 
 def train_lrvga_agent(key, apply_fn, model, dataset, dim_rank, n_inner, n_outer,
@@ -229,15 +265,25 @@ def train_lrvga_agent(key, apply_fn, model, dataset, dim_rank, n_inner, n_outer,
 if __name__ == "__main__":
     from rebayes.utils import uci_regression_data, datasets
     
+    random_state = 314
     key = jax.random.PRNGKey(314)
     dataset = "kin8nm"
     train, test = uci_regression_data.load_uci_kin8nm()
     dataset = prepare_dataset(train, test)
 
+    ymean, ystd = dataset["ymean"], dataset["ystd"]
+    eval_callback = partial(eval_callback, ymean=ymean, ystd=ystd)
+    dataset = dataset["train"], dataset["test"], dataset["warmup"]
+
     dim_out = 1
-    _, dim_in = dataset["train"].shape
+    _, dim_in = dataset[0][0].shape
     model = MLP(dim_out, activation=nn.elu)
     params = model.init(key, jnp.ones((1, dim_in)))
+
+    optimizer_eval_kwargs = {
+        "init_points": 10,
+        "n_iter": 15,
+    }
 
     pbounds = {
         "log_init_cov": (-5, 0.0),
@@ -249,4 +295,10 @@ if __name__ == "__main__":
     method = "fdekf"
     res = train_ekf_agent(
         params, model, method, dataset, pbounds,
+        train_callback, eval_callback,
+        optimizer_eval_kwargs,
     )
+
+    metric_final = res["output"]["test"][-1]
+    print(method)
+    print(f"{metric_final:=0.4f}")
