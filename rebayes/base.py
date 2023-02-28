@@ -157,53 +157,21 @@ class Rebayes(ABC):
         self,
         data_loader,
         callback=None,
-        bel=None,
-        **kwargs
+        bel=None
     ) -> Tuple[Belief, Any]:
         if bel is None:
             bel = self.init_bel()
         outputs = []    
-        for i, (Xtr, Ytr) in enumerate(data_loader):
+        for i, batch in enumerate(data_loader):
             bel_pre_update = bel
+            Xtr, Ytr = batch[0], batch[1]
             bel = self.update_state_batch(bel, Xtr, Ytr)
             if callback is None:
                 out = None
             else:
-                out = callback(i, bel_pre_update, bel, Xtr, Ytr,  **kwargs)
+                out = callback(i, bel_pre_update, bel, batch)
                 outputs.append(out)
         return bel, outputs
 
-    def scan_batch( # deprecated
-        self,
-        X: Float[Array, "ntime input_dim"],
-        Y: Float[Array, "ntime emission_dim"],
-        batch_size: int,
-        callback=None,
-        bel=None,
-        verbose=False,
-        **kwargs
-    ) -> Tuple[Belief, Any]:
-        if bel is None:
-            bel = self.init_bel()
-        outputs = []
-        # https://github.com/google/jax/blob/main/examples/mnist_classifier_fromscratch.py
-        num_train = X.shape[0]
-        num_complete_batches, leftover = divmod(num_train, batch_size)
-        num_batches = num_complete_batches + bool(leftover)
-        perm = jnp.arange(num_train) # sequential order
-        for i in range(num_batches):
-            if verbose: print('batch ', i)
-            start = i*batch_size
-            stop = min((i+1) * batch_size, num_train)
-            batch_idx = perm[start:stop]
-            Xtr, Ytr = X[batch_idx], Y[batch_idx]
-            bel_pre_update = bel
-            bel = self.update_state_batch(bel, Xtr, Ytr)
-            if callback is None:
-                out = None
-            else:
-                out = callback(i, bel_pre_update, bel, Xtr, Ytr,  **kwargs)
-                outputs.append(out)
-        return bel, outputs
     
    

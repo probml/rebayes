@@ -56,8 +56,9 @@ class RebayesSum(Rebayes):
 
     
     
-def callback_dl(b, bel_pre, bel, Xtr, Ytr,  **kwargs):
+def callback_dl(b, bel_pre, bel, batch):
     jax.debug.print("callback on batch {b}", b=b)
+    Xtr, Ytr = batch
     jax.debug.print("Xtr shape {x1}, Ytr shape {y1}", x1=Xtr.shape, y1=Ytr.shape)
     return b
 
@@ -96,8 +97,6 @@ def test_scan_dataloader_batch1():
     estimator = RebayesSum(make_rebayes_params(), shape_in, shape_out)
     bel, outputs = estimator.scan_dataloader(train_loader)
     bel2, outputs2 = estimator.scan(Xtr, Ytr)
-    print(bel, bel2)
-    print(outputs, outputs2)
     assert(jnp.allclose(bel.dummy, bel2.dummy))
 
 def make_mnist_data():

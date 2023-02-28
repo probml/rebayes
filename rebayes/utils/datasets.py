@@ -8,17 +8,24 @@ import jax
 import chex
 import zipfile
 import requests
-import torchvision
 import numpy as np
 import pandas as pd
 import jax.numpy as jnp
 import jax.random as jr
 from jax import vmap
-from augly import image
+
 from typing import Union
 from jaxtyping import  Float, Array
-from multiprocessing import Pool
+
 from sklearn.datasets import make_moons
+
+from multiprocessing import Pool
+from augly import image
+
+import torchvision
+from torchvision.transforms import ToTensor
+
+import jax_dataloader.core as jdl
 
 @chex.dataclass
 class LRState:
@@ -656,3 +663,4 @@ def make_rotating_moons(n_train, n_test, n_rotations, min_angle=0, max_angle=360
     test = (X_test_all, y_test_all, rads_test_all)
     
     return train, test
+
