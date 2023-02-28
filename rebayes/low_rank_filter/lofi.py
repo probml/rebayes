@@ -49,12 +49,12 @@ class LoFiBel:
         return cov
 
 
-
 class LoFiParams(NamedTuple):
     """Lightweight container for ORFit parameters.
     """
     memory_size: int
     sv_threshold: float = 0.0
+    steady_state: bool = False
 
 
 class PosteriorLoFiFiltered(NamedTuple):
@@ -84,7 +84,11 @@ class RebayesLoFi(Rebayes):
                 self.eta = jnp.ones((len(model_params.initial_mean), 1)) * self.eta
             self.gamma = model_params.dynamics_weights
             # assert isinstance(self.gamma, float), "Dynamics decay term must be a scalar."
-            self.q = model_params.dynamics_covariance
+            self.steady_state = lofi_params.steady_state
+            if self.steady_state and method != 'generalized_lofi':
+                self.q = (1 - self.gamma**2) / self.eta
+            else:
+                self.q = model_params.dynamics_covariance
         else:
             raise ValueError(f"Unknown method {method}.")
         self.method = method
@@ -110,7 +114,7 @@ class RebayesLoFi(Rebayes):
         if self.method == 'orfit':
             return bel
         elif self.method == 'orth_svd_lofi' or self.method == 'full_svd_lofi':
-            m_pred, Sigma_pred, eta_pred = _lofi_predict(m, Sigma, self.gamma, self.q, eta, self.alpha)
+            m_pred, Sigma_pred, eta_pred = _lofi_predict(m, Sigma, self.gamma, self.q, eta, self.alpha, self.steady_state)
             U_pred = U
         else:
             m_pred, U_pred, Sigma_pred, eta_pred = _generalized_lofi_predict(m, U, Sigma, self.gamma, self.q, eta, self.alpha)
@@ -158,8 +162,7 @@ class RebayesLoFi(Rebayes):
                 V_epi = H @ H.T/eta - (HW @ D) @ (HW).T
     
             Sigma_obs = V_epi + R
-            
-        
+                    
         return Sigma_obs
 
     @partial(jit, static_argnums=(0,))
@@ -456,7 +459,7 @@ def _lofi_estimate_noise(m, y_cond_mean, u, y, nobs, obs_noise_var, adaptive_var
     return nobs, obs_noise_var
 
 
-def _lofi_predict(m, Sigma, gamma, q, eta, alpha=0.0):
+def _lofi_predict(m, Sigma, gamma, q, eta, alpha=0.0, steady_state=False):
     """Predict step of the low-rank filter algorithm.
 
     Args:
@@ -466,6 +469,7 @@ def _lofi_predict(m, Sigma, gamma, q, eta, alpha=0.0):
         q (float): Dynamics noise factor.
         eta (float): Prior precision.
         alpha (float): Covariance inflation factor.
+        steady_state (bool): Whether to use steady-state dynamics.
 
     Returns:
         m_pred (D_hid,): Predicted mean.
@@ -474,10 +478,14 @@ def _lofi_predict(m, Sigma, gamma, q, eta, alpha=0.0):
     """
     m_pred = gamma * m
     Sigma_pred = jnp.sqrt((gamma**2 * Sigma**2)/((gamma**2 + q * eta) * (gamma**2 + q*eta + q*Sigma**2)))
-    eta_pred = eta/(gamma**2 + q*eta)
+    
+    if steady_state:
+        eta_pred = eta
+    else:
+        eta_pred = eta/(gamma**2 + q*eta)
+        # eta_pred = eta_pred / (1 + alpha)
     
     # Covariance inflation
-    eta_pred = eta_pred / (1 + alpha)
     Sigma_pred = Sigma_pred / jnp.sqrt(1 + alpha)
 
     return m_pred, Sigma_pred, eta_pred
@@ -502,7 +510,9 @@ def _generalized_lofi_predict(m, U, Sigma, gamma, q, eta, alpha=0.0):
     """
     m_pred = gamma * m
     
-    eta_pred = 1/(gamma**2 * (1+alpha)/eta + q)
+    # eta_pred = 1/(gamma**2 * (1+alpha)/eta + q)
+    eta_pred = 1/(gamma**2/eta + q)
+        
     W = U * Sigma
     chol_factor = jnp.linalg.cholesky(
         jnp.linalg.pinv(
