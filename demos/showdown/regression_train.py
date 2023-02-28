@@ -65,7 +65,7 @@ def eval_callback(bel, pred, t, X, y, bel_pred, ymean, ystd, **kwargs):
     return res
 
 
-def prepare_dataset(train, test, n_warmup=1000, n_test_warmup=0, normalise_features=True, normalise_target=True):
+def prepare_dataset(train, test, n_warmup=1000, n_test_warmup=1, normalise_features=True, normalise_target=True):
     data, csts = datasets.showdown_preprocess(train, test, n_warmup=n_warmup, n_test_warmup=n_test_warmup,
                                             normalise_features=normalise_features, normalise_target=normalise_target)
     data = jax.tree_map(jnp.nan_to_num, data)
@@ -78,13 +78,11 @@ def prepare_dataset(train, test, n_warmup=1000, n_test_warmup=0, normalise_featu
     X_learn, y_learn = data["train"]
     X_test, y_test = data["test"]
 
-    # HP optimise over test set
-    warmup_test = data["test"]
 
     data = {
         "train": (X_learn, y_learn),
         "test": (X_test, y_test),
-        "warmup": warmup_train,
+        "warmup": warmup_test,
         "ymean": ymean,
         "ystd": ystd,
     }
@@ -293,7 +291,7 @@ if __name__ == "__main__":
     }
 
     method = "fdekf"
-    res = train_ekf_agent(
+    res, apply_fn = train_ekf_agent(
         params, model, method, dataset, pbounds,
         train_callback, eval_callback,
         optimizer_eval_kwargs,
