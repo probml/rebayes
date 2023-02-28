@@ -3,7 +3,7 @@ import numpy as np
 import jax.numpy as jnp
 import time
 
-from rebayes.utils import datasets
+from rebayes.utils import rotating_mnist_data
 from rebayes.utils.utils import get_mlp_flattened_params
 from rebayes.low_rank_filter.lofi import RebayesLoFi, LoFiParams, orthogonal_recursive_fitting
 from dynamax.generalized_gaussian_ssm.models import ParamsGGSSM
@@ -19,7 +19,7 @@ def load_rmnist_data(num_train=100):
     # Load rotated MNIST dataset
     np.random.seed(314)
 
-    train, _ = datasets.load_rotated_mnist(target_digit=2)
+    train, _ = rotating_mnist_data.load_rotated_mnist(target_digit=2)
     X_train, y_train = train
 
     X_train = jnp.array(X_train)[:num_train]

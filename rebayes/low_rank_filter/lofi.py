@@ -84,8 +84,8 @@ class RebayesLoFi(Rebayes):
                 self.eta = jnp.ones((len(model_params.initial_mean), 1)) * self.eta
             self.gamma = model_params.dynamics_weights
             # assert isinstance(self.gamma, float), "Dynamics decay term must be a scalar."
-            self.steady_state = lofi_params.steady_state
-            if self.steady_state and method != 'generalized_lofi':
+            
+            if lofi_params.steady_state and method != 'generalized_lofi':
                 self.q = (1 - self.gamma**2) / self.eta
             else:
                 self.q = model_params.dynamics_covariance
@@ -95,7 +95,7 @@ class RebayesLoFi(Rebayes):
         self.nobs, self.obs_noise_var = 0, 0.0
         self.model_params = model_params
         self.adaptive_variance = model_params.adaptive_emission_cov
-        self.m, self.sv_threshold = lofi_params
+        self.m, self.sv_threshold, self.steady_state = lofi_params
         self.U0 = jnp.zeros((len(model_params.initial_mean), self.m))
         self.Sigma0 = jnp.zeros((self.m,))
         self.alpha = model_params.dynamics_covariance_inflation_factor
@@ -545,7 +545,7 @@ def orthogonal_recursive_fitting(
     """
     # Initialize parameters
     initial_mean, apply_fn = model_params.initial_mean, model_params.emission_mean_function
-    memory_limit, sv_threshold = inf_params
+    memory_limit, sv_threshold, _ = inf_params
     U, Sigma = jnp.zeros((len(initial_mean), memory_limit)), jnp.zeros((memory_limit,))
 
     def _step(carry, t):
@@ -591,7 +591,7 @@ def low_rank_filter_orthogonal_svd(
     adaptive_variance = model_params.adaptive_emission_cov
     assert isinstance(initial_cov, float) and initial_cov > 0, "Initial covariance must be a positive scalar."
     eta = 1/initial_cov
-    m, sv_threshold = inf_params
+    m, sv_threshold, steady_state = inf_params
     U, Sigma = jnp.zeros((len(initial_mean), m)), jnp.zeros((m,))
 
     m_Y, Cov_Y = model_params.emission_mean_function, model_params.emission_cov_function
@@ -606,7 +606,7 @@ def low_rank_filter_orthogonal_svd(
         x, y = inputs[t], emissions[t]
 
         # Predict the next state
-        pred_mean, pred_Sigma, pred_eta = _lofi_predict(mean, Sigma, gamma, q, eta, alpha)
+        pred_mean, pred_Sigma, pred_eta = _lofi_predict(mean, Sigma, gamma, q, eta, alpha, steady_state)
 
         # Condition on the emission
         filtered_mean, filtered_U, filtered_Sigma = _lofi_orth_svd_condition_on(pred_mean, U, pred_Sigma, pred_eta, m_Y, Cov_Y, x, y, sv_threshold, adaptive_variance, obs_noise_var)
@@ -652,7 +652,7 @@ def low_rank_filter_full_svd(
     eta = 1/initial_cov
     q, alpha = model_params.dynamics_covariance, model_params.dynamics_covariance_inflation_factor
     adaptive_variance = model_params.adaptive_emission_cov
-    m, sv_threshold = inf_params
+    m, sv_threshold, steady_state = inf_params
     U, Sigma = jnp.zeros((len(initial_mean), m)), jnp.zeros((m,))
 
     m_Y, Cov_Y = model_params.emission_mean_function, model_params.emission_cov_function
@@ -667,7 +667,7 @@ def low_rank_filter_full_svd(
         x, y = inputs[t], emissions[t]
 
         # Predict the next state
-        pred_mean, pred_Sigma, pred_eta = _lofi_predict(mean, Sigma, gamma, q, eta, alpha)
+        pred_mean, pred_Sigma, pred_eta = _lofi_predict(mean, Sigma, gamma, q, eta, alpha, steady_state)
 
         # Condition on the emission
         filtered_mean, filtered_U, filtered_Sigma = \
