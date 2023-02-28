@@ -85,7 +85,7 @@ class RebayesLoFi(Rebayes):
             self.gamma = model_params.dynamics_weights
             # assert isinstance(self.gamma, float), "Dynamics decay term must be a scalar."
             
-            if lofi_params.steady_state and method != 'generalized_lofi':
+            if not model_params.dynamics_covariance or (lofi_params.steady_state and method != 'generalized_lofi'):
                 self.q = (1 - self.gamma**2) / self.eta
             else:
                 self.q = model_params.dynamics_covariance
