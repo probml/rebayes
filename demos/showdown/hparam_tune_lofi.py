@@ -10,6 +10,7 @@ from rebayes.low_rank_filter import lofi
 def bbf(
     log_init_cov,
     dynamics_weights,
+    dynamics_covariance,
     log_emission_cov,
     # Specify before running
     train,
@@ -28,7 +29,6 @@ def bbf(
     X_train, y_train = train
     X_test, y_test = test
 
-    dynamics_covariance = None
     initial_covariance = jnp.exp(log_init_cov).item()
     if emission_mean_function is None:
         emission_mean_function = apply_fn
@@ -78,6 +78,12 @@ def create_optimizer(
     params_init = model.init(key, batch_init)
     flat_params, recfn = ravel_pytree(params_init)
 
+    kwargs = {}
+    if bounds["dynamics_covariance"] is None:
+        bounds.pop("dynamics_covariance")
+        kwargs["dynamics_covariance"] = None
+
+
     apply_fn = partial(apply, model=model, unflatten_fn=recfn)
     bbf_partial = partial(
         bbf,
@@ -89,7 +95,8 @@ def create_optimizer(
         params_lofi=params_lofi,
         method=method,
         emission_mean_function=emission_mean_function,
-        emission_cov_function=emission_cov_function
+        emission_cov_function=emission_cov_function,
+        **kwargs,
     )
     
     # Fix log-emission-covariance to dummy if adaptive
@@ -98,6 +105,8 @@ def create_optimizer(
             bbf_partial,
             log_emission_cov=0.0,
         )
+
+
 
     optimizer = BayesianOptimization(
         f=bbf_partial,
@@ -111,10 +120,10 @@ def create_optimizer(
 def get_best_params(n_params, optimizer):
     max_params = optimizer.max["params"].copy()
 
-    dynamics_cov = None
     init_cov = np.exp(max_params["log_init_cov"]).item()
     emission_cov = np.exp(max_params.get("log_emission_cov", 0.0))
     dynamics_weights = max_params["dynamics_weights"]
+    dynamics_cov = max_params.get("dynamics_covariance")
 
     hparams = {
         "initial_covariance": init_cov,
