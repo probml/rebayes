@@ -70,6 +70,7 @@ def create_optimizer(
     emission_mean_function=None,
     emission_cov_function=None,
 ):
+    bounds = bounds.copy()
     key = jax.random.PRNGKey(random_state)
     X_train, _ = train
     _, *n_params = X_train.shape
