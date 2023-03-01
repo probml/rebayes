@@ -22,9 +22,7 @@ class MLP(nn.Module):
     
     @nn.compact
     def __call__(self, x):
-        x = nn.Dense(20)(x)
-        x = self.activation(x)
-        x = nn.Dense(20)(x)
+        x = nn.Dense(50)(x)
         x = self.activation(x)
         x = nn.Dense(self.n_out)(x)
         return x
@@ -43,7 +41,7 @@ def train_callback(bel, *args, **kwargs):
     return res
 
 
-def eval_callback(bel, pred, t, X, y, bel_pred, ymean, ystd, **kwargs):
+def eval_callback_main(bel, pred, t, X, y, bel_pred, ymean, ystd, **kwargs):
     X_test, y_test = kwargs["X_test"], kwargs["y_test"]
     apply_fn = kwargs["apply_fn"]    
 
@@ -99,14 +97,14 @@ def get_subtree(tree, key):
     return jax.tree_map(lambda x: x[key], tree, is_leaf=lambda x: key in x)
 
 
-def fwd_link(mean, bel, x, model, reconstruct_fn):
+def fwd_link_main(mean, bel, x, model, reconstruct_fn):
     params = reconstruct_fn(mean)
     means = model.apply(params, x).ravel()
     std = bel.sigma
     return means, std ** 2
 
 
-def log_prob(mean, bel, x, y):
+def log_prob_main(mean, bel, x, y, fwd_link):
     yhat, std = fwd_link(mean, bel, x)
     std = jnp.sqrt(std)
     
@@ -200,7 +198,7 @@ def train_lofi_agent(params, params_lofi, model, method, dataset,
 
 
 def train_lrvga_agent(key, apply_fn, model, dataset, dim_rank, n_inner, n_outer,
-                      pbounds, eval_callback,
+                      pbounds, eval_callback, fwd_link,
                       optimizer_eval_kwargs, random_state=314):
     method = "lrvga"
     train, test, warmup = dataset
@@ -208,6 +206,7 @@ def train_lrvga_agent(key, apply_fn, model, dataset, dim_rank, n_inner, n_outer,
     X_train, y_train = train
     X_test, y_test = test
 
+    log_prob = partial(log_prob_main, fwd_link=fwd_link)
     def bbf(std, sigma2, eps, train, test, n_inner, n_outer):
         X_train, y_train = train
         X_test, y_test = test
@@ -269,25 +268,34 @@ def store_results(results, name, path):
         pickle.dump(results, f)
 
 
-if __name__ == "__main__":
-    import sys
-    from rebayes.utils import uci_regression_data, datasets
-    _, output_path = sys.argv
-    
-    dim_rank = 50
-    random_state = 314
-    key = jax.random.PRNGKey(314)
+# TODO: remove
+def load_rebayes_uci(dataset_name):
     dataset_name = "kin8nm"
     train, test = uci_regression_data.load_uci_kin8nm()
     dataset = prepare_dataset(train, test)
 
     ymean, ystd = dataset["ymean"], dataset["ystd"]
-    eval_callback = partial(eval_callback, ymean=ymean, ystd=ystd)
     dataset = dataset["train"], dataset["test"], dataset["warmup"]
+    norm_factors = (ymean, ystd)
 
+    return dataset, norm_factors
+
+
+def train_agents(path, ix):
+    res = uci_uncertainty_data.load_data(path, ix)
+    dataset = res["dataset"]
+    X_train, _ = dataset["train"]
+
+    # Train, test, warmup
+    dataset = dataset["train"], dataset["test"], dataset["train"][:500]
+
+    ymean = res["ymean"]
+    ystd = res["ystd"]
+    eval_callback = partial(eval_callback_main, ymean=ymean, ystd=ystd)
+
+    _, dim_in = X_train.shape
     dim_out = 1
-    _, dim_in = dataset[0][0].shape
-    model = MLP(dim_out, activation=nn.elu)
+    model = MLP(dim_out, activation=nn.relu)
     params = model.init(key, jnp.ones((1, dim_in)))
     params_flat, reconstruct_fn =  ravel_pytree(params)
 
@@ -326,8 +334,8 @@ if __name__ == "__main__":
         metric_final = res["output"]["test"][-1]
         print(method)
         print(f"{metric_final:=0.4f}")
-        store_results(res, f"{dataset_name}_{method}", output_path)
-
+        print("-" * 80)
+        store_results(res, f"{dataset_name}_{method}_{ix}", output_path)
 
     # -------------------------------------------------------------------------
     # Low-rank filter
@@ -347,17 +355,19 @@ if __name__ == "__main__":
         metric_final = res["output"]["test"][-1]
         print(method)
         print(f"{metric_final:=0.4f}")
-        store_results(res, f"{dataset_name}_{method}", output_path)
+        print("-" * 80)
+        store_results(res, f"{dataset_name}_{method}_{ix}", output_path)
 
 
     # -------------------------------------------------------------------------
     # Low-rank variational Gaussian approximation (LRVGA)
     n_outer = 6
     n_inner = 4
-    fwd_link = partial(fwd_link, model=model, reconstruct_fn=reconstruct_fn)
+    fwd_link = partial(fwd_link_main, model=model, reconstruct_fn=reconstruct_fn)
     res = train_lrvga_agent(
         key, apply_fn, model, dataset, dim_rank=dim_rank, n_inner=n_inner, n_outer=n_outer,
-        pbounds=pbounds_lrvga, eval_callback=eval_callback, optimizer_eval_kwargs=optimizer_eval_kwargs,
+        pbounds=pbounds_lrvga, eval_callback=eval_callback,  fwd_link=fwd_link,
+        optimizer_eval_kwargs=optimizer_eval_kwargs,
         random_state=random_state,
     ) 
     method = res["method"]
@@ -365,4 +375,34 @@ if __name__ == "__main__":
     metric_final = res["output"]["test"][-1]
     print(method)
     print(f"{metric_final:=0.4f}")
-    store_results(res, f"{dataset_name}_{method}", output_path)
+    print("-" * 80)
+    store_results(res, f"{dataset_name}_{method}_{ix}", output_path)
+
+
+if __name__ == "__main__":
+    import sys
+    from itertools import product
+    from rebayes.utils import uci_regression_data, datasets, uci_uncertainty_data
+    # TOODO: change to $REBAYES_OUTPUT
+    output_path = "/home/gerardoduran/documents/rebayes/demos/outputs/checkpoints"
+
+    # _, dataset_name = sys.argv
+    
+    dim_rank = 50
+    random_state = 314
+    key = jax.random.PRNGKey(314)
+
+    num_partitions = 20
+    datasets = [
+        "bostonHousing", "concrete", "energy", "kin8nm", "naval-propulsion-plant",
+        "power-plant", "protein-tertiary-structure", "wine-quality-red", "yacht"
+    ]
+
+    for dataset_name, ix in product(datasets, range(num_partitions)):
+        path = (
+            "/home/gerardoduran/documents/external"
+            "/DropoutUncertaintyExps/UCI_Datasets/"
+            f"{dataset_name}"
+        )
+        path = os.path.join(path, "data")
+        train_agents(path, ix)
