@@ -8,7 +8,7 @@ from typing import Callable
 from bayes_opt import BayesianOptimization
 from jax.flatten_util import ravel_pytree
 
-from rebayes.low_rank_filter import lrvga
+from rebayes.low_rank_filter import lrvga, lofi
 
 import hparam_tune_ekf as hp_ekf
 import hparam_tune_lofi as hp_lofi
@@ -279,8 +279,8 @@ if __name__ == "__main__":
     params = model.init(key, jnp.ones((1, dim_in)))
 
     optimizer_eval_kwargs = {
-        "init_points": 10,
-        "n_iter": 15,
+        "init_points": 1,
+        "n_iter": 1,
     }
 
     pbounds = {
@@ -290,6 +290,11 @@ if __name__ == "__main__":
         "dynamics_log_cov": (-7, 0.0),
     }
 
+    pbounds_lofi = pbounds.copy()
+    pbounds_lofi.pop("dynamics_log_cov")
+    pbounds_lofi["dynamics_covariance"] = None
+
+    # Extended Kalman Filter
     method = "fdekf"
     res, apply_fn = train_ekf_agent(
         params, model, method, dataset, pbounds,
@@ -300,3 +305,24 @@ if __name__ == "__main__":
     metric_final = res["output"]["test"][-1]
     print(method)
     print(f"{metric_final:=0.4f}")
+
+    # Low-rank filter
+    # method = "orth_svd_lofi"
+    method = "full_svd_lofi"
+    params_lofi = lofi.LoFiParams(
+        memory_size=50,
+        sv_threshold=0,
+        steady_state=True,
+    )
+
+    res, apply_fn = train_lofi_agent(
+        params, params_lofi, model, method, dataset, pbounds_lofi,
+        train_callback, eval_callback,
+        optimizer_eval_kwargs,
+    )
+
+    metric_final = res["output"]["test"][-1]
+    print(method)
+    print(f"{metric_final:=0.4f}")
+
+    # Low-rank variational Gaussian approximation (LRVGA)
