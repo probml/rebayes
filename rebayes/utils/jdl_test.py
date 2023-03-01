@@ -7,12 +7,24 @@ import haiku as hk
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+import numpy as np
 
 import jax_dataloader.core as jdl
 
 from torch.utils.data import DataLoader, TensorDataset
 from torchvision.transforms import ToTensor
 from torchvision.datasets import MNIST
+
+class ToNumpy(object):
+  def __call__(self, pic):
+    return np.array(pic, dtype=float)
+
+def test_pytorch():
+    train_ds = MNIST(root='/tmp', download=True, transform=ToNumpy(), train=True)
+    train_dl = jdl.DataLoader(train_ds, 'pytorch', batch_size=5, shuffle=True) # Using 'pytorch' as the backend is a must for now
+
+    imgs, label = next(iter(train_dl))
+    print(imgs.shape)
 
 def test_mnist():
     train_ds = MNIST('/tmp/mnist/', download=True, transform=ToTensor())
