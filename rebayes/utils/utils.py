@@ -92,16 +92,16 @@ def fit_optax(params, optimizer, input, output, loss_fn, num_epochs, return_hist
         updates, opt_state = optimizer.update(grads, opt_state, params)
         params = optax.apply_updates(params, updates)
         return params, opt_state, loss_value
-    
+
     if return_history:
         params_history=[]
-    
+
     for epoch in range(num_epochs):
         for i, (x, y) in enumerate(zip(input, output)):
             params, opt_state, loss_value = step(params, opt_state, x, y)
             if return_history:
                 params_history.append(params)
-    
+
     if return_history:
         return jnp.array(params_history)
     return params
@@ -115,3 +115,38 @@ def loss_optax(params, x, y, loss_fn, apply_fn):
 # Define SGD optimizer
 sgd_optimizer = optax.sgd(learning_rate=1e-2)
 
+def tree_to_cpu(tree):
+    return jax.tree_map(np.array, tree)
+
+def get_subtree(tree, key):
+    return jax.tree_map(lambda x: x[key], tree, is_leaf=lambda x: key in x)
+
+
+def eval_runs(key, num_runs_pc, agent, model, train, test, eval_callback, test_kwargs):
+    X_learn, y_learn = train
+    _, dim_in = X_learn.shape
+
+    num_devices = jax.device_count()
+    num_sims = num_runs_pc * num_devices
+    keys = jax.random.split(key, num_sims).reshape(-1, num_devices, 2)
+    n_vals = len(X_learn)
+
+    @partial(jax.pmap, in_axes=1)
+    @partial(jax.vmap, in_axes=0)
+    def evalf(key):
+        key_shuffle, key_init = jax.random.split(key)
+        ixs_shuffle = jax.random.choice(key_shuffle, n_vals, (n_vals,), replace=False)
+
+        params = model.init(key_init, jnp.ones((1, dim_in)))
+        flat_params, _ = ravel_pytree(params)
+
+        bel, output = agent.scan(
+            X_learn[ixs_shuffle], y_learn[ixs_shuffle], callback=eval_callback, progress_bar=False, **test_kwargs
+        )
+
+        return output
+
+
+    outputs = evalf(keys)
+    outputs = jax.tree_map(lambda x: x.reshape(num_sims, -1), outputs)
+    return outputs
