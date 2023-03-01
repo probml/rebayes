@@ -1,4 +1,6 @@
+import os
 import jax
+import pickle
 import distrax
 import numpy as np
 import jax.numpy as jnp
@@ -16,7 +18,7 @@ import hparam_tune_lofi as hp_lofi
 
 class MLP(nn.Module):
     n_out: int
-    activation: Callable = nn.relu
+    activation: Callable = nn.elu
     
     @nn.compact
     def __call__(self, x):
@@ -65,7 +67,7 @@ def eval_callback(bel, pred, t, X, y, bel_pred, ymean, ystd, **kwargs):
     return res
 
 
-def prepare_dataset(train, test, n_warmup=1000, n_test_warmup=1, normalise_features=True, normalise_target=True):
+def prepare_dataset(train, test, n_warmup=1000, n_test_warmup=300, normalise_features=True, normalise_target=True):
     data, csts = datasets.showdown_preprocess(train, test, n_warmup=n_warmup, n_test_warmup=n_test_warmup,
                                             normalise_features=normalise_features, normalise_target=normalise_target)
     data = jax.tree_map(jnp.nan_to_num, data)
@@ -153,7 +155,7 @@ def train_ekf_agent(params, model, method, datasets,
 
     res = {
         "method": method,
-        "hparams": hparams,
+        "hparams": optimizer.max,
         "output": output,
         "beliefs": bel,
     }
@@ -189,7 +191,7 @@ def train_lofi_agent(params, params_lofi, model, method, dataset,
 
     res = {
         "method": method,
-        "hparams": hparams,
+        "hparams": optimizer.max,
         "output": output,
         "beliefs": bel,
     }
@@ -247,12 +249,12 @@ def train_lrvga_agent(key, apply_fn, model, dataset, dim_rank, n_inner, n_outer,
     test_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
     agent = lrvga.LRVGA(fwd_link, log_prob, n_samples=30, n_outer=n_outer, n_inner=n_inner)
     bel, output = agent.scan(
-        X_train, y_train, callback=eval_callback, progress_bar=True, bel=bel_init, **test_kwargs
+        X_train, y_train, callback=eval_callback, progress_bar=False, bel=bel_init, **test_kwargs
     )
 
     res = {
         "method": method,
-        "hparams": hparams,
+        "hparams": optimizer.max,
         "output": output,
         "beliefs": bel,
     }
@@ -260,12 +262,22 @@ def train_lrvga_agent(key, apply_fn, model, dataset, dim_rank, n_inner, n_outer,
     return res
 
 
+def store_results(results, name, path):
+    path = os.path.join(path, name)
+    filename = f"{path}.pkl"
+    with open(filename, "wb") as f:
+        pickle.dump(results, f)
+
+
 if __name__ == "__main__":
+    import sys
     from rebayes.utils import uci_regression_data, datasets
+    _, output_path = sys.argv
     
+    dim_rank = 50
     random_state = 314
     key = jax.random.PRNGKey(314)
-    dataset = "kin8nm"
+    dataset_name = "kin8nm"
     train, test = uci_regression_data.load_uci_kin8nm()
     dataset = prepare_dataset(train, test)
 
@@ -277,10 +289,11 @@ if __name__ == "__main__":
     _, dim_in = dataset[0][0].shape
     model = MLP(dim_out, activation=nn.elu)
     params = model.init(key, jnp.ones((1, dim_in)))
+    params_flat, reconstruct_fn =  ravel_pytree(params)
 
     optimizer_eval_kwargs = {
-        "init_points": 1,
-        "n_iter": 1,
+        "init_points": 10,
+        "n_iter": 15,
     }
 
     pbounds = {
@@ -294,35 +307,62 @@ if __name__ == "__main__":
     pbounds_lofi.pop("dynamics_log_cov")
     pbounds_lofi["dynamics_covariance"] = None
 
+    pbounds_lrvga = {
+        "std": (-0.34, 0.0),
+        "sigma2": (-4, 0.0),
+        "eps": (-10, -4),
+    }
+
+    # -------------------------------------------------------------------------
     # Extended Kalman Filter
-    method = "fdekf"
-    res, apply_fn = train_ekf_agent(
-        params, model, method, dataset, pbounds,
-        train_callback, eval_callback,
-        optimizer_eval_kwargs,
-    )
+    methods = ["fdekf", "vdekf", "fcekf"]
+    for method in methods:
+        res, apply_fn = train_ekf_agent(
+            params, model, method, dataset, pbounds,
+            train_callback, eval_callback,
+            optimizer_eval_kwargs,
+        )
 
-    metric_final = res["output"]["test"][-1]
-    print(method)
-    print(f"{metric_final:=0.4f}")
+        metric_final = res["output"]["test"][-1]
+        print(method)
+        print(f"{metric_final:=0.4f}")
+        store_results(res, f"{dataset_name}_{method}", output_path)
 
+
+    # -------------------------------------------------------------------------
     # Low-rank filter
-    # method = "orth_svd_lofi"
-    method = "full_svd_lofi"
+    methods = ["full_svd_lofi", "orth_svd_lofi"]
     params_lofi = lofi.LoFiParams(
-        memory_size=50,
+        memory_size=dim_rank,
         sv_threshold=0,
         steady_state=True,
     )
+    for method in methods:
+        res, apply_fn = train_lofi_agent(
+            params, params_lofi, model, method, dataset, pbounds_lofi,
+            train_callback, eval_callback,
+            optimizer_eval_kwargs,
+        )
 
-    res, apply_fn = train_lofi_agent(
-        params, params_lofi, model, method, dataset, pbounds_lofi,
-        train_callback, eval_callback,
-        optimizer_eval_kwargs,
-    )
+        metric_final = res["output"]["test"][-1]
+        print(method)
+        print(f"{metric_final:=0.4f}")
+        store_results(res, f"{dataset_name}_{method}", output_path)
+
+
+    # -------------------------------------------------------------------------
+    # Low-rank variational Gaussian approximation (LRVGA)
+    n_outer = 6
+    n_inner = 4
+    fwd_link = partial(fwd_link, model=model, reconstruct_fn=reconstruct_fn)
+    res = train_lrvga_agent(
+        key, apply_fn, model, dataset, dim_rank=dim_rank, n_inner=n_inner, n_outer=n_outer,
+        pbounds=pbounds_lrvga, eval_callback=eval_callback, optimizer_eval_kwargs=optimizer_eval_kwargs,
+        random_state=random_state,
+    ) 
+    method = res["method"]
 
     metric_final = res["output"]["test"][-1]
     print(method)
     print(f"{metric_final:=0.4f}")
-
-    # Low-rank variational Gaussian approximation (LRVGA)
+    store_results(res, f"{dataset_name}_{method}", output_path)
