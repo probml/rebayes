@@ -236,6 +236,7 @@ def train_lrvga_agent(key, apply_fn, model, dataset, dim_rank, n_inner, n_outer,
         f=pbbf,
         pbounds=pbounds,
         random_state=random_state,
+        allow_duplicate_points=True,
     )
 
     optimizer.maximize(
@@ -281,7 +282,7 @@ def load_rebayes_uci(dataset_name):
     return dataset, norm_factors
 
 
-def train_agents(path, ix):
+def train_agents(key, path, ix):
     res = uci_uncertainty_data.load_data(path, ix)
     dataset = res["dataset"]
     X_train, _ = dataset["train"]
@@ -393,16 +394,20 @@ if __name__ == "__main__":
     key = jax.random.PRNGKey(314)
 
     num_partitions = 20
+    partitions = range(num_partitions)
     datasets = [
         "bostonHousing", "concrete", "energy", "kin8nm", "naval-propulsion-plant",
         "power-plant", "protein-tertiary-structure", "wine-quality-red", "yacht"
     ]
 
-    for dataset_name, ix in product(datasets, range(num_partitions)):
+    for i, (dataset_name, ix) in enumerate(product(datasets, partitions)):
+        keyv = jax.random.fold_in(key, i)
+        print(f"Fitting {dataset_name} --- {ix}")
         path = (
             "/home/gerardoduran/documents/external"
             "/DropoutUncertaintyExps/UCI_Datasets/"
             f"{dataset_name}"
         )
         path = os.path.join(path, "data")
-        train_agents(path, ix)
+        train_agents(keyv, path, ix)
+        print("\n" * 3)
