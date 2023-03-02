@@ -56,6 +56,7 @@ class LoFiParams(NamedTuple):
     memory_size: int
     sv_threshold: float = 0.0
     steady_state: bool = False
+    diagonal_covariance: bool = False
 
 
 class PosteriorLoFiFiltered(NamedTuple):
@@ -77,16 +78,17 @@ class RebayesLoFi(Rebayes):
             self.eta = None
             self.gamma = None
             self.q = None
-        elif method == 'full_svd_lofi' or method == 'orth_svd_lofi' or method == 'generalized_lofi':
+        elif method == 'lofi' or method == 'lofi_orth':
+            if method == 'lofi_orth' and lofi_params.diagonal_covariance:
+                raise NotImplementedError("Orth-LoFi is not yet implemented for diagonal covariance.")
+            
             initial_cov = model_params.initial_covariance
-            # assert isinstance(initial_cov, float) and initial_cov > 0, "Initial covariance must be a positive scalar."
             self.eta = 1/initial_cov
-            if method == 'generalized_lofi':
+            if lofi_params.diagonal_covariance:
                 self.eta = jnp.ones((len(model_params.initial_mean), 1)) * self.eta
             self.gamma = model_params.dynamics_weights
-            # assert isinstance(self.gamma, float), "Dynamics decay term must be a scalar."
             
-            if not model_params.dynamics_covariance or (lofi_params.steady_state and method != 'generalized_lofi'):
+            if not model_params.dynamics_covariance or (lofi_params.steady_state and not lofi_params.diagonal_covariance):
                 self.q = (1 - self.gamma**2) / self.eta
             else:
                 self.q = model_params.dynamics_covariance
@@ -97,7 +99,7 @@ class RebayesLoFi(Rebayes):
         self.nobs, self.obs_noise_var = 0, 0.0
         self.model_params = model_params
         self.adaptive_variance = model_params.adaptive_emission_cov
-        self.m, self.sv_threshold, self.steady_state = lofi_params
+        self.m, self.sv_threshold, self.steady_state, self.diagonal_covariance = lofi_params
         self.U0 = jnp.zeros((len(model_params.initial_mean), self.m))
         self.Sigma0 = jnp.zeros((self.m,))
         self.alpha = model_params.dynamics_covariance_inflation_factor
@@ -116,10 +118,10 @@ class RebayesLoFi(Rebayes):
             bel.initial_mean, bel.mean, bel.basis, bel.sigma, bel.nobs, bel.obs_noise_var, bel.eta
         if self.method == 'orfit':
             return bel
-        elif self.method == 'orth_svd_lofi' or self.method == 'full_svd_lofi':
-            m_pred, U_pred, Sigma_pred, eta_pred = _lofi_predict(m0, m, U, Sigma, self.gamma, self.q, eta, self.alpha, self.steady_state)
+        elif self.diagonal_covariance:
+            m_pred, U_pred, Sigma_pred, eta_pred = _lofi_diagonal_cov_predict(m0, m, U, Sigma, self.gamma, self.q, eta, self.alpha)
         else:
-            m_pred, U_pred, Sigma_pred, eta_pred = _generalized_lofi_predict(m0, m, U, Sigma, self.gamma, self.q, eta, self.alpha)
+            m_pred, U_pred, Sigma_pred, eta_pred = _lofi_spherical_cov_predict(m0, m, U, Sigma, self.gamma, self.q, eta, self.alpha, self.steady_state)
 
         return bel.replace(
             mean=m_pred, basis=U_pred, sigma=Sigma_pred,
@@ -153,15 +155,16 @@ class RebayesLoFi(Rebayes):
                 R = jnp.eye(y_pred.shape[0]) * obs_noise_var
             else:
                 R = jnp.atleast_2d(Cov_Y(m))
-            if self.method == 'orth_svd_lofi' or self.method == 'full_svd_lofi':
-                D = (sigma**2)/(eta * (eta + sigma**2))
-                HU = H @ U
-                V_epi = H @ H.T/eta - (D * HU) @ (HU).T
-            else:
+                
+            if self.diagonal_covariance:
                 W = U * sigma
                 D = jnp.linalg.pinv(jnp.eye(W.shape[1]) +  W.T @ (W/eta))
                 HW = H/eta @ W
                 V_epi = H @ H.T/eta - (HW @ D) @ (HW).T
+            else:
+                D = (sigma**2)/(eta * (eta + sigma**2))
+                HU = H @ U
+                V_epi = H @ H.T/eta - (D * HU) @ (HU).T
     
             Sigma_obs = V_epi + R
                     
@@ -180,23 +183,24 @@ class RebayesLoFi(Rebayes):
                 m, self.model_params.emission_mean_function,
                 u, y, nobs, obs_noise_var, self.adaptive_variance
             )
-            if self.method == 'full_svd_lofi':
-                m_cond, U_cond, Sigma_cond = _lofi_full_svd_condition_on(
-                    m, U, Sigma, eta_cond, self.model_params.emission_mean_function, 
-                    self.model_params.emission_cov_function, u, y, self.sv_threshold, 
-                    self.adaptive_variance, obs_noise_var
-                )
-            elif self.method == 'orth_svd_lofi':
-                m_cond, U_cond, Sigma_cond = _lofi_orth_svd_condition_on(
+            if self.method == 'lofi':
+                if self.diagonal_covariance:
+                    m_cond, U_cond, Sigma_cond, eta_cond = _lofi_diagonal_cov_condition_on(
+                        m, U, Sigma, eta_cond, self.model_params.emission_mean_function, 
+                        self.model_params.emission_cov_function, u, y, self.sv_threshold, 
+                        self.adaptive_variance, obs_noise_var
+                    )
+                else:
+                    m_cond, U_cond, Sigma_cond, _ = _lofi_spherical_cov_condition_on(
+                        m, U, Sigma, eta_cond, self.model_params.emission_mean_function, 
+                        self.model_params.emission_cov_function, u, y, self.sv_threshold, 
+                        self.adaptive_variance, obs_noise_var
+                    )
+            elif self.method == 'lofi_orth':
+                m_cond, U_cond, Sigma_cond = _lofi_orth_condition_on(
                     m, U, Sigma, eta_cond, self.model_params.emission_mean_function, 
                     self.model_params.emission_cov_function, u, y, self.sv_threshold, 
                     self.adaptive_variance, obs_noise_var, nobs
-                )
-            elif self.method == 'generalized_lofi':
-                m_cond, U_cond, Sigma_cond, eta_cond = _generalized_lofi_condition_on(
-                    m, U, Sigma, eta_cond, self.model_params.emission_mean_function, 
-                    self.model_params.emission_cov_function, u, y, self.sv_threshold, 
-                    self.adaptive_variance, obs_noise_var
                 )
 
         return bel.replace(
@@ -274,7 +278,7 @@ def _orfit_condition_on(m, U, Sigma, apply_fn, x, y, sv_threshold):
     return m_cond, U_cond, Sigma_cond
 
 
-def _lofi_orth_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=1.0, key=0):
+def _lofi_orth_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=1.0, key=0):
     """Condition step of the low-rank filter algorithm based on orthogonal SVD method.
 
     Args:
@@ -338,7 +342,7 @@ def _lofi_orth_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y,
     return m_cond, U_cond, Sigma_cond
 
 
-def _lofi_full_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=1.0):
+def _lofi_spherical_cov_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=1.0):
     """Condition step of the low-rank filter with adaptive observation variance.
 
     Args:
@@ -382,10 +386,10 @@ def _lofi_full_svd_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y,
 
     m_cond = m + K @ (y - yhat)
 
-    return m_cond, U_cond, Sigma_cond
+    return m_cond, U_cond, Sigma_cond, eta
 
 
-def _generalized_lofi_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=1.0):
+def _lofi_diagonal_cov_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=1.0):
     """Condition step of the low-rank filter with adaptive observation variance.
 
     Args:
@@ -461,7 +465,7 @@ def _lofi_estimate_noise(m, y_cond_mean, u, y, nobs, obs_noise_var, adaptive_var
     return nobs, obs_noise_var
 
 
-def _lofi_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0, steady_state=False):
+def _lofi_spherical_cov_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0, steady_state=False):
     """Predict step of the low-rank filter algorithm.
 
     Args:
@@ -502,7 +506,7 @@ def _lofi_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0, steady_state=False)
     return m_pred, U_pred, Sigma_pred, eta_pred
 
 
-def _generalized_lofi_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0):
+def _lofi_diagonal_cov_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0, steady_state=False):
     """Predict step of the generalized low-rank filter algorithm.
 
     Args:
@@ -561,7 +565,7 @@ def orthogonal_recursive_fitting(
     """
     # Initialize parameters
     initial_mean, apply_fn = model_params.initial_mean, model_params.emission_mean_function
-    memory_limit, sv_threshold, _ = inf_params
+    memory_limit, sv_threshold, *_ = inf_params
     U, Sigma = jnp.zeros((len(initial_mean), memory_limit)), jnp.zeros((memory_limit,))
 
     def _step(carry, t):
@@ -607,7 +611,7 @@ def low_rank_filter_orthogonal_svd(
     adaptive_variance = model_params.adaptive_emission_cov
     assert isinstance(initial_cov, float) and initial_cov > 0, "Initial covariance must be a positive scalar."
     eta = 1/initial_cov
-    m, sv_threshold, steady_state = inf_params
+    m, sv_threshold, steady_state, _ = inf_params
     U, Sigma = jnp.zeros((len(initial_mean), m)), jnp.zeros((m,))
 
     m_Y, Cov_Y = model_params.emission_mean_function, model_params.emission_cov_function
@@ -616,16 +620,16 @@ def low_rank_filter_orthogonal_svd(
     nobs, obs_noise_var = 0, 0.0
 
     def _step(carry, t):
-        mean, U, Sigma, eta, nobs, obs_noise_var = carry
+        mean, U, Sigma, nobs, obs_noise_var = carry
 
         # Get input and emission and compute Jacobians
         x, y = inputs[t], emissions[t]
 
         # Predict the next state
-        pred_mean, pred_Sigma, pred_eta = _lofi_predict(mean, Sigma, gamma, q, eta, alpha, steady_state)
+        pred_mean, pred_U, pred_Sigma, pred_eta = _lofi_spherical_cov_predict(initial_mean, mean, U, Sigma, gamma, q, eta, alpha, steady_state)
 
         # Condition on the emission
-        filtered_mean, filtered_U, filtered_Sigma = _lofi_orth_svd_condition_on(pred_mean, U, pred_Sigma, pred_eta, m_Y, Cov_Y, x, y, sv_threshold, adaptive_variance, obs_noise_var)
+        filtered_mean, filtered_U, filtered_Sigma = _lofi_orth_condition_on(pred_mean, pred_U, pred_Sigma, pred_eta, m_Y, Cov_Y, x, y, sv_threshold, adaptive_variance, obs_noise_var, t)
 
         # Update noise
         nobs, obs_noise_var = _lofi_estimate_noise(filtered_mean, filtered_U, m_Y, x, y, nobs, obs_noise_var, adaptive_variance)
@@ -668,13 +672,20 @@ def low_rank_filter_full_svd(
     eta = 1/initial_cov
     q, alpha = model_params.dynamics_covariance, model_params.dynamics_covariance_inflation_factor
     adaptive_variance = model_params.adaptive_emission_cov
-    m, sv_threshold, steady_state = inf_params
+    m, sv_threshold, steady_state, diagonal_covariance = inf_params
     U, Sigma = jnp.zeros((len(initial_mean), m)), jnp.zeros((m,))
 
     m_Y, Cov_Y = model_params.emission_mean_function, model_params.emission_cov_function
     gamma = model_params.dynamics_weights
     assert isinstance(gamma, float), "Dynamics decay term must be a scalar."
     nobs, obs_noise_var = 0, 0.0
+    
+    if diagonal_covariance:
+        predict_fn = _lofi_spherical_cov_predict
+        update_fn = _lofi_diagonal_cov_condition_on
+    else:
+        predict_fn = _lofi_spherical_cov_predict
+        update_fn = _lofi_spherical_cov_condition_on
 
     def _step(carry, t):
         mean, U, Sigma, eta, nobs, obs_noise_var = carry
@@ -683,18 +694,15 @@ def low_rank_filter_full_svd(
         x, y = inputs[t], emissions[t]
 
         # Predict the next state
-        pred_mean, pred_Sigma, pred_eta = _lofi_predict(mean, Sigma, gamma, q, eta, alpha, steady_state)
+        pred_mean, pred_U, pred_Sigma, pred_eta = predict_fn(initial_mean, mean, U, Sigma, gamma, q, eta, alpha, steady_state)
 
         # Condition on the emission
-        filtered_mean, filtered_U, filtered_Sigma = \
-            _lofi_full_svd_condition_on(
-                pred_mean, U, pred_Sigma, pred_eta, m_Y, Cov_Y, x, y, sv_threshold, adaptive_variance, obs_noise_var
-            )
+        filtered_mean, filtered_U, filtered_Sigma, filtered_eta = update_fn(pred_mean, pred_U, pred_Sigma, pred_eta, m_Y, Cov_Y, x, y, sv_threshold, adaptive_variance, obs_noise_var)
 
         # Update noise
         nobs, obs_noise_var = _lofi_estimate_noise(filtered_mean, filtered_U, m_Y, x, y, nobs, obs_noise_var, adaptive_variance)
 
-        return (pred_mean, filtered_U, pred_Sigma, nobs, obs_noise_var), (filtered_mean, filtered_U, filtered_Sigma)
+        return (pred_mean, filtered_U, pred_Sigma, filtered_eta, nobs, obs_noise_var), (filtered_mean, filtered_U, filtered_Sigma)
     
     # Run ORFit
     carry = (initial_mean, U, Sigma, eta, nobs, obs_noise_var)
