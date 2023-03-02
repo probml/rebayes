@@ -13,6 +13,7 @@ import pandas as pd
 import jax.numpy as jnp
 import jax.random as jr
 from jax import vmap
+import matplotlib.pyplot as plt
 
 from typing import Union
 from jaxtyping import  Float, Array
@@ -241,3 +242,86 @@ def load_1d_synthetic_dataset(n_train=100, n_test=100, key=0, trenches=False, so
 
     return (X_train, y_train), (X_test, y_test)
 
+
+
+def make_1d_regression(n_train=100, n_test=100, key=0, trenches=False, sort_data=False, coef=jnp.array([2.0,3.0])):
+    if isinstance(key, int):
+        key = jr.PRNGKey(key)
+    key1, key2, subkey1, subkey2, key_shuffle = jr.split(key, 5)
+
+    def gen(key, x):
+        epsilons = jr.normal(key, shape=(3,))*0.02
+        return (x + 0.3*jnp.sin(coef[0]*jnp.pi*(x+epsilons[0])) +
+                0.3*jnp.sin(coef[1]*jnp.pi*(x+epsilons[1])) + epsilons[2])
+    
+    n_train_sample = 2 * n_train if trenches else n_train
+    #X_train = jr.uniform(key1, shape=(n_train_sample, 1), minval=0.0, maxval=0.5)
+    #X_test = jr.uniform(key2, shape=(n_test, 1), minval=0.0, maxval=0.5)
+    X_train = jr.uniform(key1, shape=(n_train_sample, 1), minval=-0.5, maxval=0.5)
+    X_test = jr.uniform(key2, shape=(n_test, 1), minval=-0.5, maxval=0.5)
+
+
+    keys_train = jr.split(subkey1, X_train.shape[0])
+    keys_test = jr.split(subkey2, X_test.shape[0])
+    y_train = vmap(gen)(keys_train, X_train)
+    y_test = vmap(gen)(keys_test, X_test)
+
+    # Standardize dataset
+    X_train = (X_train - X_train.mean()) / X_train.std()
+    y_train = (y_train - y_train.mean()) / y_train.std()
+    X_test = (X_test - X_test.mean()) / X_test.std()
+    y_test = (y_test - y_test.mean()) / y_test.std()
+
+    if trenches:
+        sorted_idx = jnp.argsort(X_train.squeeze())
+        train_idx = jnp.concatenate([
+            sorted_idx[:n_train//2], sorted_idx[2*n_train - n_train//2:]
+        ])
+
+        X_train, y_train = X_train[train_idx], y_train[train_idx]
+
+    if not sort_data:
+        n_train = len(X_train)
+        ixs = jr.choice(key_shuffle, shape=(n_train,), a=n_train, replace=False)
+        X_train = X_train[ixs]
+        y_train = y_train[ixs]
+    else:
+        sorted_idx = jnp.argsort(X_train.squeeze())
+        X_train, y_train = X_train[sorted_idx], y_train[sorted_idx]
+
+    return X_train, y_train, X_test, y_test
+
+def make_1d_regression_sequence(n_dist=3, n_train=100, n_test=100, key=0, trenches=False, sort_data=False):
+    c0 = jnp.linspace(start=2, stop=-1, num=n_dist)
+    c1 = jnp.linspace(start=3, stop=-1, num=n_dist)
+    coefs = jnp.vstack([c0,c1]).T
+    def gen(c): return make_1d_regression(coef=c, n_train=n_train, n_test=n_test, key=key, trenches=trenches, sort_data=sort_data)
+    X_train, y_train, X_test, y_test  = vmap(gen)(coefs)
+    X_train = jnp.hstack(X_train[:,:,0])
+    X_test = jnp.hstack(X_test[:,:,0])
+    y_train = jnp.hstack(y_train[:,:,0])
+    y_test = jnp.hstack(y_test[:,:,0])
+    task_id_train = jnp.concatenate([i*jnp.ones(n_train) for i in range(n_dist)])
+    task_id_test = jnp.concatenate([i*jnp.ones(n_test) for i in range(n_dist)])
+    return X_train, y_train, X_test, y_test, task_id_train, task_id_test
+
+def nonstat_regression_plot():
+    X_train, y_train, X_test, y_test, task_id_train, task_id_test = make_1d_regression_sequence(n_dist=5)
+    ntasks = len(np.unique(task_id_train))
+    colors = ['r', 'g', 'b', 'k', 'c']
+    plt.figure()
+    for i in range(ntasks):
+        ndx_train = (task_id_train == i)
+        plt.plot(X_train[ndx_train], y_train[ndx_train], 'x', color=colors[i], label='train {:d}'.format(i))
+        ndx_test = (task_id_test == i)
+        plt.plot(X_test[ndx_test], y_test[ndx_test], 'o', color=colors[i], label='test {:d}'.format(i))
+    plt.legend()
+    
+    fig, axs = plt.subplots(1,ntasks, figsize=(20,5))
+    for i in range(ntasks):
+        ax = axs[i]
+        ndx_train = (task_id_train == i)
+        ax.plot(X_train[ndx_train], y_train[ndx_train], 'x', color=colors[i], label='train {:d}'.format(i))
+        ndx_test = (task_id_test == i)
+        ax.plot(X_test[ndx_test], y_test[ndx_test], 'o', color=colors[i], label='test {:d}'.format(i))
+    #plt.legend()
