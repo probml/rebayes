@@ -33,7 +33,7 @@ def bbf(
     if emission_mean_function is None:
         emission_mean_function = apply_fn
     if emission_cov_function is None:
-        emission_cov_function = lambda w, x: jnp.exp(log_emission_cov)
+        def emission_cov_function(w, x): return jnp.exp(log_emission_cov)
 
     test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
     params_rebayes = base.RebayesParams(
@@ -127,11 +127,12 @@ def get_best_params(n_params, optimizer):
     dynamics_weights = max_params["dynamics_weights"]
     dynamics_cov = max_params.get("dynamics_covariance")
 
+    def emission_cov_function(w, x): return emission_cov
     hparams = {
         "initial_covariance": init_cov,
         "dynamics_covariance": dynamics_cov,
         "dynamics_weights": dynamics_weights,
-        "emission_cov_function": lambda w, x: emission_cov,
+        "emission_cov_function": emission_cov_function,
     }
 
     return hparams
