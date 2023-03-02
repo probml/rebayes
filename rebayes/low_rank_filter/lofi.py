@@ -24,6 +24,7 @@ _project_to_columns = lambda A, x: \
 
 @chex.dataclass
 class LoFiBel:
+    initial_mean: chex.Array
     mean: chex.Array
     basis: chex.Array
     sigma: chex.Array
@@ -92,6 +93,7 @@ class RebayesLoFi(Rebayes):
         else:
             raise ValueError(f"Unknown method {method}.")
         self.method = method
+        self.initial_mean = model_params.initial_mean
         self.nobs, self.obs_noise_var = 0, 0.0
         self.model_params = model_params
         self.adaptive_variance = model_params.adaptive_emission_cov
@@ -102,6 +104,7 @@ class RebayesLoFi(Rebayes):
 
     def init_bel(self):
         return LoFiBel(
+            initial_mean=self.model_params.initial_mean,
             mean=self.model_params.initial_mean, basis=self.U0, sigma=self.Sigma0,
             nobs=self.nobs, obs_noise_var=self.obs_noise_var,
             eta=self.eta, gamma=self.gamma, q=self.q,
@@ -109,15 +112,15 @@ class RebayesLoFi(Rebayes):
     
     @partial(jit, static_argnums=(0,))
     def predict_state(self, bel):
-        m, U, Sigma, nobs, obs_noise_var, eta = \
-            bel.mean, bel.basis, bel.sigma, bel.nobs, bel.obs_noise_var, bel.eta
+        m0, m, U, Sigma, nobs, obs_noise_var, eta = \
+            bel.initial_mean, bel.mean, bel.basis, bel.sigma, bel.nobs, bel.obs_noise_var, bel.eta
         if self.method == 'orfit':
             return bel
         elif self.method == 'orth_svd_lofi' or self.method == 'full_svd_lofi':
             m_pred, Sigma_pred, eta_pred = _lofi_predict(m, Sigma, self.gamma, self.q, eta, self.alpha, self.steady_state)
             U_pred = U
         else:
-            m_pred, U_pred, Sigma_pred, eta_pred = _generalized_lofi_predict(m, U, Sigma, self.gamma, self.q, eta, self.alpha)
+            m_pred, U_pred, Sigma_pred, eta_pred = _generalized_lofi_predict(m0, m, U, Sigma, self.gamma, self.q, eta, self.alpha)
 
         return bel.replace(
             mean=m_pred, basis=U_pred, sigma=Sigma_pred,
@@ -491,10 +494,11 @@ def _lofi_predict(m, Sigma, gamma, q, eta, alpha=0.0, steady_state=False):
     return m_pred, Sigma_pred, eta_pred
 
 
-def _generalized_lofi_predict(m, U, Sigma, gamma, q, eta, alpha=0.0):
+def _generalized_lofi_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0):
     """Predict step of the generalized low-rank filter algorithm.
 
     Args:
+        m0 (D_hid,): Initial mean.
         m (D_hid,): Prior mean.
         Sigma (D_mem,): Prior singluar values.
         gamma (float): Dynamics decay factor.
@@ -508,18 +512,21 @@ def _generalized_lofi_predict(m, U, Sigma, gamma, q, eta, alpha=0.0):
         Sigma_pred (D_mem,): Predicted singular values.
         eta_pred (float): Predicted precision.
     """
-    m_pred = gamma * m
-    
-    # eta_pred = 1/(gamma**2 * (1+alpha)/eta + q)
-    eta_pred = 1/(gamma**2/eta + q)
-        
+    # Mean prediction
     W = U * Sigma
+    D = jnp.linalg.pinv(jnp.eye(W.shape[1]) +  (W.T @ (W/eta))/(1+alpha))
+    e = (m0 - m)
+    K = e - (1/1+alpha) * (W/eta @ D) @ (W.T @ e)
+    m_pred = gamma*m + gamma*alpha/(1+alpha) * K
+    
+    # Covariance prediction
+    eta_pred = 1/(gamma**2/eta + q)
     chol_factor = jnp.linalg.cholesky(
         jnp.linalg.pinv(
-            jnp.eye(W.shape[1]) + W.T @ (1/(gamma**2 * (1+alpha)/q + eta) * W) 
+            (1 + alpha) * jnp.eye(W.shape[1]) + W.T @ (1/(gamma**2/q + eta) * W) 
         )
     )
-    W_pred = gamma * jnp.sqrt(1+alpha)/q * (1/(gamma**2 * (1+alpha)/q + eta) * W) @ chol_factor
+    W_pred = gamma/q * (1/(gamma**2/q + eta) * W) @ chol_factor
     U_pred, Sigma_pred, _ = jnp.linalg.svd(W_pred, full_matrices=False)
     
     return m_pred, U_pred, Sigma_pred, eta_pred
