@@ -117,8 +117,7 @@ class RebayesLoFi(Rebayes):
         if self.method == 'orfit':
             return bel
         elif self.method == 'orth_svd_lofi' or self.method == 'full_svd_lofi':
-            m_pred, Sigma_pred, eta_pred = _lofi_predict(m, Sigma, self.gamma, self.q, eta, self.alpha, self.steady_state)
-            U_pred = U
+            m_pred, U_pred, Sigma_pred, eta_pred = _lofi_predict(m0, m, U, Sigma, self.gamma, self.q, eta, self.alpha, self.steady_state)
         else:
             m_pred, U_pred, Sigma_pred, eta_pred = _generalized_lofi_predict(m0, m, U, Sigma, self.gamma, self.q, eta, self.alpha)
 
@@ -462,11 +461,13 @@ def _lofi_estimate_noise(m, y_cond_mean, u, y, nobs, obs_noise_var, adaptive_var
     return nobs, obs_noise_var
 
 
-def _lofi_predict(m, Sigma, gamma, q, eta, alpha=0.0, steady_state=False):
+def _lofi_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0, steady_state=False):
     """Predict step of the low-rank filter algorithm.
 
     Args:
+        m0 (D_hid,): Initial mean.
         m (D_hid,): Prior mean.
+        U (D_hid, D_mem,): Prior basis.
         Sigma (D_mem,): Prior singluar values.
         gamma (float): Dynamics decay factor.
         q (float): Dynamics noise factor.
@@ -479,19 +480,26 @@ def _lofi_predict(m, Sigma, gamma, q, eta, alpha=0.0, steady_state=False):
         Sigma_pred (D_mem,): Predicted singular values.
         eta_pred (float): Predicted precision.
     """
-    m_pred = gamma * m
+    # Mean prediction
+    W = U * Sigma
+    D = jnp.linalg.pinv(jnp.eye(W.shape[1]) +  (W.T @ (W/eta))/(1+alpha))
+    e = (m0 - m)
+    K = e - (1/1+alpha) * (W/eta @ D) @ (W.T @ e)
+    m_pred = gamma*m + gamma*alpha/(1+alpha) * K
+    
+    # Covariance prediction
+    U_pred = U
     Sigma_pred = jnp.sqrt((gamma**2 * Sigma**2)/((gamma**2 + q * eta) * (gamma**2 + q*eta + q*Sigma**2)))
     
     if steady_state:
         eta_pred = eta
     else:
         eta_pred = eta/(gamma**2 + q*eta)
-        # eta_pred = eta_pred / (1 + alpha)
     
     # Covariance inflation
     Sigma_pred = Sigma_pred / jnp.sqrt(1 + alpha)
 
-    return m_pred, Sigma_pred, eta_pred
+    return m_pred, U_pred, Sigma_pred, eta_pred
 
 
 def _generalized_lofi_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0):
@@ -500,6 +508,7 @@ def _generalized_lofi_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0):
     Args:
         m0 (D_hid,): Initial mean.
         m (D_hid,): Prior mean.
+        U (D_hid, D_mem,): Prior basis.
         Sigma (D_mem,): Prior singluar values.
         gamma (float): Dynamics decay factor.
         q (float): Dynamics noise factor.
