@@ -93,6 +93,7 @@ def create_optimizer(
         f=bbf_partial,
         pbounds=bounds,
         random_state=random_state,
+        allow_duplicate_points=True,
     )
 
     return optimizer, apply_fn, n_features
