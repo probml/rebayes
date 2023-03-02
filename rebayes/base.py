@@ -157,7 +157,8 @@ class Rebayes(ABC):
         self,
         data_loader,
         callback=None,
-        bel=None
+        bel=None,
+        **kwargs,
     ) -> Tuple[Belief, Any]:
         if bel is None:
             bel = self.init_bel()
@@ -169,7 +170,7 @@ class Rebayes(ABC):
             if callback is None:
                 out = None
             else:
-                out = callback(i, bel_pre_update, bel, batch)
+                out = callback(i, bel_pre_update, bel, batch, **kwargs)
                 outputs.append(out)
         return bel, outputs
 
