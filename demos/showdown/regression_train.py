@@ -29,6 +29,17 @@ class MLP(nn.Module):
         return x
 
 
+@partial(jax.jit, static_argnames=("apply_fn",))
+def lossfn_rmse_fifo(params, counter, X, y, apply_fn):
+
+    yhat = apply_fn(params, X).ravel()
+    y = y.ravel()
+    err = jnp.power(y - yhat, 2)
+
+    loss = (err * counter).sum() / counter.sum()
+    return loss
+
+
 def train_callback(bel, *args, **kwargs):
     X_test, y_test = kwargs["X_test"], kwargs["y_test"]
     apply_fn = kwargs["apply_fn"]
@@ -133,6 +144,20 @@ def rmae_callback(bel, *args, **kwargs):
     return res
 
 
+def eval_sgd_agent(
+        train, test, apply_fn, callback, agent, bel_init
+):
+    X_test, y_test = test
+    X_train, y_train = train
+
+    test_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
+    bel, losses = agent.scan(
+        X_train, y_train, bel=bel_init, callback=callback, **test_kwargs
+    )
+
+    return bel, losses
+
+
 def eval_lofi_agent(
     train, test, optimizer, flat_params, params_lofi, apply_fn, method, callback,
     progress_bar=False
@@ -169,13 +194,18 @@ def eval_ekf_agent(
 
 def eval_lrvga(
     train, test, optimizer, apply_fn, callback,
-    model, fwd_link, log_prob, dim_rank, n_outer, n_inner,
+    key, model, fwd_link, log_prob, dim_rank, n_outer, n_inner,
     n_samples=30, progress_bar=False
 ):
     X_train, y_train = train
     X_test, y_test = test
 
-    hparams = jax.tree_map(np.exp, optimizer.max["params"])
+    if type(optimizer) == dict:
+        optimizer = optimizer.copy()
+    else:
+        optimizer = optimizer.max["params"].copy()
+
+    hparams = jax.tree_map(np.exp, optimizer)
     bel_init, _ = lrvga.init_lrvga(key, model, X_train, dim_rank, **hparams)
 
     test_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
