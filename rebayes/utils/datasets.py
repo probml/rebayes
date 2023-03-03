@@ -291,7 +291,7 @@ def make_1d_regression(n_train=100, n_test=100, key=0, trenches=False, sort_data
 
     return X_train, y_train, X_test, y_test
 
-def make_1d_regression_sequence(n_dist=3, n_train=100, n_test=100, key=0, trenches=False, sort_data=False):
+def make_1d_regression_sequence_jax(n_dist=3, n_train=100, n_test=100, key=0, trenches=False, sort_data=False):
     c0 = jnp.linspace(start=2, stop=-1, num=n_dist)
     c1 = jnp.linspace(start=3, stop=-1, num=n_dist)
     coefs = jnp.vstack([c0,c1]).T
@@ -304,6 +304,21 @@ def make_1d_regression_sequence(n_dist=3, n_train=100, n_test=100, key=0, trench
     task_id_train = jnp.concatenate([i*jnp.ones(n_train) for i in range(n_dist)])
     task_id_test = jnp.concatenate([i*jnp.ones(n_test) for i in range(n_dist)])
     return X_train, y_train, X_test, y_test, task_id_train, task_id_test
+
+def make_1d_regression_sequence(n_dist=3, n_train=100, n_test=100, key=0, trenches=False, sort_data=False):
+    c0 = jnp.linspace(start=2, stop=-1, num=n_dist)
+    c1 = jnp.linspace(start=3, stop=-1, num=n_dist)
+    coefs = jnp.vstack([c0,c1]).T
+    def gen(c): return make_1d_regression(coef=c, n_train=n_train, n_test=n_test, key=key, trenches=trenches, sort_data=sort_data)
+    X_train, y_train, X_test, y_test  = vmap(gen)(coefs)
+    X_train = np.hstack(X_train[:,:,0])
+    X_test = np.hstack(X_test[:,:,0])
+    y_train = np.hstack(y_train[:,:,0])
+    y_test = np.hstack(y_test[:,:,0])
+    task_id_train = np.concatenate([i*np.ones(n_train) for i in range(n_dist)])
+    task_id_test = np.concatenate([i*np.ones(n_test) for i in range(n_dist)])
+    #return X_train, y_train, X_test, y_test, task_id_train, task_id_test
+    return X_train[:,np.newaxis], y_train[:,np.newaxis], X_test[:,np.newaxis], y_test[:,np.newaxis], task_id_train, task_id_test
 
 def nonstat_regression_plot():
     X_train, y_train, X_test, y_test, task_id_train, task_id_test = make_1d_regression_sequence(n_dist=5)
