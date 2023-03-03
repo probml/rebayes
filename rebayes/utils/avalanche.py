@@ -52,7 +52,7 @@ def avalanche_dataloader_to_numpy(dataloader):
       y = y[:, None]
   return X, y
 
-def make_avalanche_datasets_pytorch(dataset, ntrain_per_dist, ntrain_per_batch, ntest_per_batch):
+def make_avalanche_datasets_pytorch(dataset, ntrain_per_dist, ntrain_per_batch, ntest_per_batch, key):
     '''Make pytorch dataloaders from avalanche dataset.
     ntrain_per_dist: number of training examples from each distribution (experience).
     batch_size: how many training examples per batch.
@@ -63,16 +63,18 @@ def make_avalanche_datasets_pytorch(dataset, ntrain_per_dist, ntrain_per_batch, 
     nexperiences = len(train_stream) # num. distinct distributions
     nbatches_per_dist = int(ntrain_per_dist / ntrain_per_batch)
     ntest_per_dist = ntest_per_batch * nbatches_per_dist
-    train_ndx, test_ndx = range(ntrain_per_dist), range(ntest_per_dist)
 
     train_sets = []
     test_sets = []
     for exp in range(nexperiences):
+        key, *subkeys = jr.split(key, 3)
         ds = train_stream[exp].dataset
+        train_ndx = jr.choice(subkeys[0], len(ds), shape=(ntrain_per_dist,), replace=False)
         train_set = torch.utils.data.Subset(ds, train_ndx)
         train_sets.append(train_set)
 
         ds = test_stream[exp].dataset
+        test_ndx = jr.choice(subkeys[1], len(ds), shape=(ntest_per_dist,), replace=False)
         test_set = torch.utils.data.Subset(ds, test_ndx)
         test_sets.append(test_set)
 
@@ -82,8 +84,10 @@ def make_avalanche_datasets_pytorch(dataset, ntrain_per_dist, ntrain_per_batch, 
     return train_set, test_set
 
 
-def make_avalanche_data(dataset, ntrain_per_dist, ntrain_per_batch, ntest_per_batch):
-    train_set, test_set = make_avalanche_datasets_pytorch(dataset, ntrain_per_dist, ntrain_per_batch, ntest_per_batch)
+def make_avalanche_data(dataset, ntrain_per_dist, ntrain_per_batch, ntest_per_batch, key=0):
+    if isinstance(key, int):
+      key = jr.PRNGKey(key)
+    train_set, test_set = make_avalanche_datasets_pytorch(dataset, ntrain_per_dist, ntrain_per_batch, ntest_per_batch, key)
     train_dataloader = DataLoader(train_set, batch_size=ntrain_per_batch, shuffle=False)
     test_dataloader = DataLoader(test_set, batch_size=ntest_per_batch, shuffle=False)
     Xtr, Ytr = avalanche_dataloader_to_numpy(train_dataloader)
