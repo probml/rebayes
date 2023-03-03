@@ -9,9 +9,11 @@ import numpy as np
 import jax.numpy as jnp
 
 
-def load_full_data(path):
+def load_raw_data(path):
     data_path = os.path.join(path, "data.txt")
     data = np.loadtxt(data_path)
+    data = jax.tree_map(jnp.array, data)
+    data = jax.tree_map(jnp.nan_to_num, data)
     return data
 
 
@@ -34,7 +36,10 @@ def load_features_target_ixs(path):
     return features_ixs, target_ixs
 
 
-def normalise_features(X_train, X_test):
+def normalise_features(X, ix_train, ix_test):
+    X_train = X[ix_train]
+    X_test = X[ix_test]
+
     xmean, xstd = np.nanmean(X_train, axis=0, keepdims=True), np.nanstd(X_train, axis=0, keepdims=True)
     X_train = (X_train - xmean) / xstd
     X_test = (X_test - xmean) / xstd
@@ -42,7 +47,10 @@ def normalise_features(X_train, X_test):
     return X_train, X_test, (xmean, xstd)
 
 
-def normalise_targets(y_train, y_test):
+def normalise_targets(y, ix_train, ix_test):
+    y_train = y[ix_train]
+    y_test = y[ix_test]
+
     ymean, ystd = np.nanmean(y_train), np.nanstd(y_train)
     y_train = (y_train - ymean) / ystd
     y_test = (y_test - ymean) / ystd
@@ -50,28 +58,68 @@ def normalise_targets(y_train, y_test):
     return y_train, y_test, (ymean, ystd)
 
 
+def load_full_data(path):
+    data = load_raw_data(path)
+    features_ixs, target_ixs = load_features_target_ixs(path)
+    X = data[:, features_ixs]
+    y = data[:, target_ixs]
+    return X, y
+
+
+def load_folds_data(path, n_partitions=20):
+    """
+    Load data from all available folds
+    """
+    X, y = load_full_data(path)
+
+    X_train_all = []
+    y_train_all = []
+    X_test_all = []
+    y_test_all = []
+    coefs_all = []
+
+    for ix in range(n_partitions):
+        ix_train, ix_test = load_train_test_ixs(path, ix)
+        X_train, X_test, _ = normalise_features(X, ix_train, ix_test)
+        y_train, y_test, (ymean, ystd) = normalise_features(y, ix_train, ix_test)
+        
+        X_test_all.append(X_test)
+        y_test_all.append(y_test)
+        
+        X_train_all.append(X_train)
+        y_train_all.append(y_train)
+        coefs = {"ymean": ymean.item(), "ystd": ystd.item()}
+        coefs_all.append(coefs)
+        
+    X_train_all = jnp.stack(X_train_all, axis=0)
+    y_train_all = jnp.stack(y_train_all, axis=0)
+
+    X_test_all = jnp.stack(X_test_all, axis=0)
+    y_test_all = jnp.stack(y_test_all, axis=0)
+
+    train_all = (X_train_all, y_train_all)
+    test_all = (X_test_all, y_test_all)
+
+    struct_out = jax.tree_util.tree_structure([0 for e in coefs_all])
+    struct_in = jax.tree_util.tree_structure(coefs_all[0])
+    coefs_all = jax.tree_util.tree_transpose(struct_out, struct_in, coefs_all)
+    coefs_all = jax.tree_map(jnp.array, coefs_all, is_leaf=lambda x: type(x)== list)
+
+    return train_all, test_all, coefs_all
+
+
 def load_data(path, index):
-    data = load_full_data(path)
+    data = load_raw_data(path)
     train_ixs, test_ixs = load_train_test_ixs(path, index)
     features_ixs, target_ixs = load_features_target_ixs(path)
 
-    X_train = data[np.ix_(train_ixs, features_ixs)]
-    y_train = data[np.ix_(train_ixs, target_ixs[None])]
+    X, y = data[:, features_ixs], data[:, target_ixs]
 
-    X_test = data[np.ix_(test_ixs, features_ixs)]
-    y_test = data[np.ix_(test_ixs, target_ixs[None])]
-
-    # Normalise dataset
-    X_train, X_test, (xmean, xstd) = normalise_features(X_train, X_test)
-    y_train, y_test, (ymean, ystd) = normalise_targets(y_train, y_test)
+    X_train, X_test, _ = normalise_features(X, train_ixs, test_ixs)
+    y_train, y_test, (ymean, ystd) = normalise_targets(y, train_ixs, test_ixs)
 
     train = (X_train, y_train.ravel())
     test = (X_test, y_test.ravel())
-
-    dataset = train, test
-    dataset = jax.tree_map(jnp.array, dataset)
-    dataset = jax.tree_map(jnp.nan_to_num, dataset)
-    train, test = dataset
 
     dataset = {
         "train": train,

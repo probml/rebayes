@@ -9,6 +9,7 @@ from functools import partial
 from typing import Callable
 from bayes_opt import BayesianOptimization
 from jax.flatten_util import ravel_pytree
+from rebayes.utils import datasets, uci_uncertainty_data
 
 from rebayes.low_rank_filter import lrvga, lofi
 
@@ -33,12 +34,17 @@ def train_callback(bel, *args, **kwargs):
     apply_fn = kwargs["apply_fn"]
 
     yhat = apply_fn(bel.mean, X_test).squeeze()
-    err = jnp.abs(y_test - yhat.ravel())
+    err = jnp.power(y_test - yhat.ravel(), 2).mean()
+    err = jnp.sqrt(err)
     
     res = {
         "test": err.mean(),
     }
     return res
+
+
+def apply_main(flat_params, x, model, unflatten_fn):
+    return model.apply(unflatten_fn(flat_params), x)
 
 
 def eval_callback_main(bel, pred, t, X, y, bel_pred, ymean, ystd, **kwargs):
@@ -54,12 +60,14 @@ def eval_callback_main(bel, pred, t, X, y, bel_pred, ymean, ystd, **kwargs):
     y_next = y.ravel() * ystd + ymean
     yhat_next = pred.ravel() * ystd + ymean
     
-    err_test = jnp.abs(y_test - yhat_test)
-    err = jnp.abs(y_next - yhat_next).sum()
+    err_test = jnp.power(y_test - yhat_test, 2).mean()
+    err = jnp.power(y_next - yhat_next, 2).mean()
     
+    err_test = jnp.sqrt(err_test)
+    err = jnp.sqrt(err)
     
     res = {
-        "test": err_test.mean(),
+        "test": err_test,
         "osa-error": err,
     }
     return res
@@ -123,6 +131,60 @@ def rmae_callback(bel, *args, **kwargs):
         "test": err.mean(),
     }
     return res
+
+
+def eval_lofi_agent(
+    train, test, optimizer, flat_params, params_lofi, apply_fn, method, callback,
+    progress_bar=False
+):
+    X_test, y_test = test
+    X_train, y_train = train
+
+    test_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
+    hparams = hp_lofi.get_best_params(None, optimizer)
+    agent = hp_lofi.build_estimator(flat_params, hparams, params_lofi, apply_fn, method=method)
+    bel, output = agent.scan(
+        X_train, y_train, callback=callback, progress_bar=progress_bar, **test_kwargs
+    )
+
+    return bel, output
+
+
+def eval_ekf_agent(
+    train, test, optimizer, flat_params, apply_fn, method, callback,
+    progress_bar=False
+):
+    X_test, y_test = test
+    X_train, y_train = train
+
+    test_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
+    hparams = hp_ekf.get_best_params(None, optimizer, method=method)
+    agent = hp_ekf.build_estimator(flat_params, hparams, None, apply_fn, method=method)
+    bel, output = agent.scan(
+        X_train, y_train, callback=callback, progress_bar=progress_bar, **test_kwargs
+    )
+
+    return bel, output
+
+
+def eval_lrvga(
+    train, test, optimizer, apply_fn, callback,
+    model, fwd_link, log_prob, dim_rank, n_outer, n_inner,
+    n_samples=30, progress_bar=False
+):
+    X_train, y_train = train
+    X_test, y_test = test
+
+    hparams = jax.tree_map(np.exp, optimizer.max["params"])
+    bel_init, _ = lrvga.init_lrvga(key, model, X_train, dim_rank, **hparams)
+
+    test_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
+    agent = lrvga.LRVGA(fwd_link, log_prob, n_samples=n_samples, n_outer=n_outer, n_inner=n_inner)
+    bel, output = agent.scan(
+        X_train, y_train, callback=callback, progress_bar=progress_bar, bel=bel_init, **test_kwargs
+    )
+
+    return bel, output
 
 
 def train_ekf_agent(params, model, method, datasets,
@@ -269,19 +331,6 @@ def store_results(results, name, path):
         pickle.dump(results, f)
 
 
-# TODO: remove
-def load_rebayes_uci(dataset_name):
-    dataset_name = "kin8nm"
-    train, test = uci_regression_data.load_uci_kin8nm()
-    dataset = prepare_dataset(train, test)
-
-    ymean, ystd = dataset["ymean"], dataset["ystd"]
-    dataset = dataset["train"], dataset["test"], dataset["warmup"]
-    norm_factors = (ymean, ystd)
-
-    return dataset, norm_factors
-
-
 def train_agents(key, path, ix):
     res = uci_uncertainty_data.load_data(path, ix)
     dataset = res["dataset"]
@@ -340,7 +389,7 @@ def train_agents(key, path, ix):
 
     # -------------------------------------------------------------------------
     # Low-rank filter
-    methods = ["full_svd_lofi", "orth_svd_lofi"]
+    methods = ["lofi_orth", "lofi"]
     params_lofi = lofi.LoFiParams(
         memory_size=dim_rank,
         sv_threshold=0,
@@ -362,6 +411,11 @@ def train_agents(key, path, ix):
 
     # -------------------------------------------------------------------------
     # Low-rank variational Gaussian approximation (LRVGA)
+
+    optimizer_eval_kwargs = {
+        "init_points": 5,
+        "n_iter": 0,
+    }
     n_outer = 6
     n_inner = 4
     fwd_link = partial(fwd_link_main, model=model, reconstruct_fn=reconstruct_fn)
@@ -383,7 +437,6 @@ def train_agents(key, path, ix):
 if __name__ == "__main__":
     import sys
     from itertools import product
-    from rebayes.utils import uci_regression_data, datasets, uci_uncertainty_data
     # TOODO: change to $REBAYES_OUTPUT
     output_path = "/home/gerardoduran/documents/rebayes/demos/outputs/checkpoints"
 
@@ -393,7 +446,7 @@ if __name__ == "__main__":
     random_state = 314
     key = jax.random.PRNGKey(314)
 
-    num_partitions = 20
+    num_partitions = 1 # 20
     partitions = range(num_partitions)
     datasets = [
         "bostonHousing", "concrete", "energy", "kin8nm", "naval-propulsion-plant",
