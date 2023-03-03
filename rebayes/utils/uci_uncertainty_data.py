@@ -103,7 +103,7 @@ def load_folds_data(path, n_partitions=20):
     struct_out = jax.tree_util.tree_structure([0 for e in coefs_all])
     struct_in = jax.tree_util.tree_structure(coefs_all[0])
     coefs_all = jax.tree_util.tree_transpose(struct_out, struct_in, coefs_all)
-    coefs_all = jax.tree_map(jnp.array, coefs_all, is_leaf=lambda x: type(x)== list)
+    coefs_all = jax.tree_map(jnp.array, coefs_all, is_leaf=lambda x: type(x) == list)
 
     return train_all, test_all, coefs_all
 
