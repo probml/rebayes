@@ -244,7 +244,7 @@ def load_1d_synthetic_dataset(n_train=100, n_test=100, key=0, trenches=False, so
 
 
 
-def make_1d_regression(n_train=100, n_test=100, key=0, trenches=False, sort_data=False, coef=jnp.array([2.0,3.0])):
+def make_1d_regression(n_train=100, n_test=100, key=0, trenches=False, sort_data=False, coef=jnp.array([2.0,3.0]), sort_test=True):
     if isinstance(key, int):
         key = jr.PRNGKey(key)
     key1, key2, subkey1, subkey2, key_shuffle = jr.split(key, 5)
@@ -259,7 +259,11 @@ def make_1d_regression(n_train=100, n_test=100, key=0, trenches=False, sort_data
     #X_test = jr.uniform(key2, shape=(n_test, 1), minval=0.0, maxval=0.5)
     X_train = jr.uniform(key1, shape=(n_train_sample, 1), minval=-0.5, maxval=0.5)
     X_test = jr.uniform(key2, shape=(n_test, 1), minval=-0.5, maxval=0.5)
-
+    
+    # sprt the test points for plotting 1d curves
+    if sort_test:
+        sorted_idx = jnp.argsort(X_test.squeeze())
+        X_test = X_test[sorted_idx]
 
     keys_train = jr.split(subkey1, X_train.shape[0])
     keys_test = jr.split(subkey2, X_test.shape[0])
