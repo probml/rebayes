@@ -120,7 +120,10 @@ def create_optimizer(
 
 
 def get_best_params(n_params, optimizer):
-    max_params = optimizer.max["params"].copy()
+    if type(optimizer) is dict:
+        max_params = optimizer.copy()
+    else:
+        max_params = optimizer.max["params"].copy()
 
     init_cov = np.exp(max_params["log_init_cov"]).item()
     emission_cov = np.exp(max_params.get("log_emission_cov", 0.0))

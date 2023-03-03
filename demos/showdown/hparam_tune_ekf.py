@@ -100,7 +100,10 @@ def create_optimizer(
 
 
 def get_best_params(num_params, optimizer, method="fdekf"):
-    max_params = optimizer.max["params"].copy()
+    if type(optimizer) is dict:
+        max_params = optimizer.copy()
+    else:
+        max_params = optimizer.max["params"].copy()
 
     dynamics_covariance = 0.0
     initial_covariance = np.exp(max_params["log_init_cov"])
