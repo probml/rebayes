@@ -353,7 +353,7 @@ def train_lofi_agent(params, params_lofi, model, method, dataset,
         "running_time": time_end - time_init,
     }
 
-    return res, apply_fn
+    return res, apply_fn, hparams
 
 
 def train_lrvga_agent(key, apply_fn, model, dataset, dim_rank, n_inner, n_outer,
@@ -494,7 +494,7 @@ def train_agents(key, path, ix):
         steady_state=True,
     )
     for method in methods:
-        res, apply_fn = train_lofi_agent(
+        res, apply_fn, hparams = train_lofi_agent(
             params, params_lofi, model, method, dataset, pbounds_lofi,
             train_callback, eval_callback,
             optimizer_eval_kwargs,
