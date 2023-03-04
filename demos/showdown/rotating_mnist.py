@@ -7,6 +7,7 @@ from typing import Callable
 from functools import partial
 from rebayes.utils.rotating_mnist_data import load_rotated_mnist
 from rebayes.low_rank_filter import lofi
+from rebayes import base
 from rebayes.sgd_filter import replay_sgd as rsgd
 from jax.flatten_util import ravel_pytree
 
@@ -57,7 +58,8 @@ def load_data(sort_by_angle: bool = True):
 
 def train_agents_general(key, model, res, dataset_name, output_path, rank):
     dataset = res["dataset"]
-    X_train, _ = dataset["train"]
+    X_train, y_train = dataset["train"]
+    X_test, y_test = dataset["test"]
 
     # Train, test, warmup
     warmup = dataset["train"]
@@ -70,7 +72,7 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
 
     _, dim_in = X_train.shape
     params = model.init(key, jnp.ones((1, dim_in)))
-    _, reconstruct_fn =  ravel_pytree(params)
+    params_flat, reconstruct_fn =  ravel_pytree(params)
 
     optimizer_eval_kwargs = {
         "init_points": 10,
@@ -108,11 +110,9 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
     pbounds_lofi = pbounds.copy()
     pbounds_lofi.pop("dynamics_log_cov")
     # pbounds_lofi["dynamics_covariance"] = None
-    # pbounds_lofi["dynamics_covariance"] = (0.0, 1.0)
-    pbounds_lofi["dynamics_covariance"] = (0.0, 1e-6) 
-    pbounds_lofi["dynamics_weights"] = (0.99, 1.0) 
+    pbounds_lofi["dynamics_covariance"] = (0.0, 1.0)
 
-    methods = ["lofi"]
+    methods = ["lofi", "lofi_orth"]
 
     params_lofi = lofi.LoFiParams(
         memory_size=rank,
@@ -121,7 +121,7 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
         diagonal_covariance=False,
     )
     for method in methods:
-        res, apply_fn = benchmark.train_lofi_agent(
+        res, apply_fn, hparams = benchmark.train_lofi_agent(
             params, params_lofi, model, method, dataset, pbounds_lofi,
             benchmark.train_callback, eval_callback,
             optimizer_eval_kwargs,
@@ -136,23 +136,16 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
     # -------------------------------------------------------------------------
     # Replay-buffer SGD
 
-    method = "sgd-rb"
-    learning_rate = 1e-4
-    n_inner = 10
-
-    state_init = rsgd.FifoTrainState.create(
-        apply_fn=model.apply,
-        params=params,
-        tx=optax.adam(learning_rate),
-        buffer_size=rank,
-        dim_features=dim_in,
-        dim_output=1,
-    )
+    pbounds_rsgd = {
+        "learning_rate": (1e-6, 1e-2),
+        "n_inner": (1, 100),
+    }
 
     method = "sgd-rb"
     res = benchmark.train_sgd_agent(
-        state_init, model, method, dataset, None,
-        None, eval_callback, None, n_inner=n_inner,
+        params, model, method, dataset, pbounds_rsgd,
+        benchmark.train_callback, eval_callback,
+        optimizer_eval_kwargs, rank=rank,
     )
     metric_final = res["output"]["test"][-1]
     print(method)
@@ -160,13 +153,35 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
     print("-" * 80)
     benchmark.store_results(res, f"{dataset_name}_{method}", output_path)
 
+    # -------------------------------------------------------------------------
+    # ORFIT
+    method = "orfit"
+    params_orfit = base.RebayesParams(
+        initial_mean=params_flat,
+        emission_mean_function=apply_fn,
+        **hparams
+    )
+
+    agent = lofi.RebayesLoFi(params_orfit, params_lofi, method=method)
+    test_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
+    _, output = agent.scan(
+        X_train, y_train, callback=eval_callback, progress_bar=False, **test_kwargs
+    )
+    res = {
+        "output": output,
+        "method": method,
+    }
+    metric_final = res["output"]["test"][-1]
+    print(method)
+    print(f"{metric_final:=0.4f}")
+    print("-" * 80)
+    benchmark.store_results(res, f"{dataset_name}_{method}", output_path)
 
 
 if __name__ == "__main__":
     import os
     # output_path = "/home/gerardoduran/documents/rebayes/demos/showdown/output/rotating-mnist"
-    # ranks = [1, 5, 10, 15, 20, 30, 40, 50]
-    ranks = [1, 2]
+    ranks = [1, 2, 5, 10, 15, 20, 30, 40, 50]
     for rank in ranks:
         print(f"------------------ Rank: {rank} ------------------")
         dataset_name = f"sorted-rotating-mnist-2-mlp-rank{rank}"
