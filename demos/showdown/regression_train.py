@@ -16,6 +16,7 @@ from rebayes.utils import datasets, uci_uncertainty_data
 from rebayes.low_rank_filter import lrvga, lofi
 from rebayes.sgd_filter import replay_sgd as rsgd
 
+import hparam_tune_sgd as hp_sgd
 import hparam_tune_ekf as hp_ekf
 import hparam_tune_lofi as hp_lofi
 
@@ -225,29 +226,55 @@ def eval_lrvga(
     return bel, output
 
 
-def train_sgd_agent(fifo_bel, model, method, datasets,
+def train_sgd_agent(params, model, method, datasets,
                     pbounds, train_callback, eval_callback,
-                    optimizer_eval_kwargs, n_inner,
+                    optimizer_eval_kwargs, rank,
                     random_state=314):
     train, test, warmup = datasets
     X_train, y_train = train
     X_test, y_test = test
 
     part_apply_fn_sgd = partial(apply_fn_sgd, model=model)
+
+    optimizer = hp_sgd.create_optimizer(
+        model, pbounds, random_state, warmup, test, rank, lossfn_rmse_fifo,
+        train_callback,
+    )
+
+    optimizer.maximize(
+        **optimizer_eval_kwargs
+    )
+
+    best_hparams = optimizer.max["params"]
+    learning_rate = best_hparams["learning_rate"]
+    n_inner = round(best_hparams["n_inner"])
+
+
+    bel_init = rsgd.FifoTrainState.create(
+        apply_fn=part_apply_fn_sgd,
+        params=params,
+        tx=optax.adam(learning_rate=learning_rate),
+        buffer_size=rank,
+        dim_features=X_train.shape[1],
+        dim_output=1,
+    )
+
     agent = rsgd.FSGD(lossfn_rmse_fifo, n_inner=n_inner)
 
     time_init = time()
     bel, output = eval_sgd_agent(
-        train, test, part_apply_fn_sgd, eval_callback, agent, fifo_bel,
+        train, test, part_apply_fn_sgd, eval_callback, agent, bel_init,
     )
     time_end = time()
 
     res = {
         "method": method,
+        "hparams": optimizer.max,
         "output": output,
         "beliefs": bel.replace(apply_fn=None, tx=None),
         "running_time": time_end - time_init,
     }
+
     return res
 
 
