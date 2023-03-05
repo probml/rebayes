@@ -14,13 +14,11 @@ from jax.flatten_util import ravel_pytree
 
 class MLP(nn.Module):
     n_out: int = 1
-    n_hidden: int = 128
+    n_hidden: int = 100
     activation: Callable = nn.elu
 
     @nn.compact
     def __call__(self, x):
-        x = nn.Dense(self.n_hidden)(x)
-        x = self.activation(x)
         x = nn.Dense(self.n_hidden)(x)
         x = self.activation(x)
         x = nn.Dense(self.n_hidden)(x)
@@ -64,7 +62,8 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
     # Train, test, warmup
     warmup = dataset["train"]
     warmup = jax.tree_map(lambda x: x[::5], warmup)
-    dataset = dataset["train"], dataset["test"], warmup
+    # dataset = dataset["train"], dataset["test"], warmup
+    dataset = warmup, dataset["test"], warmup
 
     ymean = res["ymean"]
     ystd = res["ystd"]
@@ -76,7 +75,7 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
 
     optimizer_eval_kwargs = {
         "init_points": 10,
-        "n_iter": 20,
+        "n_iter": 30,
     }
 
     pbounds = {
@@ -92,9 +91,9 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
     # methods = ["fdekf", "vdekf", "fcekf"]
     # methods = ["fdekf", "vdekf"]
     # for method in methods:
-    #     res, apply_fn = train_ekf_agent(
+    #     res, apply_fn = benchmark.train_ekf_agent(
     #         params, model, method, dataset, pbounds,
-    #         train_callback, eval_callback,
+    #         benchmark.train_callback, eval_callback,
     #         optimizer_eval_kwargs,
     #     )
 
@@ -102,7 +101,7 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
     #     print(method)
     #     print(f"{metric_final:=0.4f}")
     #     print("-" * 80)
-    #     store_results(res, f"{dataset_name}_{method}", output_path)
+    #     benchmark.store_results(res, f"{dataset_name}_{method}", output_path)
 
     # -------------------------------------------------------------------------
     # Low-rank filter
@@ -117,7 +116,7 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
     params_lofi = lofi.LoFiParams(
         memory_size=rank,
         sv_threshold=0,
-        steady_state=True,
+        steady_state=False,
         diagonal_covariance=False,
     )
     for method in methods:
@@ -132,6 +131,29 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
         print(f"{metric_final:=0.4f}")
         print("-" * 80)
         benchmark.store_results(res, f"{dataset_name}_{method}", output_path)
+    
+    # Generalised LoFi
+    method = "lofi"
+    params_lofi = lofi.LoFiParams(
+        memory_size=rank,
+        sv_threshold=0,
+        steady_state=False,
+        diagonal_covariance=True,
+    )
+
+    res, apply_fn, hparams = benchmark.train_lofi_agent(
+        params, params_lofi, model, method, dataset, pbounds_lofi,
+        benchmark.train_callback, eval_callback,
+        optimizer_eval_kwargs,
+    )
+    method = "lofi_diag"
+    res["method"] = method
+
+    metric_final = res["output"]["test"][-1]
+    print(method)
+    print(f"{metric_final:=0.4f}")
+    print("-" * 80)
+    benchmark.store_results(res, f"{dataset_name}_{method}", output_path)
 
     # -------------------------------------------------------------------------
     # Replay-buffer SGD
@@ -162,6 +184,7 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
         **hparams
     )
 
+    X_train, y_train = warmup
     agent = lofi.RebayesLoFi(params_orfit, params_lofi, method=method)
     test_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
     _, output = agent.scan(
@@ -181,16 +204,17 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
 if __name__ == "__main__":
     import os
     # output_path = "/home/gerardoduran/documents/rebayes/demos/showdown/output/rotating-mnist"
-    ranks = [1, 2, 5, 10, 15, 20, 30, 40, 50]
+    ranks = [2, 5, 10, 15, 20, 30, 40, 50]
+    output_path = os.environ.get("REBAYES_OUTPUT")
+    if output_path is None:
+        output_path = "/tmp/rebayes"
+        os.mkdir(output_path)
+    print(f"Output path: {output_path}")
+
     for rank in ranks:
         print(f"------------------ Rank: {rank} ------------------")
-        dataset_name = f"sorted-rotating-mnist-2-mlp-rank{rank}"
-        output_path = os.environ.get("REBAYES_OUTPUT")
-        if output_path is None:
-            output_path = "/tmp/rebayes"
-            os.mkdir(output_path)
+        dataset_name = f"sorted-rotating-mnist-2-mlp-rank{rank:02}"
         print(f"Dataset name: {dataset_name}")
-        print(f"Output path: {output_path}")
 
         data = load_data()
         model = MLP(n_out=1, n_hidden=100)
