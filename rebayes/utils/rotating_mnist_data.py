@@ -1,29 +1,12 @@
 """
 Prepcocessing and data augmentation for the datasets.
 """
-import re
-import io
-import os
-import jax
-import chex
-import zipfile
-import requests
+import torchvision
 import numpy as np
-import pandas as pd
 import jax.numpy as jnp
-import jax.random as jr
-from jax import vmap
-
 from typing import Union
-from jaxtyping import  Float, Array
-
-
 from multiprocessing import Pool
 from augly import image
-
-import torchvision
-from torchvision.transforms import ToTensor
-
 
 
 class DataAugmentationFactory:
@@ -137,7 +120,7 @@ def generate_rotated_images(images, n_processes, minangle=0, maxangle=180):
 
 
 def load_rotated_mnist(
-    root: str = "./data",
+    root: str = "/tmp/data",
     target_digit: Union[int, None] = None,
     minangle: int = 0,
     maxangle: int = 180,

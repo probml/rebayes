@@ -7,6 +7,7 @@ from jax.flatten_util import ravel_pytree
 from bayes_opt import BayesianOptimization
 from rebayes.low_rank_filter import lofi
 
+
 def bbf(
     log_init_cov,
     dynamics_weights,

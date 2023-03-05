@@ -1,10 +1,12 @@
 import os
 import jax
+import optax
 import pickle
 import distrax
 import numpy as np
 import jax.numpy as jnp
 import flax.linen as nn
+from time import time
 from functools import partial
 from typing import Callable
 from bayes_opt import BayesianOptimization
@@ -12,7 +14,9 @@ from jax.flatten_util import ravel_pytree
 from rebayes.utils import datasets, uci_uncertainty_data
 
 from rebayes.low_rank_filter import lrvga, lofi
+from rebayes.sgd_filter import replay_sgd as rsgd
 
+import hparam_tune_sgd as hp_sgd
 import hparam_tune_ekf as hp_ekf
 import hparam_tune_lofi as hp_lofi
 
@@ -44,7 +48,8 @@ def train_callback(bel, *args, **kwargs):
     X_test, y_test = kwargs["X_test"], kwargs["y_test"]
     apply_fn = kwargs["apply_fn"]
 
-    yhat = apply_fn(bel.mean, X_test).squeeze()
+    y_test = y_test.ravel()
+    yhat = apply_fn(bel.mean, X_test).ravel()
     err = jnp.power(y_test - yhat.ravel(), 2).mean()
     err = jnp.sqrt(err)
     
@@ -52,6 +57,10 @@ def train_callback(bel, *args, **kwargs):
         "test": err.mean(),
     }
     return res
+
+
+def apply_fn_sgd(params, x, model):
+    return model.apply(params, x)
 
 
 def apply_main(flat_params, x, model, unflatten_fn):
@@ -217,6 +226,58 @@ def eval_lrvga(
     return bel, output
 
 
+def train_sgd_agent(params, model, method, datasets,
+                    pbounds, train_callback, eval_callback,
+                    optimizer_eval_kwargs, rank,
+                    random_state=314):
+    train, test, warmup = datasets
+    X_train, y_train = train
+    X_test, y_test = test
+
+    part_apply_fn_sgd = partial(apply_fn_sgd, model=model)
+
+    optimizer = hp_sgd.create_optimizer(
+        model, pbounds, random_state, warmup, test, rank, lossfn_rmse_fifo,
+        train_callback,
+    )
+
+    optimizer.maximize(
+        **optimizer_eval_kwargs
+    )
+
+    best_hparams = optimizer.max["params"]
+    learning_rate = best_hparams["learning_rate"]
+    n_inner = round(best_hparams["n_inner"])
+
+
+    bel_init = rsgd.FifoTrainState.create(
+        apply_fn=part_apply_fn_sgd,
+        params=params,
+        tx=optax.adam(learning_rate=learning_rate),
+        buffer_size=rank,
+        dim_features=X_train.shape[1],
+        dim_output=1,
+    )
+
+    agent = rsgd.FSGD(lossfn_rmse_fifo, n_inner=n_inner)
+
+    time_init = time()
+    bel, output = eval_sgd_agent(
+        train, test, part_apply_fn_sgd, eval_callback, agent, bel_init,
+    )
+    time_end = time()
+
+    res = {
+        "method": method,
+        "hparams": optimizer.max,
+        "output": output,
+        "beliefs": bel.replace(apply_fn=None, tx=None),
+        "running_time": time_end - time_init,
+    }
+
+    return res
+
+
 def train_ekf_agent(params, model, method, datasets,
                     pbounds, train_callback, eval_callback,
                     optimizer_eval_kwargs,
@@ -227,6 +288,8 @@ def train_ekf_agent(params, model, method, datasets,
 
     X_train, y_train = train
     X_test, y_test = test
+
+    _, num_features = X_train.shape
 
     optimizer, apply_fn, _ = hp_ekf.create_optimizer(
         model, pbounds, random_state, warmup, test, train_callback, method=method
@@ -275,18 +338,22 @@ def train_lofi_agent(params, params_lofi, model, method, dataset,
     test_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
     hparams = hp_lofi.get_best_params(n_params, optimizer)
     agent = hp_lofi.build_estimator(flat_params, hparams, params_lofi, apply_fn, method=method)
+
+    time_init = time()
     bel, output = agent.scan(
         X_train, y_train, callback=eval_callback, progress_bar=False, **test_kwargs
     )
+    time_end = time()
 
     res = {
         "method": method,
         "hparams": optimizer.max,
         "output": output,
         "beliefs": bel,
+        "running_time": time_end - time_init,
     }
 
-    return res, apply_fn
+    return res, apply_fn, hparams
 
 
 def train_lrvga_agent(key, apply_fn, model, dataset, dim_rank, n_inner, n_outer,
@@ -362,6 +429,7 @@ def store_results(results, name, path):
 
 
 def train_agents(key, path, ix):
+    # TODO: Move to individual script
     res = uci_uncertainty_data.load_data(path, ix)
     dataset = res["dataset"]
     X_train, _ = dataset["train"]
@@ -426,7 +494,7 @@ def train_agents(key, path, ix):
         steady_state=True,
     )
     for method in methods:
-        res, apply_fn = train_lofi_agent(
+        res, apply_fn, hparams = train_lofi_agent(
             params, params_lofi, model, method, dataset, pbounds_lofi,
             train_callback, eval_callback,
             optimizer_eval_kwargs,
@@ -467,8 +535,9 @@ def train_agents(key, path, ix):
 if __name__ == "__main__":
     import sys
     from itertools import product
-    # TOODO: change to $REBAYES_OUTPUT
+    # TOODO: change to $REBAYES_OUTPUT, $REBAYES_DATASET
     output_path = "/home/gerardoduran/documents/rebayes/demos/outputs/checkpoints"
+    dataset_path = "/home/gerardoduran/documents/external/DropoutUncertaintyExps/UCI_Datasets"
 
     # _, dataset_name = sys.argv
     
@@ -476,7 +545,7 @@ if __name__ == "__main__":
     random_state = 314
     key = jax.random.PRNGKey(314)
 
-    num_partitions = 1 # 20
+    num_partitions = 1
     partitions = range(num_partitions)
     datasets = [
         "bostonHousing", "concrete", "energy", "kin8nm", "naval-propulsion-plant",
@@ -486,6 +555,7 @@ if __name__ == "__main__":
     for i, (dataset_name, ix) in enumerate(product(datasets, partitions)):
         keyv = jax.random.fold_in(key, i)
         print(f"Fitting {dataset_name} --- {ix}")
+        path = os.path.join(dataset_path, dataset_name)
         path = (
             "/home/gerardoduran/documents/external"
             "/DropoutUncertaintyExps/UCI_Datasets/"
