@@ -135,7 +135,7 @@ class LRVGA(Rebayes):
 
     @staticmethod
     def _get_coef(params, bel, x, fwd_link):
-        c, std = jax.jacfwd(fwd_link, has_aux=True)(params, bel, x)
+        c, std = jax.jacrev(fwd_link, has_aux=True)(params, bel, x)
         std = jnp.sqrt(std)
         return c * std
 
