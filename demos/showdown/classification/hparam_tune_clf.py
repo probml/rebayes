@@ -1,12 +1,17 @@
+from functools import partial
+
 import jax
 import numpy as np
 import jax.numpy as jnp
 from rebayes import base
-from functools import partial
 from jax.flatten_util import ravel_pytree
+from jax import vmap, jit
 from bayes_opt import BayesianOptimization
+import optax
+
 from rebayes.extended_kalman_filter import ekf
 from rebayes.low_rank_filter import lofi
+from rebayes.sgd_filter import replay_sgd as rsgd
 
 
 def apply(flat_params, x, model, unflatten_fn):
@@ -26,8 +31,9 @@ def bbf_lofi(
     flat_params,
     callback,
     apply_fn,
-    params_lofi,
+    lofi_params,
     method="lofi",
+    callback_at_end=True,
 ):
     """
     Black-box function for Bayesian optimization.
@@ -51,12 +57,15 @@ def bbf_lofi(
         dynamics_covariance_inflation_factor=alpha,
     )
 
-    estimator = lofi.RebayesLoFi(params_rebayes, params_lofi, method=method)
+    estimator = lofi.RebayesLoFi(params_rebayes, lofi_params, method=method)
 
-    bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
-    metric = callback(bel, **test_callback_kwargs)
+    if callback_at_end:
+        bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
+        metric = callback(bel, **test_callback_kwargs)
+    else:
+        _, metric = estimator.scan(X_train, y_train, progress_bar=False, callback=callback, **test_callback_kwargs)
+
     return metric
-
 
 
 def bbf_ekf(
@@ -73,6 +82,7 @@ def bbf_ekf(
     callback,
     apply_fn,
     method="fdekf",
+    callback_at_end=True,
 ):
     """
     Black-box function for Bayesian optimization.
@@ -98,8 +108,66 @@ def bbf_ekf(
 
     estimator = ekf.RebayesEKF(params_rebayes, method=method)
 
-    bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
+    if callback_at_end:
+        bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
+        metric = callback(bel, **test_callback_kwargs)
+    else:
+        _, metric = estimator.scan(X_train, y_train, progress_bar=False, callback=callback, **test_callback_kwargs)
+
+    return metric
+
+
+def bbf_rsgd(
+    log_lr,
+    n_inner,
+    # Specify before running
+    train,
+    test,
+    flat_params,
+    callback,
+    apply_fn,
+    loss_fn,
+    buffer_size,
+    dim_output,
+    callback_at_end=True,
+):
+    """
+    Black-box function for Bayesian optimization.
+    """
+    X_train, y_train = train
+    X_test, y_test = test
+
+    tx = optax.sgd(learning_rate=jnp.exp(log_lr).item())
+    n_inner = int(n_inner)
+
+    test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
+    rsgd_state = rsgd.FifoTrainState.create(
+        apply_fn=apply_fn,
+        params=flat_params,
+        tx=tx,
+        buffer_size=buffer_size,
+        dim_features=[1, 28, 28, 1],
+        dim_output=dim_output,
+    )
+    
+    @partial(jit, static_argnames=("applyfn",))
+    def lossfn_fifo(params, counter, X, y, applyfn):
+        logits = vmap(applyfn, (None, 0))(params, X)
+        nll = loss_fn(logits=logits, labels=y)
+        nll = nll.sum(axis=-1)
+        loss = (nll * counter).sum() / counter.sum()
+        return loss
+
+    estimator = rsgd.FSGD(lossfn_fifo, n_inner=n_inner)
+
+    bel, _ = estimator.scan(X_train, y_train, progress_bar=False, bel=rsgd_state)
     metric = callback(bel, **test_callback_kwargs)
+    
+    if callback_at_end:
+        bel, _ = estimator.scan(X_train, y_train, progress_bar=False, bel=rsgd_state)
+        metric = callback(bel, **test_callback_kwargs)
+    else:
+        _, metric = estimator.scan(X_train, y_train, progress_bar=False, callback=callback, **test_callback_kwargs)
     return metric
 
 
@@ -114,6 +182,7 @@ def create_optimizer(
     callback=None,
     method="fdekf",
     verbose=2,
+    callback_at_end=True,
     **kwargs
 ):
     key = jax.random.PRNGKey(random_state)
@@ -126,23 +195,36 @@ def create_optimizer(
 
     apply_fn = partial(apply, model=model, unflatten_fn=recfn)
     
-    if "ekf" in method:
-        bbf = bbf_ekf
-    elif "lofi" in method:
-        bbf = bbf_lofi
+    if "rsgd" not in method:
+        if "ekf" in method:
+            bbf = bbf_ekf
+        elif "lofi" in method:
+            bbf = bbf_lofi
 
-    bbf_partial = partial(
-        bbf,
-        emission_mean_fn=emission_mean_fn,
-        emission_cov_fn=emission_cov_fn,
-        train=train,
-        test=test,
-        flat_params=flat_params,
-        callback=callback,
-        apply_fn=apply_fn,
-        method=method,
-        **kwargs # Must include params_lofi if method is lofi
-    )
+        bbf_partial = partial(
+            bbf,
+            emission_mean_fn=emission_mean_fn,
+            emission_cov_fn=emission_cov_fn,
+            train=train,
+            test=test,
+            flat_params=flat_params,
+            callback=callback,
+            apply_fn=apply_fn,
+            method=method,
+            callback_at_end=callback_at_end,
+            **kwargs # Must include params_lofi if method is lofi
+        )
+    else:
+        bbf_partial = partial(
+            bbf_rsgd,
+            train=train,
+            test=test,
+            flat_params=flat_params,
+            callback=callback,
+            apply_fn=apply_fn,
+            callback_at_end=callback_at_end,
+            **kwargs # Must include loss_fn, buffer_size, dim_output if method is rsgd
+        )
 
     optimizer = BayesianOptimization(
         f=bbf_partial,
@@ -154,37 +236,66 @@ def create_optimizer(
     return optimizer, apply_fn, n_features
 
 
-def get_best_params(optimizer):
+def get_best_params(optimizer, method):
     max_params = optimizer.max["params"].copy()
 
-    initial_covariance = np.exp(max_params["log_init_cov"])
-    dynamics_weights = 1 - np.exp(max_params["log_dynamics_weights"])
-    dynamics_covariance = np.exp(max_params["log_dynamics_cov"])
-    alpha = np.exp(max_params["log_alpha"])
+    if "rsgd" not in method:
+        initial_covariance = np.exp(max_params["log_init_cov"])
+        dynamics_weights = 1 - np.exp(max_params["log_dynamics_weights"])
+        dynamics_covariance = np.exp(max_params["log_dynamics_cov"])
+        alpha = np.exp(max_params["log_alpha"])
 
-    hparams = {
-        "initial_covariance": initial_covariance,
-        "dynamics_weights": dynamics_weights,
-        "dynamics_covariance": dynamics_covariance,
-        "dynamics_covariance_inflation_factor": alpha,
-    }
+        hparams = {
+            "initial_covariance": initial_covariance,
+            "dynamics_weights": dynamics_weights,
+            "dynamics_covariance": dynamics_covariance,
+            "dynamics_covariance_inflation_factor": alpha,
+        }
+    else:
+        hparams = {
+            "learning_rate": np.exp(max_params["log_lr"]),
+            "n_inner": int(max_params["n_inner"]),
+        }
 
     return hparams
 
 
-def build_estimator(init_mean, hparams, emission_mean_fn, emission_cov_fn, method, **kwargs):
+def build_estimator(init_mean, apply_fn, hparams, emission_mean_fn, emission_cov_fn, method, **kwargs):
     """
     _ is a dummy parameter for compatibility with lofi 
     """
-    params = base.RebayesParams(
-        initial_mean=init_mean,
-        emission_mean_function=emission_mean_fn,
-        emission_cov_function=emission_cov_fn,
-        **hparams,
-    )
+    if "rsgd" not in method:
+        params = base.RebayesParams(
+            initial_mean=init_mean,
+            emission_mean_function=emission_mean_fn,
+            emission_cov_function=emission_cov_fn,
+            **hparams,
+        )
 
-    if "ekf" in method:
-        estimator = ekf.RebayesEKF(params, method=method)
-    elif "lofi" in method:
-        estimator = lofi.RebayesLoFi(params, method=method, **kwargs)
-    return estimator
+        if "ekf" in method:
+            estimator = ekf.RebayesEKF(params, method=method)
+        elif "lofi" in method:
+            estimator = lofi.RebayesLoFi(params, method=method, **kwargs)
+        bel = None
+    else:
+        tx = optax.sgd(learning_rate=hparams["learning_rate"])
+        bel = rsgd.FifoTrainState.create(
+            apply_fn=apply_fn,
+            params=init_mean,
+            tx=tx,
+            buffer_size=kwargs["buffer_size"],
+            dim_features=[1, 28, 28, 1],
+            dim_output=kwargs["dim_output"],
+        )
+        
+        @partial(jit, static_argnames=("applyfn",))
+        def lossfn_fifo(params, counter, X, y, applyfn):
+            logits = vmap(applyfn, (None, 0))(params, X)
+            nll = kwargs["loss_fn"](logits=logits, labels=y)
+            nll = nll.sum(axis=-1)
+            loss = (nll * counter).sum() / counter.sum()
+            return loss
+        
+        estimator = rsgd.FSGD(lossfn_fifo, n_inner=hparams["n_inner"])
+        
+    return estimator, bel

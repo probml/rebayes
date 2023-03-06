@@ -1,11 +1,14 @@
 import os
 from pathlib import Path
 from functools import partial
+import pickle
 
 import jax
 import jax.random as jr
 import jax.numpy as jnp
+from jax import jit
 from jax.flatten_util import ravel_pytree
+import optax
 
 from rebayes.low_rank_filter.lofi import LoFiParams
 from demos.showdown.classification import classification_train as benchmark
@@ -73,6 +76,8 @@ def train_agent(model, dataset, output_path, agent_type='fdekf', **kwargs):
             'log_dynamics_cov': (-40, 0),
             'log_alpha': (-40, 0),
         }
+        if agent_type == 'lofi_sph' or agent_type == 'lofi_diag':
+            agent_type = 'lofi'
     
     ll_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_ll)
     optimizer, *_ = hpt.create_optimizer(
@@ -81,14 +86,15 @@ def train_agent(model, dataset, output_path, agent_type='fdekf', **kwargs):
     )
     
     optimizer.maximize(
-        init_points=1,
-        n_iter=1,
+        init_points=10,
+        n_iter=15,
     )
-    best_hparams = hpt.get_best_params(optimizer)
+    best_hparams = hpt.get_best_params(optimizer, method=agent_type)
     print(f"Best target: {optimizer.max['target']}")
     
-    estimator = hpt.build_estimator(
+    estimator, bel = hpt.build_estimator(
         model['flat_params'],
+        model['apply_fn'],
         best_hparams,
         emission_mean_function,
         emission_cov_function,
@@ -99,23 +105,24 @@ def train_agent(model, dataset, output_path, agent_type='fdekf', **kwargs):
     nll_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_nll)
     nll_mean, nll_std = benchmark.mnist_eval_agent(
         dataset['train'], dataset['test'], model['apply_fn'], callback=nll_callback,
-        agent=estimator
+        agent=estimator, bel_init=bel,
     )
     
     miscl_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_miscl)
     miscl_mean, miscl_std = benchmark.mnist_eval_agent(
         dataset['train'], dataset['test'], model['apply_fn'], callback=miscl_callback,
-        agent=estimator
+        agent=estimator, bel_init=bel,
     )
     
-    nll_result = {
-        'nll_mean': nll_mean,
-        'nll_std': nll_std,
-    }
-    miscl_result = {
-        'miscl_mean': miscl_mean,
-        'miscl_std': miscl_std,
-    }
+    nll_result = jax.block_until_ready({
+        'mean': nll_mean,
+        'std': nll_std,
+    })
+    miscl_result = jax.block_until_ready({
+        'mean': miscl_mean,
+        'std': miscl_std,
+    })
+    print('\n')
     
     return nll_result, miscl_result
 
@@ -130,14 +137,30 @@ if __name__ == "__main__":
     dataset = load_data() # load data
     cnn_model = init_cnn() # initialize model
     
+    lofi_params_spherical = LoFiParams(
+        memory_size=20,
+        diagonal_covariance=False,
+    )
+    lofi_params_diagonal = LoFiParams(
+        memory_size=20,
+        diagonal_covariance=True,
+    )
+    
     agents = {
         'fdekf': None,
         'lofi_orth': {
-            'params_lofi': 
-                LoFiParams(
-                    memory_size=20,
-                diagonal_covariance=False,
-                )
+            'lofi_params': lofi_params_spherical
+        },
+        'lofi_sph': {
+            'lofi_params': lofi_params_spherical
+        },
+        'lofi_diag': {
+            'lofi_params': lofi_params_diagonal
+        },
+        'rsgd': {
+            'loss_fn': optax.softmax_cross_entropy,
+            'buffer_size': 20,
+            'dim_output': 10,
         }
     }
     
@@ -149,4 +172,13 @@ if __name__ == "__main__":
             nll, miscl = train_agent(cnn_model, dataset, output_path, agent_type=agent, **kwargs)
         nll_results[agent] = nll
         miscl_results[agent] = miscl
+        
+    # Store results and plot
+    benchmark.store_results(nll_results, 'mnist_nll', output_path)
+    benchmark.store_results(miscl_results, 'mnist_miscl', output_path)
     
+    nll_title = "Test-set average NLL"
+    benchmark.plot_results(nll_results, "mnist_nll", output_path, ylim=(0.5, 2.5), title=nll_title)
+    
+    miscl_title = "Test-set average misclassification rate"
+    benchmark.plot_results(miscl_results, "mnist_miscl", output_path, ylim=(0.2, 0.8), title=miscl_title)

@@ -1,5 +1,9 @@
 from typing import Sequence
+from functools import partial
+from pathlib import Path
+import pickle
 
+import matplotlib.pyplot as plt
 import tensorflow_datasets as tfds
 from flax import linen as nn
 import jax
@@ -7,6 +11,7 @@ from jax import jit, vmap, lax
 import jax.numpy as jnp
 import jax.random as jr
 import optax
+from jax_tqdm import scan_tqdm
 
 from avalanche.benchmarks.classic import SplitMNIST
 from rebayes.utils.avalanche import make_avalanche_data
@@ -82,6 +87,7 @@ def load_split_mnist_dataset(n_tasks=5, ntrain_per_task=200, ntest_per_task=500,
 # ------------------------------------------------------------------------------
 # Callback Functions
 
+@partial(jit, static_argnums=(1,4,))
 def evaluate_function(flat_params, apply_fn, X_test, y_test, loss_fn):
     @jit
     def evaluate(label, image):
@@ -138,25 +144,23 @@ def smnist_evaluate_accuracy(flat_params, apply_fn, X_test, y_test):
 # Model Evaluation
 
 def mnist_eval_agent(
-    train, test, apply_fn, callback, agent, bel_init=None, key=0, n_iter=10, n_steps=1_000,
+    train, test, apply_fn, callback, agent, bel_init=None, n_iter=10, n_steps=1_000,
 ):
-    if isinstance(key, int):
-        key = jr.PRNGKey(key)
-    
     X_train, y_train = train
     X_test, y_test = test
     test_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
     
-    def _step(_, key):
+    @scan_tqdm(n_iter)
+    def _step(_, i):
+        key = jr.PRNGKey(i)
         indx = jr.choice(key, len(X_train), (n_steps,))
         X_curr, y_curr = X_train[indx], y_train[indx]
-        _, result = agent.scan(X_curr, y_curr, callback=callback, **test_kwargs, progress_bar=True, bel=bel_init)
+        _, result = agent.scan(X_curr, y_curr, callback=callback, **test_kwargs, bel=bel_init)
         
         return result, result
 
-    keys = jr.split(key, n_iter)
     carry = jnp.zeros((n_steps,))
-    _, res = lax.scan(_step, carry, keys)
+    _, res = lax.scan(_step, carry, jnp.arange(n_iter))
     mean, std = res.mean(axis=0), res.std(axis=0)
 
     return mean, std
@@ -165,4 +169,38 @@ def mnist_eval_agent(
 # def smnist_eval_agent(
 #     train, test, apply_fn, callback, agent, bel_init=None, n_iter=10,
 # ): TODOTODO
+
+
+# ------------------------------------------------------------------------------
+# Save and Plot Results
+
+def store_results(results, name, path):
+    path = Path(path, name)
+    filename = f"{path}.pkl"
+    with open(filename, "wb") as f:
+        pickle.dump(results, f) 
+
+
+def plot_results(results, name, path, ylim, ax=None, title=''):
+    if ax is None:
+        fig, ax = plt.subplots()
+    path = Path(path, name)
+    filename = f"{path}.png"
+    plt.figure(figsize=(10, 5))
+    for key, val in results.items():
+        mean, std = val['mean'], val['std']
+        ax.plot(mean, label=key)
+        ax.fill_between(
+            jnp.arange(mean.shape[0]),
+            mean - std,
+            mean + std,
+            alpha=0.3
+        )
+    ax.set_xlabel('Number of training examples seen')
+    ax.set_ylabel(title)
+    ax.set_ylim(*ylim)
+    ax.set_title(title)
+    ax.legend()
+    fig.savefig(filename)
     
+    return ax
