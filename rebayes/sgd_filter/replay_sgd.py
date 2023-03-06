@@ -41,7 +41,10 @@ class FifoTrainState(TrainState):
     def create(cls, *, apply_fn, params, tx,
                buffer_size, dim_features, dim_output, **kwargs):
         opt_state = tx.init(params)
-        buffer_X = jnp.empty((buffer_size, dim_features))
+        if isinstance(dim_features, int):   # TODO: Refactor for general case
+            buffer_X = jnp.empty((buffer_size, dim_features))
+        else:
+            buffer_X = jnp.empty((buffer_size, *dim_features))
         buffer_y = jnp.empty((buffer_size, dim_output))
         counter = jnp.zeros(buffer_size)
  
