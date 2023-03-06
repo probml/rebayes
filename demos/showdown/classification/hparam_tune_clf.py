@@ -54,7 +54,7 @@ def bbf_lofi(
     estimator = lofi.RebayesLoFi(params_rebayes, params_lofi, method=method)
 
     bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
-    metric = callback(bel, **test_callback_kwargs)["test"]
+    metric = callback(bel, **test_callback_kwargs)
     return metric
 
 
@@ -99,7 +99,7 @@ def bbf_ekf(
     estimator = ekf.RebayesEKF(params_rebayes, method=method)
 
     bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
-    metric = callback(bel, **test_callback_kwargs)["test"]
+    metric = callback(bel, **test_callback_kwargs)
     return metric
 
 
@@ -113,6 +113,7 @@ def create_optimizer(
     emission_cov_fn,
     callback=None,
     method="fdekf",
+    verbose=2,
     **kwargs
 ):
     key = jax.random.PRNGKey(random_state)
@@ -147,6 +148,7 @@ def create_optimizer(
         f=bbf_partial,
         pbounds=bounds,
         random_state=random_state,
+        verbose=verbose,
     )
 
     return optimizer, apply_fn, n_features

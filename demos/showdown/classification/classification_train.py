@@ -41,7 +41,7 @@ class MLP(nn.Module):
             x = nn.relu(nn.Dense(feat)(x))
         x = nn.Dense(self.features[-1])(x)
         return x
-    
+
 
 # ------------------------------------------------------------------------------
 # Dataset Helper Functions
@@ -87,31 +87,37 @@ def evaluate_function(flat_params, apply_fn, X_test, y_test, loss_fn):
     def evaluate(label, image):
         image = image.reshape((1, 28, 28, 1))
         logits = apply_fn(flat_params, image).ravel()
-        return loss_fn(logits, label.ravel())
-    evals = vmap(evaluate, (0, 0))(X_test, y_test)
+        return loss_fn(logits, label)
+    evals = vmap(evaluate, (0, 0))(y_test, X_test)
     
     return evals.mean()
     
 
-def eval_callback(bel, evaluate_fn, *args, **kwargs):
+def eval_callback(bel, *args, evaluate_fn, **kwargs):
     X, y, apply_fn = kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
     eval = evaluate_fn(bel.mean, apply_fn, X, y)
+    eval = jnp.where(jnp.isnan(eval), -1e8, eval)
     
     return eval
 
 
 # MNIST
-def mnist_evaluate_log_likelihood(flat_params, apply_fn, X_test, y_test):
+def mnist_evaluate_nll(flat_params, apply_fn, X_test, y_test):
     nll = evaluate_function(flat_params, apply_fn, X_test, y_test, optax.softmax_cross_entropy_with_integer_labels)
+    
+    return nll
+
+def mnist_evaluate_ll(flat_params, apply_fn, X_test, y_test):
+    nll = mnist_evaluate_nll(flat_params, apply_fn, X_test, y_test)
     
     return -nll
 
 
-def mnist_evaluate_accuracy(flat_params, apply_fn, X_test, y_test):
+def mnist_evaluate_miscl(flat_params, apply_fn, X_test, y_test):
     acc_fn = lambda logits, label: (logits.argmax(axis=-1) == label).mean()
     acc = evaluate_function(flat_params, apply_fn, X_test, y_test, acc_fn)
     
-    return acc
+    return 1.0 - acc
 
 
 # Split-MNIST
