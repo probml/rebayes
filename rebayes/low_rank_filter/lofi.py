@@ -488,7 +488,7 @@ def _lofi_spherical_cov_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0, stead
     W = U * Sigma
     D = jnp.linalg.pinv(jnp.eye(W.shape[1]) +  (W.T @ (W/eta))/(1+alpha))
     e = (m0 - m)
-    K = e - (1/1+alpha) * (W/eta @ D) @ (W.T @ e)
+    K = e - (1/(1+alpha)) * (W/eta @ D) @ (W.T @ e)
     m_pred = gamma*m + gamma*alpha/(1+alpha) * K
     
     # Covariance prediction
@@ -529,7 +529,7 @@ def _lofi_diagonal_cov_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0, steady
     W = U * Sigma
     D = jnp.linalg.pinv(jnp.eye(W.shape[1]) +  (W.T @ (W/eta))/(1+alpha))
     e = (m0 - m)
-    K = e - (1/1+alpha) * (W/eta @ D) @ (W.T @ e)
+    K = e - (1/(1+alpha)) * (W/eta @ D) @ (W.T @ e)
     m_pred = gamma*m + gamma*alpha/(1+alpha) * K
     
     # Covariance prediction
