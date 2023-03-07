@@ -428,10 +428,17 @@ def store_results(results, name, path):
         pickle.dump(results, f)
 
 
-def train_agents(key, path, ix):
+def train_agents(key, dim_rank, dataset_name, path, output_path, ix):
+    """
+    TODO: divide script into memory-aware agents and memory-agnostic agents.
+    Memory aware: LoFi, L-RVGA, ORFit
+    Memory-agnostic: EKF-FC, EKF-FD, EFK-VD.
+    """
     # TODO: Move to individual script
     res = uci_uncertainty_data.load_data(path, ix)
     dataset = res["dataset"]
+    # Simple offset of NaNs to zero-values
+    dataset = jax.tree_map(jnp.nan_to_num, dataset)
     X_train, _ = dataset["train"]
 
     # Train, test, warmup
@@ -533,15 +540,13 @@ def train_agents(key, path, ix):
 
 
 if __name__ == "__main__":
-    import sys
     from itertools import product
     # TOODO: change to $REBAYES_OUTPUT, $REBAYES_DATASET
-    output_path = "/home/gerardoduran/documents/rebayes/demos/outputs/checkpoints"
+    output_path = "/home/gerardoduran/documents/rebayes/demos/showdown/output/checkpoints"
     dataset_path = "/home/gerardoduran/documents/external/DropoutUncertaintyExps/UCI_Datasets"
 
     # _, dataset_name = sys.argv
     
-    dim_rank = 50
     random_state = 314
     key = jax.random.PRNGKey(314)
 
@@ -549,18 +554,15 @@ if __name__ == "__main__":
     partitions = range(num_partitions)
     datasets = [
         "bostonHousing", "concrete", "energy", "kin8nm", "naval-propulsion-plant",
-        "power-plant", "protein-tertiary-structure", "wine-quality-red", "yacht"
+        "power-plant", "wine-quality-red", "yacht"
     ]
 
-    for i, (dataset_name, ix) in enumerate(product(datasets, partitions)):
+    dim_ranks = [1, 2, 5, 10, 20, 50]
+    ix = 0
+    for i, (dataset_name, dim_rank) in enumerate(product(datasets, dim_ranks)):
         keyv = jax.random.fold_in(key, i)
-        print(f"Fitting {dataset_name} --- {ix}")
-        path = os.path.join(dataset_path, dataset_name)
-        path = (
-            "/home/gerardoduran/documents/external"
-            "/DropoutUncertaintyExps/UCI_Datasets/"
-            f"{dataset_name}"
-        )
-        path = os.path.join(path, "data")
-        train_agents(keyv, path, ix)
-        print("\n" * 3)
+        data_path = os.path.join(dataset_path, dataset_name, "data")
+        dataset_name_store = f"{dataset_name}_rank{dim_rank:02}"
+        print(f"Fitting {dataset_name_store} --- {ix}")
+        train_agents(keyv, dim_rank, dataset_name_store, data_path, output_path, ix)
+        print("\n" * 2)
