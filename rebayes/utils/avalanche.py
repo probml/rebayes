@@ -10,6 +10,7 @@ from jax.flatten_util import ravel_pytree
 from jax.experimental import host_callback
 from jax import jacrev
 import numpy as np
+from tqdm import trange
 
 import torch
 from torch.utils.data import TensorDataset, DataLoader
@@ -66,7 +67,7 @@ def make_avalanche_datasets_pytorch(dataset, ntrain_per_dist, ntrain_per_batch, 
 
     train_sets = []
     test_sets = []
-    for exp in range(nexperiences):
+    for exp in trange(nexperiences):
         key, *subkeys = jr.split(key, 3)
         ds = train_stream[exp].dataset
         train_ndx = jr.choice(subkeys[0], len(ds), shape=(ntrain_per_dist,), replace=False)
