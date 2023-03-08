@@ -13,6 +13,7 @@ def bbf(
     dynamics_weights,
     dynamics_covariance,
     log_emission_cov,
+    log_inflation,
     # Specify before running
     train,
     test,
@@ -31,10 +32,12 @@ def bbf(
     X_test, y_test = test
 
     initial_covariance = jnp.exp(log_init_cov).item()
+    inflation = jnp.exp(log_inflation)
     if emission_mean_function is None:
         emission_mean_function = apply_fn
     if emission_cov_function is None:
         def emission_cov_function(w, x): return jnp.exp(log_emission_cov)
+    
 
     test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
     params_rebayes = base.RebayesParams(
@@ -44,6 +47,7 @@ def bbf(
         dynamics_covariance=dynamics_covariance,
         emission_mean_function=emission_mean_function,
         emission_cov_function=emission_cov_function,
+        dynamics_covariance_inflation_factor=inflation,
     )
 
     estimator = lofi.RebayesLoFi(params_rebayes, params_lofi, method=method)
@@ -82,8 +86,11 @@ def create_optimizer(
 
     kwargs = {}
     if bounds["dynamics_covariance"] is None:
-        bounds.pop("dynamics_covariance")
+        bounds.pop("dynamics_covariance", None)
         kwargs["dynamics_covariance"] = None
+    if bounds.get("log_inflation") is None:
+        bounds.pop("log_inflation", None)
+        kwargs["log_inflation"] = -np.inf
 
 
     apply_fn = partial(apply, model=model, unflatten_fn=recfn)
@@ -130,6 +137,7 @@ def get_best_params(n_params, optimizer):
     emission_cov = np.exp(max_params.get("log_emission_cov", 0.0))
     dynamics_weights = max_params["dynamics_weights"]
     dynamics_cov = max_params.get("dynamics_covariance")
+    inflation = np.exp(max_params.get("log_inflation", -np.inf))
 
     def emission_cov_function(w, x): return emission_cov
     hparams = {
@@ -137,6 +145,7 @@ def get_best_params(n_params, optimizer):
         "dynamics_covariance": dynamics_cov,
         "dynamics_weights": dynamics_weights,
         "emission_cov_function": emission_cov_function,
+        "dynamics_covariance_inflation_factor": inflation,
     }
 
     return hparams
