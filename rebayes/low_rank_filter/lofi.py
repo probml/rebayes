@@ -485,23 +485,26 @@ def _lofi_spherical_cov_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0, stead
         eta_pred (float): Predicted precision.
     """
     # Mean prediction
-    W = U * Sigma
-    D = jnp.linalg.pinv(jnp.eye(W.shape[1]) +  (W.T @ (W/eta))/(1+alpha))
+    D = (Sigma**2)/((1+alpha)*eta + Sigma**2)
     e = (m0 - m)
-    K = e - (1/(1+alpha)) * (W/eta @ D) @ (W.T @ e)
-    m_pred = gamma*m + gamma*alpha/(1+alpha) * K
+    K = e - (D * U) @ (U.T @ e)
+    m_pred = gamma*m + gamma*alpha/(1+alpha)*K
     
     # Covariance prediction
     U_pred = U
-    Sigma_pred = jnp.sqrt((gamma**2 * Sigma**2)/((gamma**2 + q * eta) * (gamma**2 + q*eta + q*Sigma**2)))
     
     if steady_state:
         eta_pred = eta
+        Sigma_pred = jnp.sqrt(
+            (gamma**2 * Sigma**2) /
+            (1 + alpha + q*Sigma**2)
+        )
     else:
         eta_pred = eta/(gamma**2 + q*eta)
-    
-    # Covariance inflation
-    Sigma_pred = Sigma_pred / jnp.sqrt(1 + alpha)
+        Sigma_pred = jnp.sqrt(
+            (gamma**2 * Sigma**2) /
+            ((gamma**2*(1+alpha) + q*(1+alpha)*eta + q*Sigma**2) * (gamma**2 + q*eta))
+        )
 
     return m_pred, U_pred, Sigma_pred, eta_pred
 
