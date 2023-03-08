@@ -41,7 +41,9 @@ class Belief:
     # The belief state can be a Gaussian or some other representation (eg samples)
     # This must be a chex dataclass so that it works with lax.scan as a return type for carry
 
-class RebayesParams(NamedTuple):
+@chex.dataclass
+class RebayesParams:
+#class RebayesParams(NamedTuple):
     initial_mean: Float[Array, "state_dim"]
     initial_covariance: CovMat
     dynamics_weights: CovMat
