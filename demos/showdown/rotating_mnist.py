@@ -1,5 +1,4 @@
 import jax
-import optax
 import jax.numpy as jnp
 import flax.linen as nn
 import regression_train as benchmark
@@ -54,16 +53,29 @@ def load_data(sort_by_angle: bool = True):
     return res
 
 
+def train_xkf_agents(params, dataset, pbounds, eval_callback, method, optimizer_eval_kwargs):
+    res, apply_fn = benchmark.train_ekf_agent(
+        params, model, method, dataset, pbounds,
+        benchmark.train_callback, eval_callback,
+        optimizer_eval_kwargs,
+    )
+
+    metric_final = res["output"]["test"][-1]
+    print(method)
+    print(f"{metric_final:=0.4f}")
+    print("-" * 80)
+    benchmark.store_results(res, f"{dataset_name}_{method}", output_path)
+    return True
+
+
 def train_agents_general(key, model, res, dataset_name, output_path, rank):
     dataset = res["dataset"]
-    X_train, y_train = dataset["train"]
     X_test, y_test = dataset["test"]
+    # Use train as warmup
+    X_train, y_train = dataset["train"]
 
     # Train, test, warmup
-    warmup = dataset["train"]
-    warmup = jax.tree_map(lambda x: x[::5], warmup)
-    # dataset = dataset["train"], dataset["test"], warmup
-    dataset = warmup, dataset["test"], warmup
+    dataset = dataset["train"], dataset["test"], dataset["train"][:200]
 
     ymean = res["ymean"]
     ystd = res["ystd"]
@@ -79,16 +91,14 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
     }
 
     pbounds = {
-        "log_init_cov": (-8, -3),
-        "dynamics_weights": (0, 1.0),
-        "log_emission_cov": (-7, 0.0),
-        "dynamics_log_cov": (-7, 0.0),
+        "log_init_cov": (-10, 0),
+        "dynamics_weights": (0, 1.0), # Change to log-space close to 1.0
+        "log_emission_cov": (-80, 0.0),
+        "dynamics_log_cov": (-80, 0.0),
     }
-
 
     # -------------------------------------------------------------------------
     # Extended Kalman Filter
-    # methods = ["fdekf", "vdekf", "fcekf"]
     # methods = ["fdekf", "vdekf"]
     # for method in methods:
     #     res, apply_fn = benchmark.train_ekf_agent(
@@ -105,40 +115,18 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
 
     # -------------------------------------------------------------------------
     # Low-rank filter
-
     pbounds_lofi = pbounds.copy()
     pbounds_lofi.pop("dynamics_log_cov")
-    # pbounds_lofi["dynamics_covariance"] = None
-    pbounds_lofi["dynamics_covariance"] = (0.0, 1.0)
+    pbounds_lofi["dynamics_covariance"] = None # If steady-state
+    # pbounds_lofi["dynamics_covariance"] = (0.0, 1.0)
+    # pbounds_lofi["log_inflation"] = (-40, 0.0)
 
-    methods = ["lofi", "lofi_orth"]
-
-    params_lofi = lofi.LoFiParams(
-        memory_size=rank,
-        sv_threshold=0,
-        steady_state=False,
-        diagonal_covariance=False,
-    )
-    for method in methods:
-        res, apply_fn, hparams = benchmark.train_lofi_agent(
-            params, params_lofi, model, method, dataset, pbounds_lofi,
-            benchmark.train_callback, eval_callback,
-            optimizer_eval_kwargs,
-        )
-
-        metric_final = res["output"]["test"][-1]
-        print(method)
-        print(f"{metric_final:=0.4f}")
-        print("-" * 80)
-        benchmark.store_results(res, f"{dataset_name}_{method}", output_path)
-    
-    # Generalised LoFi
     method = "lofi"
     params_lofi = lofi.LoFiParams(
         memory_size=rank,
         sv_threshold=0,
-        steady_state=False,
-        diagonal_covariance=True,
+        steady_state=True,
+        diagonal_covariance=False,
     )
 
     res, apply_fn, hparams = benchmark.train_lofi_agent(
@@ -146,8 +134,6 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
         benchmark.train_callback, eval_callback,
         optimizer_eval_kwargs,
     )
-    method = "lofi_diag"
-    res["method"] = method
 
     metric_final = res["output"]["test"][-1]
     print(method)
@@ -155,12 +141,36 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
     print("-" * 80)
     benchmark.store_results(res, f"{dataset_name}_{method}", output_path)
 
+    # Generalised LoFi (Optional parameter)
+    fit_generalised = False
+    if fit_generalised:
+        method = "lofi"
+        params_lofi = lofi.LoFiParams(
+            memory_size=rank,
+            sv_threshold=0,
+            steady_state=False,
+            diagonal_covariance=True,
+        )
+
+        res, apply_fn, hparams = benchmark.train_lofi_agent(
+            params, params_lofi, model, method, dataset, pbounds_lofi,
+            benchmark.train_callback, eval_callback,
+            optimizer_eval_kwargs,
+        )
+        method = "lofi_diag"
+        res["method"] = method
+
+        metric_final = res["output"]["test"][-1]
+        print(method)
+        print(f"{metric_final:=0.4f}")
+        print("-" * 80)
+        benchmark.store_results(res, f"{dataset_name}_{method}", output_path)
+
     # -------------------------------------------------------------------------
     # Replay-buffer SGD
-
     pbounds_rsgd = {
         "learning_rate": (1e-6, 1e-2),
-        "n_inner": (1, 100),
+        "n_inner": (1, 2),
     }
 
     method = "sgd-rb"
@@ -184,7 +194,6 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
         **hparams
     )
 
-    X_train, y_train = warmup
     agent = lofi.RebayesLoFi(params_orfit, params_lofi, method=method)
     test_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
     _, output = agent.scan(
@@ -194,17 +203,47 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
         "output": output,
         "method": method,
     }
+
     metric_final = res["output"]["test"][-1]
     print(method)
     print(f"{metric_final:=0.4f}")
     print("-" * 80)
     benchmark.store_results(res, f"{dataset_name}_{method}", output_path)
 
+    # random_state = 314
+    # optimizer_eval_kwargs = {
+    #     "init_points": 5,
+    #     "n_iter": 0,
+    # }
+
+    # pbounds_lrvga = {
+    #     "std": (-0.34, 0.0),
+    #     "sigma2": (-4, 0.0),
+    #     "eps": (-10, -4),
+    # }
+
+    # n_outer = 2
+    # n_inner = 3
+    # fwd_link = partial(benchmark.fwd_link_main, model=model, reconstruct_fn=reconstruct_fn)
+    # res = benchmark.train_lrvga_agent(
+    #     key, apply_fn, model, dataset, dim_rank=rank, n_inner=n_inner, n_outer=n_outer,
+    #     pbounds=pbounds_lrvga, eval_callback=eval_callback,  fwd_link=fwd_link,
+    #     optimizer_eval_kwargs=optimizer_eval_kwargs,
+    #     random_state=random_state,
+    # ) 
+    # method = res["method"]
+
+    # metric_final = res["output"]["test"][-1]
+    # print(method)
+    # print(f"{metric_final:=0.4f}")
+    # print("-" * 80)
+    # benchmark.store_results(res, f"{dataset_name}_{method}", output_path)
+
 
 if __name__ == "__main__":
     import os
     # output_path = "/home/gerardoduran/documents/rebayes/demos/showdown/output/rotating-mnist"
-    ranks = [2, 5, 10, 15, 20, 30, 40, 50]
+    ranks = [2, 5, 10, 20, 50, 100]
     output_path = os.environ.get("REBAYES_OUTPUT")
     if output_path is None:
         output_path = "/tmp/rebayes"
@@ -213,11 +252,10 @@ if __name__ == "__main__":
 
     for rank in ranks:
         print(f"------------------ Rank: {rank} ------------------")
-        dataset_name = f"sorted-rotating-mnist-2-mlp-rank{rank:02}"
+        dataset_name = f"rotating-mnist-2-mlp-rank{rank:02}"
         print(f"Dataset name: {dataset_name}")
 
-        data = load_data()
+        data = load_data(sort_by_angle=False)
         model = MLP(n_out=1, n_hidden=100)
         key = jax.random.PRNGKey(314)
-
         train_agents_general(key, model, data, dataset_name, output_path, rank)
