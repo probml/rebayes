@@ -106,3 +106,58 @@ class FSGD(Rebayes):
         _, bel = self._train_step(bel)
         return bel
  
+
+class FifoSGD(Rebayes):
+    """
+    FIFO Replay-buffer SGD training procedure
+    """
+    def __init__(self, lossfn, apply_fn, init_params, tx,  buffer_size, dim_features, dim_output, n_inner=1):
+        self.lossfn = lossfn   
+        self.apply_fn = apply_fn
+        self.params = init_params
+        self.tx = tx
+        self.buffer_size = buffer_size
+        self.dim_features = dim_features
+        self.dim_output = dim_output
+        self.n_inner = n_inner
+        self.loss_grad = jax.value_and_grad(self.lossfn, 0)
+
+    def init_bel(self):
+        bel_init = FifoTrainState.create(
+            apply_fn = self.apply_fn,
+            params = self.params,
+            tx = self.tx,
+            buffer_size = self.buffer_size,
+            dim_features = self.dim_features,
+            dim_output = self.dim_output
+        )
+        return bel_init
+
+    def predict_obs(self, bel, X):
+        yhat = bel.apply_fn(bel.params, X)
+        return yhat
+
+    def predict_state(self, bel):
+        return bel
+ 
+    @partial(jax.jit, static_argnums=(0,))
+    def _train_step(
+        self,
+        state: FifoTrainState,
+    ) -> Tuple[float, FifoTrainState]:
+        X, y = state.buffer_X, state.buffer_y
+        loss, grads = self.loss_grad(state.params, state.counter, X, y, state.apply_fn)
+        state = state.apply_gradients(grads=grads)
+        return loss, state
+
+    @partial(jax.jit, static_argnums=(0,))
+    def update_state(self, bel, Xt, yt):
+        bel = bel.apply_buffers(Xt, yt) 
+
+        def partial_step(_, bel):
+            _, bel = self._train_step(bel)
+            return bel
+        bel = jax.lax.fori_loop(0, self.n_inner - 1, partial_step, bel)
+        # Do not count inner steps as part of the outer step
+        _, bel = self._train_step(bel)
+        return bel
