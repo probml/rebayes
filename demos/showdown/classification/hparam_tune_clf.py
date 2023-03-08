@@ -119,7 +119,6 @@ def bbf_ekf(
 
 def bbf_rsgd(
     log_lr,
-    n_inner,
     # Specify before running
     train,
     test,
@@ -138,7 +137,6 @@ def bbf_rsgd(
     X_test, y_test = test
 
     tx = optax.sgd(learning_rate=jnp.exp(log_lr).item())
-    n_inner = int(n_inner)
 
     test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
     rsgd_state = rsgd.FifoTrainState.create(
@@ -152,13 +150,13 @@ def bbf_rsgd(
     
     @partial(jit, static_argnames=("applyfn",))
     def lossfn_fifo(params, counter, X, y, applyfn):
-        logits = vmap(applyfn, (None, 0))(params, X)
-        nll = loss_fn(logits=logits, labels=y)
-        nll = nll.sum(axis=-1)
+        logits = vmap(applyfn, (None, 0))(params, X).ravel()
+        nll = loss_fn(logits=logits, labels=y.ravel())
+        nll = nll.sum()
         loss = (nll * counter).sum() / counter.sum()
         return loss
 
-    estimator = rsgd.FSGD(lossfn_fifo, n_inner=n_inner)
+    estimator = rsgd.FSGD(lossfn_fifo, n_inner=1)
 
     bel, _ = estimator.scan(X_train, y_train, progress_bar=False, bel=rsgd_state)
     metric = callback(bel, **test_callback_kwargs)
@@ -167,7 +165,7 @@ def bbf_rsgd(
         bel, _ = estimator.scan(X_train, y_train, progress_bar=False, bel=rsgd_state)
         metric = callback(bel, **test_callback_kwargs)
     else:
-        _, metric = estimator.scan(X_train, y_train, progress_bar=False, callback=callback, **test_callback_kwargs)
+        _, metric = estimator.scan(X_train, y_train, progress_bar=False, bel=rsgd_state, callback=callback, **test_callback_kwargs)
     return metric
 
 
@@ -195,7 +193,7 @@ def create_optimizer(
 
     apply_fn = partial(apply, model=model, unflatten_fn=recfn)
     
-    if "rsgd" not in method:
+    if "sgd" not in method:
         if "ekf" in method:
             bbf = bbf_ekf
         elif "lofi" in method:
@@ -239,7 +237,7 @@ def create_optimizer(
 def get_best_params(optimizer, method):
     max_params = optimizer.max["params"].copy()
 
-    if "rsgd" not in method:
+    if "sgd" not in method:
         initial_covariance = np.exp(max_params["log_init_cov"])
         dynamics_weights = 1 - np.exp(max_params["log_dynamics_weights"])
         dynamics_covariance = np.exp(max_params["log_dynamics_cov"])
@@ -254,7 +252,6 @@ def get_best_params(optimizer, method):
     else:
         hparams = {
             "learning_rate": np.exp(max_params["log_lr"]),
-            "n_inner": int(max_params["n_inner"]),
         }
 
     return hparams
@@ -264,7 +261,7 @@ def build_estimator(init_mean, apply_fn, hparams, emission_mean_fn, emission_cov
     """
     _ is a dummy parameter for compatibility with lofi 
     """
-    if "rsgd" not in method:
+    if "sgd" not in method:
         params = base.RebayesParams(
             initial_mean=init_mean,
             emission_mean_function=emission_mean_fn,
@@ -296,6 +293,6 @@ def build_estimator(init_mean, apply_fn, hparams, emission_mean_fn, emission_cov
             loss = (nll * counter).sum() / counter.sum()
             return loss
         
-        estimator = rsgd.FSGD(lossfn_fifo, n_inner=hparams["n_inner"])
+        estimator = rsgd.FSGD(lossfn_fifo, n_inner=1)
         
     return estimator, bel
