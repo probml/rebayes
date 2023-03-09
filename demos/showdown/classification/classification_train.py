@@ -51,19 +51,24 @@ class MLP(nn.Module):
 # ------------------------------------------------------------------------------
 # Dataset Helper Functions
 
-def load_fmnist_datasets():
-    """Load Fashion-MNIST train and test datasets into memory."""
-    ds_builder = tfds.builder('fashion_mnist')
+def load_mnist_datasets(fashion=False):
+    """Load MNIST train and test datasets into memory."""
+    dataset='mnist'
+    if fashion:
+        dataset='fashion_mnist'
+    ds_builder = tfds.builder(dataset)
     ds_builder.download_and_prepare()
     
-    train_ds = tfds.as_numpy(ds_builder.as_dataset(split='train', batch_size=-1))
+    train_ds = tfds.as_numpy(ds_builder.as_dataset(split='train[:80%]', batch_size=-1))
+    val_ds = tfds.as_numpy(ds_builder.as_dataset(split='train[80%:]', batch_size=-1))
+
     test_ds = tfds.as_numpy(ds_builder.as_dataset(split='test', batch_size=-1))
     
     # Normalize pixel values
-    for ds in [train_ds, test_ds]:
+    for ds in [train_ds, val_ds, test_ds]:
         ds['image'] = jnp.float32(ds['image']) / 255.
         
-    return train_ds, test_ds
+    return train_ds, val_ds, test_ds
 
 
 def load_split_mnist_dataset(n_tasks=5, ntrain_per_task=200, ntest_per_task=500, key=0):
@@ -185,7 +190,7 @@ def plot_results(results, name, path, ylim, ax=None, title=''):
     if ax is None:
         fig, ax = plt.subplots()
     path = Path(path, name)
-    filename = f"{path}.png"
+    filename = f"{path}.pdf"
     plt.figure(figsize=(10, 5))
     for key, val in results.items():
         mean, std = val['mean'], val['std']
