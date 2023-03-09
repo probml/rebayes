@@ -6,6 +6,9 @@ dist/
 *egg-info
 *.ipynb_checkpoints
 *.pyc
+*.pkl
+*-ubyte*
+*.log
 
 # ignore figures unless manually added
 *.png
