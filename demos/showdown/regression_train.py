@@ -154,7 +154,7 @@ def rmae_callback(bel, *args, **kwargs):
 
 
 def eval_sgd_agent(
-        train, test, apply_fn, callback, agent, bel_init
+        train, test, apply_fn, callback, agent, bel_init=None
 ):
     X_test, y_test = test
     X_train, y_train = train

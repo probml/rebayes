@@ -24,18 +24,19 @@ def bbf(
     X_train, y_train = train
     X_test, y_test = test
 
-    bel_init = rsgd.FifoTrainState.create(
+    test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
+    agent = rsgd.FifoSGD(
+        lossfn,
         apply_fn=apply_fn,
-        params=params,
+        init_params=params,
         tx=optax.adam(learning_rate),
         buffer_size=rank,
         dim_features=dim_in,
         dim_output=dim_out,
+        n_inner=n_inner,
     )
 
-    test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
-    agent = rsgd.FSGD(lossfn, n_inner=n_inner)
-    bel, _ = agent.scan(X_train, y_train, bel=bel_init, progress_bar=False)
+    bel, _ = agent.scan(X_train, y_train, progress_bar=False)
     metric = callback(bel, **test_callback_kwargs)["test"].item()
     
     isna = np.isnan(metric)
