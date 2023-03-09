@@ -191,7 +191,7 @@ class Rebayes(ABC):
                 if callback is None:
                     out = None
                 else:
-                    out = callback(i, bel_pre_update, bel, batch)
+                    out = callback(i, bel_pre_update, bel, batch, **kwargs)
                     outputs.append(out)
             else:
                 bel, out = self.update_state_batch_with_callback(
