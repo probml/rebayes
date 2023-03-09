@@ -22,7 +22,15 @@ def generate_warmup_data(data_dict, ntrain_per_task, nval_per_task, val_after=5)
     return warmup_train, warmup_val
 
 
-def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
+def train_agent(
+    ntrain_per_task,
+    ntest_per_task,
+    model_dict, 
+    dataset, 
+    load_dataset_fn, 
+    agent_type='fdekf', 
+    **kwargs
+):
     print(f'Training {agent_type} agent...')
     model, emission_mean_function, emission_cov_function = \
         model_dict['model'], model_dict['emission_mean_function'], model_dict['emission_cov_function']
@@ -33,10 +41,10 @@ def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
         }
     else:
         pbounds={
-            'log_init_cov': (-10, 5.0),
-            'log_dynamics_weights': (-90, -90),
-            'log_dynamics_cov': (-90, -90),
-            'log_alpha': (-40, 0),
+            'log_init_cov': (-10, 1),
+            'log_dynamics_weights': (-50, 0),
+            'log_dynamics_cov': (-50, 0),
+            'log_alpha': (-50, 0),
         }
         if 'lofi' in agent_type:
             agent_type = 'lofi'
@@ -64,29 +72,23 @@ def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
         **kwargs,
     )
     
-    nll_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_nll)
-    nll_mean, nll_std = benchmark.mnist_eval_agent(
-        dataset['train'], dataset['test'], model_dict['apply_fn'], callback=nll_callback,
-        agent=estimator, bel_init=bel,
-    )
+    per_batch_miscl_callback = partial(benchmark.per_batch_callback, evaluate_fn=benchmark.mnist_evaluate_miscl)
     
-    miscl_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_miscl)
-    miscl_mean, miscl_std = benchmark.mnist_eval_agent(
-        dataset['train'], dataset['test'], model_dict['apply_fn'], callback=miscl_callback,
-        agent=estimator, bel_init=bel,
+    miscl_result = jax.block_until_ready(
+        benchmark.nonstationary_mnist_eval_agent(
+            load_dataset_fn,
+            ntrain_per_task,
+            ntest_per_task,
+            model_dict['apply_fn'],
+            estimator,
+            callback=per_batch_miscl_callback,
+            bel=bel,
+            n_iter=5,
+        )
     )
-    
-    nll_result = jax.block_until_ready({
-        'mean': nll_mean,
-        'std': nll_std,
-    })
-    miscl_result = jax.block_until_ready({
-        'mean': miscl_mean,
-        'std': miscl_std,
-    })
     print('\n')
     
-    return nll_result, miscl_result
+    return miscl_result
 
 
 if __name__ == "__main__":
@@ -99,10 +101,11 @@ if __name__ == "__main__":
     data_kwargs = {
         'n_tasks': 100,
         'ntrain_per_task': 600,
-        'nval_per_task': 5_000,
-        'ntest_per_task': 5_000,
+        'nval_per_task': 1_000,
+        'ntest_per_task': 1_000,
     }
     dataset = benchmark.load_permuted_mnist_dataset(**data_kwargs, fashion=True) # load data
+    dataset_load_fn = partial(benchmark.load_permuted_mnist_dataset, **data_kwargs, fashion=True)
     warmup_train, warmup_val = generate_warmup_data(
         dataset, data_kwargs["ntrain_per_task"], data_kwargs["nval_per_task"], val_after=5
     )
@@ -138,9 +141,24 @@ if __name__ == "__main__":
     nll_results, miscl_results = {}, {}
     for agent, kwargs in agents.items():
         if kwargs is None:
-            nll, miscl = train_agent(model_dict, dataset, agent_type=agent)
+            nll, miscl = train_agent(
+                data_kwargs["ntrain_per_task"],
+                data_kwargs["ntest_per_task"],
+                model_dict, 
+                dataset, 
+                dataset_load_fn, 
+                agent_type=agent
+            )
         else:
-            nll, miscl = train_agent(model_dict, dataset, agent_type=agent, **kwargs)
+            nll, miscl = train_agent(
+                data_kwargs["ntrain_per_task"],
+                data_kwargs["ntest_per_task"],
+                model_dict, 
+                dataset, 
+                dataset_load_fn, 
+                agent_type=agent,
+                **kwargs
+            )
         benchmark.store_results(nll, f'{agent}_mnist_nll', output_path)
         benchmark.store_results(miscl, f'{agent}_mnist_miscl', output_path)
         nll_results[agent] = nll

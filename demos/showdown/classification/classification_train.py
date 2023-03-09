@@ -13,6 +13,8 @@ import jax.numpy as jnp
 import jax.random as jr
 import optax
 from jax_tqdm import scan_tqdm
+from tqdm import trange
+import jax_dataloader.core as jdl
 
 from rebayes.utils.avalanche import make_avalanche_data
 
@@ -175,7 +177,6 @@ def process_dataset(Xtr, Ytr, Xval, Yval, Xte, Yte):
     return dataset
     
 
-
 # ------------------------------------------------------------------------------
 # Callback Functions
 
@@ -256,7 +257,7 @@ def smnist_evaluate_accuracy(flat_params, apply_fn, X_test, y_test):
 # Model Evaluation
 
 def mnist_eval_agent(
-    train, test, apply_fn, callback, agent, bel_init=None, n_iter=10, n_steps=1_000,
+    train, test, apply_fn, callback, agent, bel_init=None, n_iter=5, n_steps=1_000,
 ):
     X_train, y_train = train
     X_test, y_test = test
@@ -276,11 +277,61 @@ def mnist_eval_agent(
     mean, std = res.mean(axis=0), res.std(axis=0)
 
     return mean, std
-    
 
-# def smnist_eval_agent(
-#     train, test, apply_fn, callback, agent, bel_init=None, n_iter=10,
-# ): TODOTODO
+
+def nonstationary_mnist_eval_agent(
+    load_dataset_fn, 
+    ntrain_per_task,
+    ntest_per_task,
+    apply_fn,
+    agent, 
+    callback, 
+    bel=None,
+    n_iter=5,
+):
+    overall_accs, current_accs, first_task_accs = [], [], []
+    for i in trange(n_iter, desc='Evaluating agent...'):
+        # Load dataset with random permutation and random shuffle
+        dataset = load_dataset_fn(key=i)
+        (Xtr, Ytr), _, (Xte, Yte) = dataset.values()
+        train_ds = jdl.ArrayDataset(Xtr, Ytr)
+        train_loader = jdl.DataLoaderJax(
+            train_ds, batch_size=ntrain_per_task, shuffle=False, drop_last=False
+        )
+        
+        test_kwargs = {
+            'X_test': Xte,
+            'y_test': Yte,
+            'ntest_per_batch': ntest_per_task,
+            'apply_fn': apply_fn,
+        }
+        
+        _, accs = agent.scan_dataloader(
+            train_loader, 
+            callback=callback,
+            bel=bel,
+            callback_at_end=True,
+            **test_kwargs
+        )
+        overall_accs.append(jnp.array([res['overall'] for res in accs]))
+        current_accs.append(jnp.array([res['current'] for res in accs]))
+        first_task_accs.append(jnp.array([res['first_task'] for res in accs]))
+    
+    overall_accs, current_accs, task1_accs = \
+        jnp.array(overall_accs).reshape((n_iter, -1)), \
+            jnp.array(current_accs).reshape((n_iter, -1)), \
+                jnp.array(task1_accs).reshape((n_iter, -1))
+
+    result = {
+        'overall': overall_accs.mean(axis=0),
+        'overall-std': overall_accs.std(axis=0),
+        'current': current_accs.mean(axis=0),
+        'current-std': current_accs.std(axis=0),
+        'first_task': task1_accs.mean(axis=0),
+        'first_task-std': task1_accs.std(axis=0),
+    }
+    
+    return result
 
 
 # ------------------------------------------------------------------------------
