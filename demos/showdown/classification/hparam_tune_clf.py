@@ -210,7 +210,7 @@ def create_optimizer(
             apply_fn=apply_fn,
             method=method,
             callback_at_end=callback_at_end,
-            **kwargs # Must include params_lofi if method is lofi
+            **kwargs # Must include lofi_params if method is lofi
         )
     else:
         bbf_partial = partial(
