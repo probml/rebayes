@@ -1,22 +1,12 @@
 from pathlib import Path
-from typing import Sequence, Optional, Any, Union
-from functools import partial
-import optax
-import jax
+from typing import Optional, Any, Union
+
 import jax.numpy as jnp
 import jax.random as jr
-from jax import lax
-import flax.linen as nn
-from jax.flatten_util import ravel_pytree
-from jax.experimental import host_callback
-from jax import jacrev
 import numpy as np
 from tqdm import trange
-
 import torch
-from torch.utils.data import TensorDataset, DataLoader
-from torchvision.transforms import ToTensor, ToPILImage, Compose, Normalize, \
-    RandomRotation
+from torch.utils.data import DataLoader
 import jax_dataloader.core as jdl
 from avalanche.benchmarks import NCScenario, nc_benchmark
 from avalanche.benchmarks.classic.cmnist import (
