@@ -13,7 +13,6 @@ import jax.numpy as jnp
 import jax.random as jr
 import optax
 from jax_tqdm import scan_tqdm
-from tqdm import trange
 
 from rebayes.utils.avalanche import make_avalanche_data
 
@@ -140,7 +139,7 @@ def load_permuted_mnist_dataset(n_tasks, ntrain_per_task, nval_per_task, ntest_p
     n_per_task = {'train': ntrain_per_task, 'val': nval_per_task, 'test': ntest_per_task}
     result = {data_type: ([], []) for data_type in ['train', 'val', 'test']}
     
-    for _ in trange(n_tasks, desc="Generating permuted MNIST dataset"):
+    for _ in range(n_tasks):
         key, subkey = jr.split(key)
         perm_idx = jr.permutation(subkey, jnp.arange(28*28))
         permute_fn = partial(permute, idx=perm_idx)
