@@ -20,9 +20,11 @@ from torchvision.transforms import ToTensor, ToPILImage, Compose, Normalize, \
 import jax_dataloader.core as jdl
 from avalanche.benchmarks import NCScenario, nc_benchmark
 from avalanche.benchmarks.classic.cmnist import (
-    _default_mnist_train_transform,
-    _default_mnist_eval_transform,
     PixelsPermutation,
+)
+from avalanche.benchmarks.classic.cfashion_mnist import (
+    _default_fmnist_train_transform,
+    _default_fmnist_eval_transform,
 )
 from avalanche.benchmarks.datasets.external_datasets.fmnist import get_fmnist_dataset
 from avalanche.benchmarks.utils.data import make_avalanche_dataset
@@ -121,13 +123,30 @@ def make_avalanche_dataloaders_numpy(dataset, ntrain_per_dist, ntrain_per_batch,
     return train_loader, test_loader
 
 
+def load_mnist_dataset(avalanche_dataset, n_experiences, ntrain_per_dist, ntrain_per_batch, nval_per_batch, ntest_per_batch, seed=0, key=0):
+    if isinstance(key, int):
+        key = jr.PRNGKey(key)
+    dataset = avalanche_dataset(n_experiences=n_experiences, seed=seed)
+    Xtr, Ytr, Xte, Yte = make_avalanche_data(dataset, ntrain_per_dist, ntrain_per_batch, nval_per_batch + ntest_per_batch, key)
+    Xtr, Xte = Xtr.reshape(-1, 1, 28, 28, 1), Xte.reshape(-1, 1, 28, 28, 1)
+    
+    Xte_batches, Yte_batches = jnp.split(Xte, n_experiences), jnp.split(Yte, n_experiences)
+    Xval_sets, Yval_sets = [batch[:nval_per_batch] for batch in Xte_batches], [batch[:nval_per_batch] for batch in Yte_batches]
+    Xte_sets, Yte_sets = [batch[nval_per_batch:] for batch in Xte_batches], [batch[nval_per_batch:] for batch in Yte_batches]
+    
+    Xval, Yval = jnp.concatenate(Xval_sets), jnp.concatenate(Yval_sets)
+    Xte, Yte = jnp.concatenate(Xte_sets), jnp.concatenate(Yte_sets)
+    
+    return (Xtr, Ytr), (Xval, Yval), (Xte, Yte)
+
+
 def PermutedFashionMNIST(
     n_experiences: int,
     *,
     return_task_id=False,
     seed: Optional[int] = None,
-    train_transform: Optional[Any] = _default_mnist_train_transform,
-    eval_transform: Optional[Any] = _default_mnist_eval_transform,
+    train_transform: Optional[Any] = _default_fmnist_train_transform,
+    eval_transform: Optional[Any] = _default_fmnist_eval_transform,
     dataset_root: Union[str, Path] = None
 ) -> NCScenario:
     """Modified from avalanche.benchmarks.classic.cmnist.PermutedMNIST"""
