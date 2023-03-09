@@ -247,7 +247,8 @@ if __name__ == "__main__":
     output_path = os.environ.get("REBAYES_OUTPUT")
     if output_path is None:
         output_path = "/tmp/rebayes"
-        os.mkdir(output_path)
+        if not os.path.exists(output_path):
+            os.mkdir(output_path)
     print(f"Output path: {output_path}")
 
     for rank in ranks:
