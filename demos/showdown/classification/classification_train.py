@@ -90,9 +90,9 @@ def load_mnist_dataset(fashion=False):
     ds_builder = tfds.builder(dataset)
     ds_builder.download_and_prepare()
     
-    train_ds = tfds.as_numpy(ds_builder.as_dataset(split='train[:80%]', batch_size=-1))
-    val_ds = tfds.as_numpy(ds_builder.as_dataset(split='train[80%:]', batch_size=-1))
-    test_ds = tfds.as_numpy(ds_builder.as_dataset(split='test', batch_size=-1))
+    train_ds = tfds.as_numpy(ds_builder.as_dataset(split='train', batch_size=-1))
+    val_ds = tfds.as_numpy(ds_builder.as_dataset(split='test[80%:]', batch_size=-1))
+    test_ds = tfds.as_numpy(ds_builder.as_dataset(split='test[:80%]', batch_size=-1))
     
     # Normalize pixel values
     for ds in [train_ds, val_ds, test_ds]:
@@ -197,6 +197,26 @@ def eval_callback(bel, *args, evaluate_fn, **kwargs):
     eval = jnp.where(jnp.isnan(eval), -1e8, eval)
     
     return eval
+
+
+def per_batch_callback(i, bel_pre_update, bel, batch, evaluate_fn, **kwargs):
+    X_test, y_test, apply_fn = kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
+    ntest_per_batch = kwargs["ntest_per_batch"]
+    
+    prev_test_batch, curr_test_batch = i*ntest_per_batch, (i+1)*ntest_per_batch
+    curr_X_test, curr_y_test = X_test[prev_test_batch:curr_test_batch], y_test[prev_test_batch:curr_test_batch]
+    cum_X_test, cum_y_test = X_test[:curr_test_batch], y_test[:curr_test_batch]
+    
+    overall_accuracy = evaluate_fn(bel.mean, apply_fn, cum_X_test, cum_y_test)
+    current_accuracy = evaluate_fn(bel.mean, apply_fn, curr_X_test, curr_y_test)
+    task1_accuracy = evaluate_fn(bel.mean, apply_fn, X_test[:ntest_per_batch], y_test[:ntest_per_batch])
+    result = {
+        'overall': overall_accuracy,
+        'current': current_accuracy,
+        'first_task': task1_accuracy,
+    }
+    
+    return result
 
 
 # MNIST
