@@ -150,9 +150,10 @@ class Rebayes(ABC):
         self,
         bel: Belief, 
         X: Float[Array, "batch_size input_dim"],
-        Y: Float[Array, "batch_size emission_dim"]
+        Y: Float[Array, "batch_size emission_dim"],
+        progress_bar=False
     ) -> Tuple[Belief, Any]:
-        bel, _ = self.scan(X, Y, bel=bel)
+        bel, _ = self.scan(X, Y, bel=bel, progress_bar=progress_bar)
         return 
     
     def update_state_batch_with_callback(
@@ -162,11 +163,12 @@ class Rebayes(ABC):
         X: Float[Array, "batch_size input_dim"],
         Y: Float[Array, "batch_size emission_dim"],
         callback=None,
+        progress_bar=False,
         **kwargs
     ) -> Tuple[Belief, Any]:
         if callback is not None:
             callback = partial(callback, i=i)
-        bel, outputs = self.scan(X, Y, callback=callback, bel=bel, **kwargs)
+        bel, outputs = self.scan(X, Y, callback=callback, bel=bel, progress_bar=progress_bar, **kwargs)
         return bel, outputs
     
     def scan_dataloader(
@@ -175,6 +177,7 @@ class Rebayes(ABC):
         callback=None,
         bel=None,
         callback_at_end=True,
+        progress_bar=False,
         **kwargs,
     ) -> Tuple[Belief, Any]:
         if bel is None:
@@ -184,7 +187,7 @@ class Rebayes(ABC):
             bel_pre_update = bel
             Xtr, Ytr = batch[0], batch[1]
             if callback_at_end:
-                bel = self.update_state_batch(bel, Xtr, Ytr)
+                bel = self.update_state_batch(bel, Xtr, Ytr, progress_bar)
                 if callback is None:
                     out = None
                 else:
@@ -192,7 +195,7 @@ class Rebayes(ABC):
                     outputs.append(out)
             else:
                 bel, out = self.update_state_batch_with_callback(
-                    i, bel, Xtr, Ytr, callback=callback, **kwargs
+                    i, bel, Xtr, Ytr, callback, progress_bar, **kwargs
                 )
                 outputs.append(out)
         return bel, outputs
