@@ -13,6 +13,7 @@ import jax.numpy as jnp
 import jax.random as jr
 import optax
 from jax_tqdm import scan_tqdm
+from tqdm import trange
 
 from rebayes.utils.avalanche import make_avalanche_data
 
@@ -92,7 +93,6 @@ def load_mnist_dataset(fashion=False):
     
     train_ds = tfds.as_numpy(ds_builder.as_dataset(split='train[:80%]', batch_size=-1))
     val_ds = tfds.as_numpy(ds_builder.as_dataset(split='train[80%:]', batch_size=-1))
-
     test_ds = tfds.as_numpy(ds_builder.as_dataset(split='test', batch_size=-1))
     
     # Normalize pixel values
@@ -126,6 +126,40 @@ def load_avalanche_mnist_dataset(avalanche_dataset, n_experiences, ntrain_per_di
     dataset = process_dataset(Xtr, Ytr, Xval, Yval, Xte, Yte)
     
     return dataset
+
+
+def load_permuted_mnist_dataset(n_tasks, ntrain_per_task, nval_per_task, ntest_per_task, key=0, fashion=False):
+    if isinstance(key, int):
+        key = jr.PRNGKey(key)
+        
+    dataset = load_mnist_dataset(fashion=fashion)
+    
+    def permute(x, idx):
+        return x.ravel()[idx].reshape(x.shape)
+    
+    n_per_task = {'train': ntrain_per_task, 'val': nval_per_task, 'test': ntest_per_task}
+    result = {data_type: ([], []) for data_type in ['train', 'val', 'test']}
+    
+    for _ in trange(n_tasks, desc="Generating permuted MNIST dataset"):
+        key, subkey = jr.split(key)
+        perm_idx = jr.permutation(subkey, jnp.arange(28*28))
+        permute_fn = partial(permute, idx=perm_idx)
+        
+        for data_type, data in dataset.items():
+            key, subkey = jr.split(key)
+            X, Y = data
+            sample_idx = jr.choice(subkey, jnp.arange(len(X)), shape=(n_per_task[data_type],), replace=False)
+            
+            curr_X = vmap(permute_fn)(X[sample_idx])
+            result[data_type][0].append(curr_X)
+            
+            curr_Y = Y[sample_idx]
+            result[data_type][1].append(curr_Y)
+    
+    for data_type in ['train', 'val', 'test']:
+        result[data_type] = (jnp.concatenate(result[data_type][0]), jnp.concatenate(result[data_type][1]))
+            
+    return result
 
 
 def process_dataset(Xtr, Ytr, Xval, Yval, Xte, Yte):
