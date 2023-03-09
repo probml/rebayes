@@ -145,7 +145,7 @@ class Rebayes(ABC):
         bel, outputs = scan(step, carry, jnp.arange(num_timesteps))
         return bel, outputs
     
-    @partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0, 4))
     def update_state_batch(
         self,
         bel: Belief, 
@@ -154,7 +154,7 @@ class Rebayes(ABC):
         progress_bar=False
     ) -> Tuple[Belief, Any]:
         bel, _ = self.scan(X, Y, bel=bel, progress_bar=progress_bar)
-        return 
+        return bel
     
     def update_state_batch_with_callback(
         self,
