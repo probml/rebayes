@@ -129,6 +129,7 @@ def load_mnist_dataset(avalanche_dataset, n_experiences, ntrain_per_dist, ntrain
     dataset = avalanche_dataset(n_experiences=n_experiences, seed=seed)
     Xtr, Ytr, Xte, Yte = make_avalanche_data(dataset, ntrain_per_dist, ntrain_per_batch, nval_per_batch + ntest_per_batch, key)
     Xtr, Xte = Xtr.reshape(-1, 1, 28, 28, 1), Xte.reshape(-1, 1, 28, 28, 1)
+    Ytr, Yte = Ytr.ravel(), Yte.ravel()
     
     Xte_batches, Yte_batches = jnp.split(Xte, n_experiences), jnp.split(Yte, n_experiences)
     Xval_sets, Yval_sets = [batch[:nval_per_batch] for batch in Xte_batches], [batch[:nval_per_batch] for batch in Yte_batches]
