@@ -1,4 +1,5 @@
-from typing import Sequence
+from pathlib import Path
+from typing import Sequence, Optional, Any, Union
 from functools import partial
 import optax
 import jax
@@ -14,7 +15,20 @@ from tqdm import trange
 
 import torch
 from torch.utils.data import TensorDataset, DataLoader
+from torchvision.transforms import ToTensor, ToPILImage, Compose, Normalize, \
+    RandomRotation
 import jax_dataloader.core as jdl
+from avalanche.benchmarks import NCScenario, nc_benchmark
+from avalanche.benchmarks.classic.cmnist import (
+    _default_mnist_train_transform,
+    _default_mnist_eval_transform,
+    PixelsPermutation,
+)
+from avalanche.benchmarks.datasets.external_datasets.fmnist import get_fmnist_dataset
+from avalanche.benchmarks.utils.data import make_avalanche_dataset
+from avalanche.benchmarks.utils.transform_groups import DefaultTransformGroups
+from avalanche.benchmarks.utils.classification_dataset import make_classification_dataset
+
 
 
 def flatten_batch(X):
@@ -28,30 +42,32 @@ def flatten_batch(X):
 
 
 def dataloader_to_numpy(dataloader):
-  # data = np.array(train_dataloader.dataset) # mangles the shapes
-  all_X = []
-  all_y = []
-  for X, y in dataloader:
-    all_X.append(X)
-    all_y.append(y)
-  X = torch.cat(all_X, dim=0).numpy()
-  y = torch.cat(all_y, dim=0).numpy()
-  if y.ndim == 1:
-      y = y[:, None]
-  return X, y
+    # data = np.array(train_dataloader.dataset) # mangles the shapes
+    all_X = []
+    all_y = []
+    for X, y in dataloader:
+        all_X.append(X)
+        all_y.append(y)
+    X = torch.cat(all_X, dim=0).numpy()
+    y = torch.cat(all_y, dim=0).numpy()
+    if y.ndim == 1:
+        y = y[:, None]
+    return X, y
+
 
 def avalanche_dataloader_to_numpy(dataloader):
-  # data = np.array(train_dataloader.dataset) # mangles the shapes
-  all_X = []
-  all_y = []
-  for X, y, t in dataloader: # avalanche uses x,y,t
-    all_X.append(X)
-    all_y.append(y)
-  X = torch.cat(all_X, dim=0).numpy()
-  y = torch.cat(all_y, dim=0).numpy()
-  if y.ndim == 1:
-      y = y[:, None]
-  return X, y
+    # data = np.array(train_dataloader.dataset) # mangles the shapes
+    all_X = []
+    all_y = []
+    for X, y, t in dataloader: # avalanche uses x,y,t
+        all_X.append(X)
+        all_y.append(y)
+    X = torch.cat(all_X, dim=0).numpy()
+    y = torch.cat(all_y, dim=0).numpy()
+    if y.ndim == 1:
+        y = y[:, None]
+    return X, y
+
 
 def make_avalanche_datasets_pytorch(dataset, ntrain_per_dist, ntrain_per_batch, ntest_per_batch, key):
     '''Make pytorch dataloaders from avalanche dataset.
@@ -67,7 +83,7 @@ def make_avalanche_datasets_pytorch(dataset, ntrain_per_dist, ntrain_per_batch, 
 
     train_sets = []
     test_sets = []
-    for exp in trange(nexperiences):
+    for exp in trange(nexperiences, desc='Translating avalanche dataset to pytorch...'):
         key, *subkeys = jr.split(key, 3)
         ds = train_stream[exp].dataset
         train_ndx = jr.choice(subkeys[0], len(ds), shape=(ntrain_per_dist,), replace=False)
@@ -87,13 +103,14 @@ def make_avalanche_datasets_pytorch(dataset, ntrain_per_dist, ntrain_per_batch, 
 
 def make_avalanche_data(dataset, ntrain_per_dist, ntrain_per_batch, ntest_per_batch, key=0):
     if isinstance(key, int):
-      key = jr.PRNGKey(key)
+        key = jr.PRNGKey(key)
     train_set, test_set = make_avalanche_datasets_pytorch(dataset, ntrain_per_dist, ntrain_per_batch, ntest_per_batch, key)
     train_dataloader = DataLoader(train_set, batch_size=ntrain_per_batch, shuffle=False)
     test_dataloader = DataLoader(test_set, batch_size=ntest_per_batch, shuffle=False)
     Xtr, Ytr = avalanche_dataloader_to_numpy(train_dataloader)
     Xte, Yte = avalanche_dataloader_to_numpy(test_dataloader)
     return  jnp.array(Xtr), jnp.array(Ytr), jnp.array(Xte), jnp.array(Yte)
+
 
 def make_avalanche_dataloaders_numpy(dataset, ntrain_per_dist, ntrain_per_batch, ntest_per_batch):
     Xtr, Ytr, Xte, Yte = make_avalanche_data(dataset, ntrain_per_dist, ntrain_per_batch, ntest_per_batch)
@@ -104,3 +121,53 @@ def make_avalanche_dataloaders_numpy(dataset, ntrain_per_dist, ntrain_per_batch,
     return train_loader, test_loader
 
 
+def PermutedFashionMNIST(
+    n_experiences: int,
+    *,
+    return_task_id=False,
+    seed: Optional[int] = None,
+    train_transform: Optional[Any] = _default_mnist_train_transform,
+    eval_transform: Optional[Any] = _default_mnist_eval_transform,
+    dataset_root: Union[str, Path] = None
+) -> NCScenario:
+    """Modified from avalanche.benchmarks.classic.cmnist.PermutedMNIST"""
+    list_train_dataset = []
+    list_test_dataset = []
+    rng_permute = np.random.RandomState(seed)
+
+    mnist_train, mnist_test = get_fmnist_dataset(dataset_root)
+
+    # for every incremental experience
+    for _ in trange(n_experiences, desc="Generating PermutedFashionMNIST..."):
+        # choose a random permutation of the pixels in the image
+        idx_permute = torch.from_numpy(rng_permute.permutation(784)).type(
+            torch.int64
+        )
+
+        permutation = PixelsPermutation(idx_permute)
+
+        # Freeze the permutation
+        permuted_train = make_avalanche_dataset(
+            make_classification_dataset(mnist_train),
+            frozen_transform_groups=DefaultTransformGroups((permutation, None)),
+        )
+
+        permuted_test = make_avalanche_dataset(
+            make_classification_dataset(mnist_test),
+            frozen_transform_groups=DefaultTransformGroups((permutation, None)),
+        )
+
+        list_train_dataset.append(permuted_train)
+        list_test_dataset.append(permuted_test)
+
+    return nc_benchmark(
+        list_train_dataset,
+        list_test_dataset,
+        n_experiences=len(list_train_dataset),
+        task_labels=return_task_id,
+        shuffle=False,
+        class_ids_from_zero_in_each_exp=True,
+        one_dataset_per_exp=True,
+        train_transform=train_transform,
+        eval_transform=eval_transform,
+    )
