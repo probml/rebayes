@@ -1,68 +1,13 @@
 import os
 from pathlib import Path
 from functools import partial
-import pickle
 
 import jax
-import jax.random as jr
-import jax.numpy as jnp
-from jax import jit
-from jax.flatten_util import ravel_pytree
 import optax
 
 from rebayes.low_rank_filter.lofi import LoFiParams
 from demos.showdown.classification import classification_train as benchmark
 from demos.showdown.classification import hparam_tune_clf as hpt
-
-
-def load_data(fashion=False):
-    train_ds, val_ds, test_ds = benchmark.load_mnist_datasets(fashion)
-    X_train, y_train = jnp.array(train_ds['image']), jnp.array(train_ds['label'])
-    X_val, y_val = jnp.array(val_ds['image']), jnp.array(val_ds['label'])
-    X_test, y_test = jnp.array(test_ds['image']), jnp.array(test_ds['label'])
-    
-    # Reshape data
-    X_train = X_train.reshape(-1, 1, 28, 28, 1)
-    y_train_ohe = jax.nn.one_hot(y_train, 10) # one-hot encode labels
-    
-    dataset = {
-        'train': (X_train, y_train_ohe),
-        'val': (X_val, y_val),
-        'test': (X_test, y_test)
-    }
-    
-    return dataset
-
-
-def init_model(key=0, type='cnn', features=(400, 400, 10)):
-    if isinstance(key, int):
-        key = jr.PRNGKey(key)
-    
-    if type == 'cnn':
-        model = benchmark.CNN()
-    elif type == 'mlp':
-        model = benchmark.MLP(features)
-    else:
-        raise ValueError(f'Unknown model type: {type}')
-    
-    params = model.init(key, jnp.ones([1, 28, 28, 1]))['params']
-    flat_params, unflatten_fn = ravel_pytree(params)
-    apply_fn = lambda w, x: model.apply({'params': unflatten_fn(w)}, x).ravel()
-    
-    emission_mean_function=lambda w, x: jax.nn.softmax(apply_fn(w, x))
-    def emission_cov_function(w, x):
-        ps = emission_mean_function(w, x)
-        return jnp.diag(ps) - jnp.outer(ps, ps) + 1e-3 * jnp.eye(len(ps)) # Add diagonal to avoid singularity
-    
-    model_dict = {
-        'model': model,
-        'flat_params': flat_params,
-        'apply_fn': apply_fn,
-        'emission_mean_function': emission_mean_function,
-        'emission_cov_function': emission_cov_function,
-    }
-    
-    return model_dict
 
 
 def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
@@ -144,8 +89,8 @@ if __name__ == "__main__":
         output_path.mkdir(parents=True, exist_ok=True)
     print(f"Output path: {output_path}")
     
-    dataset = load_data(fashion=fashion) # load data
-    model_dict = init_model(type='cnn') # initialize model
+    dataset = benchmark.load_mnist_dataset(fashion=fashion) # load data
+    model_dict = benchmark.init_model(type='cnn') # initialize model
     
     lofi_ranks = (1, 5, 10, 20, 50)
     lofi_agents = {

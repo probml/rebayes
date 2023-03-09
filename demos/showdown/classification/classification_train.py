@@ -8,12 +8,12 @@ import tensorflow_datasets as tfds
 from flax import linen as nn
 import jax
 from jax import jit, vmap, lax
+from jax.flatten_util import ravel_pytree
 import jax.numpy as jnp
 import jax.random as jr
 import optax
 from jax_tqdm import scan_tqdm
 
-from avalanche.benchmarks.classic import SplitMNIST
 from rebayes.utils.avalanche import make_avalanche_data
 
 
@@ -46,12 +46,43 @@ class MLP(nn.Module):
             x = nn.relu(nn.Dense(feat)(x))
         x = nn.Dense(self.features[-1])(x)
         return x
+    
+
+def init_model(key=0, type='cnn', features=(400, 400, 10)):
+    if isinstance(key, int):
+        key = jr.PRNGKey(key)
+    
+    if type == 'cnn':
+        model = CNN()
+    elif type == 'mlp':
+        model = MLP(features)
+    else:
+        raise ValueError(f'Unknown model type: {type}')
+    
+    params = model.init(key, jnp.ones([1, 28, 28, 1]))['params']
+    flat_params, unflatten_fn = ravel_pytree(params)
+    apply_fn = lambda w, x: model.apply({'params': unflatten_fn(w)}, x).ravel()
+    
+    emission_mean_function=lambda w, x: jax.nn.softmax(apply_fn(w, x))
+    def emission_cov_function(w, x):
+        ps = emission_mean_function(w, x)
+        return jnp.diag(ps) - jnp.outer(ps, ps) + 1e-3 * jnp.eye(len(ps)) # Add diagonal to avoid singularity
+    
+    model_dict = {
+        'model': model,
+        'flat_params': flat_params,
+        'apply_fn': apply_fn,
+        'emission_mean_function': emission_mean_function,
+        'emission_cov_function': emission_cov_function,
+    }
+    
+    return model_dict
 
 
 # ------------------------------------------------------------------------------
 # Dataset Helper Functions
 
-def load_mnist_datasets(fashion=False):
+def load_mnist_dataset(fashion=False):
     """Load MNIST train and test datasets into memory."""
     dataset='mnist'
     if fashion:
@@ -67,8 +98,14 @@ def load_mnist_datasets(fashion=False):
     # Normalize pixel values
     for ds in [train_ds, val_ds, test_ds]:
         ds['image'] = jnp.float32(ds['image']) / 255.
+    
+    X_train, y_train = jnp.array(train_ds['image']), jnp.array(train_ds['label'])
+    X_val, y_val = jnp.array(val_ds['image']), jnp.array(val_ds['label'])
+    X_test, y_test = jnp.array(test_ds['image']), jnp.array(test_ds['label'])
+    
+    dataset = process_dataset(X_train, y_train, X_val, y_val, X_test, y_test)
         
-    return train_ds, val_ds, test_ds
+    return dataset
 
 
 def load_avalanche_mnist_dataset(avalanche_dataset, n_experiences, ntrain_per_dist, ntrain_per_batch, nval_per_batch, ntest_per_batch, seed=0, key=0):
@@ -86,7 +123,24 @@ def load_avalanche_mnist_dataset(avalanche_dataset, n_experiences, ntrain_per_di
     Xval, Yval = jnp.concatenate(Xval_sets), jnp.concatenate(Yval_sets)
     Xte, Yte = jnp.concatenate(Xte_sets), jnp.concatenate(Yte_sets)
     
-    return (Xtr, Ytr), (Xval, Yval), (Xte, Yte)
+    dataset = process_dataset(Xtr, Ytr, Xval, Yval, Xte, Yte)
+    
+    return dataset
+
+
+def process_dataset(Xtr, Ytr, Xval, Yval, Xte, Yte):
+    # Reshape data
+    Xtr = Xtr.reshape(-1, 1, 28, 28, 1)
+    Ytr_ohe = jax.nn.one_hot(Ytr, 10) # one-hot encode labels
+    
+    dataset = {
+        'train': (Xtr, Ytr_ohe),
+        'val': (Xval, Yval),
+        'test': (Xte, Yte)
+    }
+    
+    return dataset
+    
 
 
 # ------------------------------------------------------------------------------
