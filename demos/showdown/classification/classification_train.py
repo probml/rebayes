@@ -192,10 +192,17 @@ def evaluate_function(flat_params, apply_fn, X_test, y_test, loss_fn):
     return evals.mean()
     
 
-def eval_callback(bel, *args, evaluate_fn, **kwargs):
+def eval_callback(bel, *args, evaluate_fn, nan_val=-1e8, **kwargs):
     X, y, apply_fn = kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
     eval = evaluate_fn(bel.mean, apply_fn, X, y)
-    eval = jnp.where(jnp.isnan(eval), -1e8, eval)
+    eval = jnp.where(jnp.isnan(eval), nan_val, eval)
+    
+    return eval
+
+
+def osa_eval_callback(bel, y_pred, t, X, y, bel_pred, evaluate_fn, nan_val=-1e8, **kwargs):
+    eval = evaluate_fn(y_pred, y)
+    eval = jnp.where(jnp.isnan(eval), nan_val, eval)
     
     return eval
 
