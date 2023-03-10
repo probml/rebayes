@@ -64,7 +64,8 @@ def bbf_lofi(
         metric = callback(bel, **test_callback_kwargs)
     else:
         _, metric = estimator.scan(X_train, y_train, progress_bar=False, callback=callback, **test_callback_kwargs)
-
+        metric = metric.mean()
+        
     return metric
 
 
@@ -113,6 +114,7 @@ def bbf_ekf(
         metric = callback(bel, **test_callback_kwargs)
     else:
         _, metric = estimator.scan(X_train, y_train, progress_bar=False, callback=callback, **test_callback_kwargs)
+        metric = metric.mean()
 
     return metric
 
@@ -167,6 +169,8 @@ def bbf_rsgd(
         metric = callback(bel, **test_callback_kwargs)
     else:
         _, metric = estimator.scan(X_train, y_train, progress_bar=False, callback=callback, **test_callback_kwargs)
+        metric = metric.mean()
+        
     return metric
 
 
