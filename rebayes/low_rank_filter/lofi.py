@@ -31,7 +31,8 @@ class LoFiBel:
     nobs: int=None
     obs_noise_var: float=None
 
-    eta: CovMat=None
+    eta: float=None
+    Ups: CovMat=None
     gamma: float=None
     q: float=None
 
@@ -74,18 +75,19 @@ class RebayesLoFi(Rebayes):
         lofi_params: LoFiParams,
         method: str,
     ):
-        if method == 'orfit':
-            self.eta = None
-            self.gamma = None
-            self.q = None
-        elif method == 'lofi' or method == 'lofi_orth':
+        self.eta = None
+        self.Ups = None
+        self.gamma = None
+        self.q = None
+        
+        if method == 'lofi' or method == 'lofi_orth':
             if method == 'lofi_orth' and lofi_params.diagonal_covariance:
                 raise NotImplementedError("Orth-LoFi is not yet implemented for diagonal covariance.")
             
             initial_cov = model_params.initial_covariance
             self.eta = 1/initial_cov
             if lofi_params.diagonal_covariance:
-                self.eta = jnp.ones((len(model_params.initial_mean), 1)) * self.eta
+                self.Ups = jnp.ones((len(model_params.initial_mean), 1)) * self.eta
             self.gamma = model_params.dynamics_weights
             
             if not model_params.dynamics_covariance or (lofi_params.steady_state and not lofi_params.diagonal_covariance):
@@ -94,6 +96,7 @@ class RebayesLoFi(Rebayes):
                 self.q = model_params.dynamics_covariance
         else:
             raise ValueError(f"Unknown method {method}.")
+        
         self.method = method
         self.initial_mean = model_params.initial_mean
         self.nobs, self.obs_noise_var = 0, 0.0
@@ -109,23 +112,26 @@ class RebayesLoFi(Rebayes):
             initial_mean=self.model_params.initial_mean,
             mean=self.model_params.initial_mean, basis=self.U0, sigma=self.Sigma0,
             nobs=self.nobs, obs_noise_var=self.obs_noise_var,
-            eta=self.eta, gamma=self.gamma, q=self.q,
+            eta=self.eta, Ups=self.Ups, gamma=self.gamma, q=self.q,
         )
     
     @partial(jit, static_argnums=(0,))
     def predict_state(self, bel):
-        m0, m, U, Sigma, nobs, obs_noise_var, eta = \
-            bel.initial_mean, bel.mean, bel.basis, bel.sigma, bel.nobs, bel.obs_noise_var, bel.eta
+        m0, m, U, Sigma, nobs, obs_noise_var, eta, Ups_pred = \
+            bel.initial_mean, bel.mean, bel.basis, bel.sigma, bel.nobs, bel.obs_noise_var, bel.eta, bel.Ups
+            
         if self.method == 'orfit':
             return bel
         elif self.diagonal_covariance:
-            m_pred, U_pred, Sigma_pred, eta_pred = _lofi_diagonal_cov_predict(m0, m, U, Sigma, self.gamma, self.q, eta, self.alpha)
+            m_pred, U_pred, Sigma_pred, eta_pred, Ups_pred = \
+                _lofi_diagonal_cov_predict(m0, m, U, Sigma, self.gamma, self.q, eta, Ups_pred, self.alpha)
         else:
-            m_pred, U_pred, Sigma_pred, eta_pred = _lofi_spherical_cov_predict(m0, m, U, Sigma, self.gamma, self.q, eta, self.alpha, self.steady_state)
+            m_pred, U_pred, Sigma_pred, eta_pred = \
+                _lofi_spherical_cov_predict(m0, m, U, Sigma, self.gamma, self.q, eta, self.alpha, self.steady_state)
 
         return bel.replace(
             mean=m_pred, basis=U_pred, sigma=Sigma_pred,
-            nobs=nobs, obs_noise_var=obs_noise_var, eta=eta_pred
+            nobs=nobs, obs_noise_var=obs_noise_var, eta=eta_pred, Ups=Ups_pred,
         )
 
     @partial(jit, static_argnums=(0,))
@@ -138,8 +144,8 @@ class RebayesLoFi(Rebayes):
     
     @partial(jit, static_argnums=(0,))
     def predict_obs_cov(self, bel, u):
-        m, U, sigma, obs_noise_var, eta = \
-            bel.mean, bel.basis, bel.sigma, bel.obs_noise_var, bel.eta
+        m, U, sigma, obs_noise_var, eta, Ups = \
+            bel.mean, bel.basis, bel.sigma, bel.obs_noise_var, bel.eta, bel.Ups
         m_Y = lambda z: self.model_params.emission_mean_function(z, u)
         Cov_Y = lambda z: self.model_params.emission_cov_function(z, u)
         
@@ -158,13 +164,13 @@ class RebayesLoFi(Rebayes):
                 
             if self.diagonal_covariance:
                 W = U * sigma
-                D = jnp.linalg.pinv(jnp.eye(W.shape[1]) +  W.T @ (W/eta))
-                HW = H/eta @ W
-                V_epi = H @ H.T/eta - (HW @ D) @ (HW).T
+                G = jnp.linalg.pinv(jnp.eye(W.shape[1]) +  W.T @ (W/Ups))
+                HW = H/Ups @ W
+                V_epi = H @ H.T/Ups - (HW @ G) @ (HW).T
             else:
-                D = (sigma**2)/(eta * (eta + sigma**2))
+                G = (sigma**2)/(eta * (eta + sigma**2))
                 HU = H @ U
-                V_epi = H @ H.T/eta - (D * HU) @ (HU).T
+                V_epi = H @ H.T/eta - (G * HU) @ (HU).T
     
             Sigma_obs = V_epi + R
                     
@@ -172,8 +178,9 @@ class RebayesLoFi(Rebayes):
 
     @partial(jit, static_argnums=(0,))
     def update_state(self, bel, u, y):
-        m, U, Sigma, nobs, obs_noise_var, eta_cond = \
-            bel.mean, bel.basis, bel.sigma, bel.nobs, bel.obs_noise_var, bel.eta
+        m, U, Sigma, nobs, obs_noise_var, eta_cond, Ups_cond = \
+            bel.mean, bel.basis, bel.sigma, bel.nobs, bel.obs_noise_var, bel.eta, bel.Ups
+            
         if self.method == 'orfit':
             m_cond, U_cond, Sigma_cond = _orfit_condition_on(
                 m, U, Sigma, self.model_params.emission_mean_function, u, y, self.sv_threshold
@@ -185,8 +192,8 @@ class RebayesLoFi(Rebayes):
             )
             if self.method == 'lofi':
                 if self.diagonal_covariance:
-                    m_cond, U_cond, Sigma_cond, eta_cond = _lofi_diagonal_cov_condition_on(
-                        m, U, Sigma, eta_cond, self.model_params.emission_mean_function, 
+                    m_cond, U_cond, Sigma_cond, Ups_cond = _lofi_diagonal_cov_condition_on(
+                        m, U, Sigma, Ups_cond, self.model_params.emission_mean_function, 
                         self.model_params.emission_cov_function, u, y, self.sv_threshold, 
                         self.adaptive_variance, obs_noise_var
                     )
@@ -205,7 +212,7 @@ class RebayesLoFi(Rebayes):
 
         return bel.replace(
             mean=m_cond, basis=U_cond, sigma=Sigma_cond, nobs=nobs, 
-            obs_noise_var=obs_noise_var, eta=eta_cond
+            obs_noise_var=obs_noise_var, eta=eta_cond, Ups=Ups_cond
         )
 
 
@@ -389,14 +396,14 @@ def _lofi_spherical_cov_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, 
     return m_cond, U_cond, Sigma_cond, eta
 
 
-def _lofi_diagonal_cov_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=1.0):
+def _lofi_diagonal_cov_condition_on(m, U, Sigma, Ups, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=1.0):
     """Condition step of the low-rank filter with adaptive observation variance.
 
     Args:
         m (D_hid,): Prior mean.
         U (D_hid, D_mem,): Prior basis.
         Sigma (D_mem,): Prior singular values.
-        eta (float): Prior precision. 
+        Ups (D_hid): Prior precision. 
         y_cond_mean (Callable): Conditional emission mean function.
         y_cond_cov (Callable): Conditional emission covariance function.
         x (D_in,): Control input.
@@ -427,13 +434,13 @@ def _lofi_diagonal_cov_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x
     U_cond, U_extra = u[:, :U.shape[1]], u[:, U.shape[1]:]
     Sigma_cond, Sigma_extra = lamb[:U.shape[1]], lamb[U.shape[1]:]
     W_extra = Sigma_extra * U_extra
-    eta_cond = eta + jnp.einsum('ij,ij->i', W_extra, W_extra)[:, jnp.newaxis]
+    Ups_cond = Ups + jnp.einsum('ij,ij->i', W_extra, W_extra)[:, jnp.newaxis]
     
-    D = jnp.linalg.pinv(jnp.eye(W_tilde.shape[1]) + W_tilde.T @ (W_tilde/eta))
-    K = (H.T @ A) @ A.T/eta - (W_tilde/eta @ D) @ ((W_tilde/eta).T @ (H.T @ A) @ A.T)
+    G = jnp.linalg.pinv(jnp.eye(W_tilde.shape[1]) + W_tilde.T @ (W_tilde/Ups))
+    K = (H.T @ A) @ A.T/Ups - (W_tilde/Ups @ G) @ ((W_tilde/Ups).T @ (H.T @ A) @ A.T)
     m_cond = m + K @ (y - yhat)
     
-    return m_cond, U_cond, Sigma_cond, eta_cond
+    return m_cond, U_cond, Sigma_cond, Ups_cond
 
 
 def _lofi_estimate_noise(m, y_cond_mean, u, y, nobs, obs_noise_var, adaptive_variance=False):
@@ -485,9 +492,9 @@ def _lofi_spherical_cov_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0, stead
         eta_pred (float): Predicted precision.
     """
     # Mean prediction
-    D = (Sigma**2)/((1+alpha)*eta + Sigma**2)
+    G = (Sigma**2)/((1+alpha)*eta + Sigma**2)
     e = (m0 - m)
-    K = e - (D * U) @ (U.T @ e)
+    K = e - (G * U) @ (U.T @ e)
     m_pred = gamma*m + gamma*alpha/(1+alpha)*K
     
     # Covariance prediction
@@ -509,7 +516,7 @@ def _lofi_spherical_cov_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0, stead
     return m_pred, U_pred, Sigma_pred, eta_pred
 
 
-def _lofi_diagonal_cov_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0, steady_state=False):
+def _lofi_diagonal_cov_predict(m0, m, U, Sigma, gamma, q, eta, Ups, alpha=0.0, steady_state=False):
     """Predict step of the generalized low-rank filter algorithm.
 
     Args:
@@ -519,7 +526,8 @@ def _lofi_diagonal_cov_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0, steady
         Sigma (D_mem,): Prior singluar values.
         gamma (float): Dynamics decay factor.
         q (float): Dynamics noise factor.
-        eta (D_hid,): Prior precision.
+        eta (float): Prior precision.
+        Ups (D_hid,): Prior diagonal covariance.
         alpha (float): Covariance inflation factor.
 
     Returns:
@@ -530,22 +538,27 @@ def _lofi_diagonal_cov_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0, steady
     """
     # Mean prediction
     W = U * Sigma
-    D = jnp.linalg.pinv(jnp.eye(W.shape[1]) +  (W.T @ (W/eta))/(1+alpha))
+    Ups_hat = Ups/(1+alpha) + alpha*eta/(1+alpha)
+    G = jnp.linalg.pinv(jnp.eye(W.shape[1]) +  (W.T @ (W/Ups_hat))/(1+alpha))
     e = (m0 - m)
-    K = e - (1/(1+alpha)) * (W/eta @ D) @ (W.T @ e)
+    k1 = eta/Ups_hat
+    k2 = (e - (1/(1+alpha)) * (W @ G) @ ((W/Ups_hat).T @ e))
+    K = eta/Ups_hat.ravel() * (e - (1/(1+alpha)) * (W @ G) @ ((W/Ups_hat).T @ e))
     m_pred = gamma*m + gamma*alpha/(1+alpha) * K
     
     # Covariance prediction
-    eta_pred = 1/(gamma**2/eta + q)
+    eta_pred = eta/(gamma**2 + q*eta)
+    Ups_pred = 1/(gamma**2/Ups + q)
+    D = 1/(gamma**2 + q/(1+alpha)*(Ups + alpha*eta))
     chol_factor = jnp.linalg.cholesky(
         jnp.linalg.pinv(
-            (1 + alpha) * jnp.eye(W.shape[1]) + W.T @ (1/(gamma**2/q + eta) * W) 
+            (1 + alpha)*jnp.eye(W.shape[1]) + W.T @ (q*D*W)
         )
     )
-    W_pred = gamma/q * (1/(gamma**2/q + eta) * W) @ chol_factor
+    W_pred = gamma*(D*W) @ chol_factor
     U_pred, Sigma_pred, _ = jnp.linalg.svd(W_pred, full_matrices=False)
     
-    return m_pred, U_pred, Sigma_pred, eta_pred
+    return m_pred, U_pred, Sigma_pred, eta_pred, Ups_pred
     
 
 def orthogonal_recursive_fitting(
