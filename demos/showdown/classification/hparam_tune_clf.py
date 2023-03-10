@@ -160,9 +160,6 @@ def bbf_rsgd(
         dim_output=dim_output,
         n_inner=1,
     )
-
-    bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
-    metric = callback(bel, **test_callback_kwargs)
     
     if callback_at_end:
         bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
