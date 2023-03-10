@@ -136,17 +136,9 @@ def bbf_rsgd(
     X_train, y_train = train
     X_test, y_test = test
 
-    tx = optax.sgd(learning_rate=jnp.exp(log_lr).item())
+    tx = optax.adam(learning_rate=jnp.exp(log_lr).item())
 
     test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
-    rsgd_state = rsgd.FifoTrainState.create(
-        apply_fn=apply_fn,
-        params=flat_params,
-        tx=tx,
-        buffer_size=buffer_size,
-        dim_features=[1, 28, 28, 1],
-        dim_output=dim_output,
-    )
     
     @partial(jit, static_argnames=("applyfn",))
     def lossfn_fifo(params, counter, X, y, applyfn):
@@ -155,17 +147,26 @@ def bbf_rsgd(
         nll = nll.sum()
         loss = (nll * counter).sum() / counter.sum()
         return loss
+    
+    estimator = rsgd.FifoSGD(
+        lossfn_fifo,
+        apply_fn=apply_fn,
+        init_params=flat_params,
+        tx=tx,
+        buffer_size=buffer_size,
+        dim_features=[1, 28, 28, 1],
+        dim_output=dim_output,
+        n_inner=1,
+    )
 
-    estimator = rsgd.FSGD(lossfn_fifo, n_inner=1)
-
-    bel, _ = estimator.scan(X_train, y_train, progress_bar=False, bel=rsgd_state)
+    bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
     metric = callback(bel, **test_callback_kwargs)
     
     if callback_at_end:
-        bel, _ = estimator.scan(X_train, y_train, progress_bar=False, bel=rsgd_state)
+        bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
         metric = callback(bel, **test_callback_kwargs)
     else:
-        _, metric = estimator.scan(X_train, y_train, progress_bar=False, bel=rsgd_state, callback=callback, **test_callback_kwargs)
+        _, metric = estimator.scan(X_train, y_train, progress_bar=False, callback=callback, **test_callback_kwargs)
     return metric
 
 
@@ -275,15 +276,7 @@ def build_estimator(init_mean, apply_fn, hparams, emission_mean_fn, emission_cov
             estimator = lofi.RebayesLoFi(params, method=method, **kwargs)
         bel = None
     else:
-        tx = optax.sgd(learning_rate=hparams["learning_rate"])
-        bel = rsgd.FifoTrainState.create(
-            apply_fn=apply_fn,
-            params=init_mean,
-            tx=tx,
-            buffer_size=kwargs["buffer_size"],
-            dim_features=[1, 28, 28, 1],
-            dim_output=kwargs["dim_output"],
-        )
+        tx = optax.adam(learning_rate=hparams["learning_rate"])
         
         @partial(jit, static_argnames=("applyfn",))
         def lossfn_fifo(params, counter, X, y, applyfn):
@@ -293,6 +286,15 @@ def build_estimator(init_mean, apply_fn, hparams, emission_mean_fn, emission_cov
             loss = (nll * counter).sum() / counter.sum()
             return loss
         
-        estimator = rsgd.FSGD(lossfn_fifo, n_inner=1)
+        estimator = rsgd.FifoSGD(
+            lossfn_fifo,
+            apply_fn=apply_fn,
+            init_params=init_mean,
+            tx=tx,
+            buffer_size=kwargs["buffer_size"],
+            dim_features=[1, 28, 28, 1],
+            dim_output=kwargs["dim_output"],
+            n_inner=1,
+        )
         
-    return estimator, bel
+    return estimator

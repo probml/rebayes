@@ -62,7 +62,7 @@ def train_agent(
     best_hparams = hpt.get_best_params(optimizer, method=agent_type)
     print(f"Best target: {optimizer.max['target']}")
     
-    estimator, bel = hpt.build_estimator(
+    estimator = hpt.build_estimator(
         model_dict['flat_params'],
         model_dict['apply_fn'],
         best_hparams,
@@ -82,7 +82,6 @@ def train_agent(
             model_dict['apply_fn'],
             estimator,
             callback=per_batch_miscl_callback,
-            bel=bel,
             n_iter=5,
         )
     )

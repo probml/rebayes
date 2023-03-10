@@ -44,7 +44,7 @@ def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
     best_hparams = hpt.get_best_params(optimizer, method=agent_type)
     print(f"Best target: {optimizer.max['target']}")
     
-    estimator, bel = hpt.build_estimator(
+    estimator = hpt.build_estimator(
         model_dict['flat_params'],
         model_dict['apply_fn'],
         best_hparams,
@@ -56,14 +56,12 @@ def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
     
     nll_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_nll)
     nll_mean, nll_std = benchmark.mnist_eval_agent(
-        dataset['train'], dataset['test'], model_dict['apply_fn'], callback=nll_callback,
-        agent=estimator, bel_init=bel,
+        dataset['train'], dataset['test'], model_dict['apply_fn'], callback=nll_callback, agent=estimator
     )
     
     miscl_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_miscl)
     miscl_mean, miscl_std = benchmark.mnist_eval_agent(
-        dataset['train'], dataset['test'], model_dict['apply_fn'], callback=miscl_callback,
-        agent=estimator, bel_init=bel,
+        dataset['train'], dataset['test'], model_dict['apply_fn'], callback=miscl_callback, agent=estimator
     )
     
     nll_result = jax.block_until_ready({
