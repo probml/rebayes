@@ -66,6 +66,9 @@ def bbf_lofi(
         _, metric = estimator.scan(X_train, y_train, progress_bar=False, callback=callback, **test_callback_kwargs)
         metric = metric.mean()
         
+    if jnp.isnan(metric) or jnp.isinf(metric):
+        metric = -1e8
+        
     return metric
 
 
@@ -115,6 +118,9 @@ def bbf_ekf(
     else:
         _, metric = estimator.scan(X_train, y_train, progress_bar=False, callback=callback, **test_callback_kwargs)
         metric = metric.mean()
+        
+    if jnp.isnan(metric) or jnp.isinf(metric):
+        metric = -1e8
 
     return metric
 
@@ -167,6 +173,9 @@ def bbf_rsgd(
     else:
         _, metric = estimator.scan(X_train, y_train, progress_bar=False, callback=callback, **test_callback_kwargs)
         metric = metric.mean()
+        
+    if jnp.isnan(metric) or jnp.isinf(metric):
+        metric = -1e6
         
     return metric
 
