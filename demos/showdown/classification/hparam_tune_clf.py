@@ -286,7 +286,7 @@ def build_estimator(init_mean, apply_fn, hparams, emission_mean_fn, emission_cov
             estimator = lofi.RebayesLoFi(params, method=method, **kwargs)
         bel = None
     else:
-        tx = optax.adam(learning_rate=hparams["learning_rate"])
+        tx = optax.sgd(learning_rate=hparams["learning_rate"])
         
         @partial(jit, static_argnames=("applyfn",))
         def lossfn_fifo(params, counter, X, y, applyfn):
