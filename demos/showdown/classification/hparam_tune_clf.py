@@ -138,7 +138,7 @@ def bbf_rsgd(
     X_train, y_train = train
     X_test, y_test = test
 
-    tx = optax.adam(learning_rate=jnp.exp(log_lr).item())
+    tx = optax.sgd(learning_rate=jnp.exp(log_lr).item())
 
     test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
     
