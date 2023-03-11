@@ -11,6 +11,27 @@ from rebayes.sgd_filter import replay_sgd as rsgd
 from jax.flatten_util import ravel_pytree
 
 
+class CNN(nn.Module):
+    n_out: int = 1
+    activation: Callable = nn.elu
+
+    @nn.compact
+    def __call__(self, x):
+        x = x.reshape((-1, 28, 28, 1))
+        x = nn.Conv(features=32, kernel_size=(3, 3))(x)
+        x = self.activation(x)
+        x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
+        x = nn.Conv(features=64, kernel_size=(3, 3))(x)
+        x = self.activation(x)
+        x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
+        x = x.reshape((x.shape[0], -1))  # flatten
+        x = nn.Dense(features=128)(x)
+        x = self.activation(x)
+        x = nn.Dense(features=self.n_out)(x)
+        x = x.squeeze(-1)
+        return x
+
+
 class MLP(nn.Module):
     n_out: int = 1
     n_hidden: int = 100
@@ -92,7 +113,7 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
 
     pbounds = {
         "log_init_cov": (-10, 0),
-        "dynamics_weights": (0, 1.0), # Change to log-space close to 1.0
+        "dynamics_weights": (0.7, 1.0), # Change to log-space close to 1.0
         "log_emission_cov": (-80, 0.0),
         "dynamics_log_cov": (-80, 0.0),
     }
@@ -117,9 +138,9 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
     # Low-rank filter
     pbounds_lofi = pbounds.copy()
     pbounds_lofi.pop("dynamics_log_cov")
-    pbounds_lofi["dynamics_covariance"] = None # If steady-state
-    # pbounds_lofi["dynamics_covariance"] = (0.0, 1.0)
-    # pbounds_lofi["log_inflation"] = (-40, 0.0)
+    # pbounds_lofi["dynamics_covariance"] = None # If steady-state
+    pbounds_lofi["dynamics_covariance"] = (0.0, 1.0)
+    pbounds_lofi["log_inflation"] = (-40, 0.0)
 
     method = "lofi"
     params_lofi = lofi.LoFiParams(
@@ -170,7 +191,7 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
     # Replay-buffer SGD
     pbounds_rsgd = {
         "learning_rate": (1e-6, 1e-2),
-        "n_inner": (1, 2),
+        "n_inner": (1, 1),
     }
 
     method = "sgd-rb"
@@ -243,7 +264,7 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
 if __name__ == "__main__":
     import os
     # output_path = "/home/gerardoduran/documents/rebayes/demos/showdown/output/rotating-mnist"
-    ranks = [2, 5, 10, 20, 50, 100]
+    ranks = [2, 5, 10, 20, 50]
     output_path = os.environ.get("REBAYES_OUTPUT")
     if output_path is None:
         output_path = "/tmp/rebayes"
@@ -256,7 +277,8 @@ if __name__ == "__main__":
         dataset_name = f"rotating-mnist-2-mlp-rank{rank:02}"
         print(f"Dataset name: {dataset_name}")
 
-        data = load_data(sort_by_angle=False)
-        model = MLP(n_out=1, n_hidden=100)
+        data = load_data(sort_by_angle=True)
+        # model = MLP(n_out=1, n_hidden=100)
+        model = CNN(n_out=1)
         key = jax.random.PRNGKey(314)
         train_agents_general(key, model, data, dataset_name, output_path, rank)
