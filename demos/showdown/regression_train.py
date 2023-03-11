@@ -259,11 +259,21 @@ def train_sgd_agent(params, model, method, datasets,
         dim_output=1,
     )
 
-    agent = rsgd.FSGD(lossfn_rmse_fifo, n_inner=n_inner)
+    agent = rsgd.FifoSGD(
+        lossfn_rmse_fifo,
+        apply_fn=model.apply,
+        init_params=params,
+        tx=optax.adam(learning_rate),
+        buffer_size=dim_rank,
+        dim_features=X_train.shape[1],
+        dim_output=1,
+        n_inner=n_inner
+    )
+
 
     time_init = time()
     bel, output = eval_sgd_agent(
-        train, test, part_apply_fn_sgd, eval_callback, agent, bel_init,
+        train, test, part_apply_fn_sgd, eval_callback, agent, 
     )
     time_end = time()
 
@@ -478,6 +488,8 @@ def train_agents(key, dim_rank, dataset_name, path, output_path, ix):
 
     # -------------------------------------------------------------------------
     # Extended Kalman Filter
+    # TODO: Move to individual function.
+    #    Run separately from "low-rank" methods.
     methods = ["fdekf", "vdekf", "fcekf"]
     for method in methods:
         res, apply_fn = train_ekf_agent(
@@ -494,25 +506,45 @@ def train_agents(key, dim_rank, dataset_name, path, output_path, ix):
 
     # -------------------------------------------------------------------------
     # Low-rank filter
-    methods = ["lofi_orth", "lofi"]
+    method = "lofi"
     params_lofi = lofi.LoFiParams(
         memory_size=dim_rank,
         sv_threshold=0,
         steady_state=True,
     )
-    for method in methods:
-        res, apply_fn, hparams = train_lofi_agent(
-            params, params_lofi, model, method, dataset, pbounds_lofi,
-            train_callback, eval_callback,
-            optimizer_eval_kwargs,
-        )
+    res, apply_fn, hparams = train_lofi_agent(
+        params, params_lofi, model, method, dataset, pbounds_lofi,
+        train_callback, eval_callback,
+        optimizer_eval_kwargs,
+    )
 
-        metric_final = res["output"]["test"][-1]
-        print(method)
-        print(f"{metric_final:=0.4f}")
-        print("-" * 80)
-        store_results(res, f"{dataset_name}_{method}_{ix}", output_path)
+    metric_final = res["output"]["test"][-1]
+    print(method)
+    print(f"{metric_final:=0.4f}")
+    print("-" * 80)
+    store_results(res, f"{dataset_name}_{method}_{ix}", output_path)
 
+    # Diagonal low-rank filter
+    method = "lofi"
+    params_lofi = lofi.LoFiParams(
+        memory_size=dim_rank,
+        sv_threshold=0,
+        steady_state=True,
+        diagonal_covariance=True,
+    )
+    res, apply_fn, hparams = train_lofi_agent(
+        params, params_lofi, model, method, dataset, pbounds_lofi,
+        train_callback, eval_callback,
+        optimizer_eval_kwargs,
+    )
+    method = "lofi_diag"
+    res["method"] = method
+
+    metric_final = res["output"]["test"][-1]
+    print(method)
+    print(f"{metric_final:=0.4f}")
+    print("-" * 80)
+    store_results(res, f"{dataset_name}_{method}_{ix}", output_path)
 
     # -------------------------------------------------------------------------
     # Low-rank variational Gaussian approximation (LRVGA)
@@ -544,8 +576,6 @@ if __name__ == "__main__":
     # TOODO: change to $REBAYES_OUTPUT, $REBAYES_DATASET
     output_path = "/home/gerardoduran/documents/rebayes/demos/showdown/output/checkpoints"
     dataset_path = "/home/gerardoduran/documents/external/DropoutUncertaintyExps/UCI_Datasets"
-
-    # _, dataset_name = sys.argv
     
     random_state = 314
     key = jax.random.PRNGKey(314)
