@@ -92,9 +92,9 @@ def load_mnist_dataset(fashion=False):
     ds_builder = tfds.builder(dataset)
     ds_builder.download_and_prepare()
     
-    train_ds = tfds.as_numpy(ds_builder.as_dataset(split='train', batch_size=-1))
-    val_ds = tfds.as_numpy(ds_builder.as_dataset(split='test[80%:]', batch_size=-1))
-    test_ds = tfds.as_numpy(ds_builder.as_dataset(split='test[:80%]', batch_size=-1))
+    train_ds = tfds.as_numpy(ds_builder.as_dataset(split='train[2%:]', batch_size=-1))
+    val_ds = tfds.as_numpy(ds_builder.as_dataset(split='train[:2%]', batch_size=-1))
+    test_ds = tfds.as_numpy(ds_builder.as_dataset(split='test', batch_size=-1))
     
     # Normalize pixel values
     for ds in [train_ds, val_ds, test_ds]:
@@ -104,7 +104,7 @@ def load_mnist_dataset(fashion=False):
     X_val, y_val = jnp.array(val_ds['image']), jnp.array(val_ds['label'])
     X_test, y_test = jnp.array(test_ds['image']), jnp.array(test_ds['label'])
     
-    dataset = process_dataset(X_train, y_train, X_val, y_val, X_test, y_test)
+    dataset = process_dataset(X_train, y_train, X_val, y_val, X_test, y_test, shuffle=True)
         
     return dataset
 
@@ -163,10 +163,18 @@ def load_permuted_mnist_dataset(n_tasks, ntrain_per_task, nval_per_task, ntest_p
     return result
 
 
-def process_dataset(Xtr, Ytr, Xval, Yval, Xte, Yte):
+def process_dataset(Xtr, Ytr, Xval, Yval, Xte, Yte, shuffle=False, key=0):
+    if isinstance(key, int):
+        key = jr.PRNGKey(key)
+        
     # Reshape data
     Xtr = Xtr.reshape(-1, 1, 28, 28, 1)
     Ytr_ohe = jax.nn.one_hot(Ytr, 10) # one-hot encode labels
+    
+    # Shuffle data
+    if shuffle:
+        idx = jr.permutation(key, jnp.arange(len(Xtr)))
+        Xtr, Ytr_ohe = Xtr[idx], Ytr_ohe[idx]
     
     dataset = {
         'train': (Xtr, Ytr_ohe),
@@ -264,7 +272,7 @@ def smnist_evaluate_accuracy(flat_params, apply_fn, X_test, y_test):
 # Model Evaluation
 
 def mnist_eval_agent(
-    train, test, apply_fn, callback, agent, bel_init=None, n_iter=5, n_steps=1_000,
+    train, test, apply_fn, callback, agent, bel_init=None, n_iter=20, n_steps=500,
 ):
     X_train, y_train = train
     X_test, y_test = test

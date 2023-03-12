@@ -33,6 +33,7 @@ def bbf_lofi(
     apply_fn,
     lofi_params,
     method="lofi",
+    inflation="bayesian",
     callback_at_end=True,
 ):
     """
@@ -57,7 +58,7 @@ def bbf_lofi(
         dynamics_covariance_inflation_factor=alpha,
     )
 
-    estimator = lofi.RebayesLoFi(params_rebayes, lofi_params, method=method)
+    estimator = lofi.RebayesLoFi(params_rebayes, lofi_params, method=method, inflation=inflation)
 
     if callback_at_end:
         bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
@@ -221,7 +222,7 @@ def create_optimizer(
             apply_fn=apply_fn,
             method=method,
             callback_at_end=callback_at_end,
-            **kwargs # Must include lofi_params if method is lofi
+            **kwargs # Must include lofi_params and inflation if method is lofi
         )
     else:
         bbf_partial = partial(
