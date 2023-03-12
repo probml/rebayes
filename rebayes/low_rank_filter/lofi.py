@@ -74,6 +74,7 @@ class RebayesLoFi(Rebayes):
         model_params: RebayesParams,
         lofi_params: LoFiParams,
         method: str,
+        inflation: str='bayesian',
     ):
         self.eta = None
         self.Ups = None
@@ -98,6 +99,9 @@ class RebayesLoFi(Rebayes):
             raise ValueError(f"Unknown method {method}.")
         
         self.method = method
+        if inflation not in ('bayesian', 'simple', 'hybrid'):
+            raise ValueError(f"Unknown inflation method {inflation}.")
+        self.inflation = inflation
         self.initial_mean = model_params.initial_mean
         self.nobs, self.obs_noise_var = 0, 0.0
         self.model_params = model_params
@@ -124,7 +128,7 @@ class RebayesLoFi(Rebayes):
             return bel
         elif self.diagonal_covariance:
             m_pred, U_pred, Sigma_pred, eta_pred, Ups_pred = \
-                _lofi_diagonal_cov_predict(m0, m, U, Sigma, self.gamma, self.q, eta, Ups_pred, self.alpha)
+                _lofi_diagonal_cov_predict(m0, m, U, Sigma, self.gamma, self.q, eta, Ups_pred, self.alpha, inflation=self.inflation)
         else:
             m_pred, U_pred, Sigma_pred, eta_pred = \
                 _lofi_spherical_cov_predict(m0, m, U, Sigma, self.gamma, self.q, eta, self.alpha, self.steady_state)
@@ -516,7 +520,7 @@ def _lofi_spherical_cov_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0, stead
     return m_pred, U_pred, Sigma_pred, eta_pred
 
 
-def _lofi_diagonal_cov_predict(m0, m, U, Sigma, gamma, q, eta, Ups, alpha=0.0, steady_state=False):
+def _lofi_diagonal_cov_predict(m0, m, U, Sigma, gamma, q, eta, Ups, alpha=0.0, steady_state=False, inflation='bayesian'):
     """Predict step of the generalized low-rank filter algorithm.
 
     Args:
@@ -538,17 +542,23 @@ def _lofi_diagonal_cov_predict(m0, m, U, Sigma, gamma, q, eta, Ups, alpha=0.0, s
     """
     # Mean prediction
     W = U * Sigma
-    Ups_hat = Ups/(1+alpha) + alpha*eta/(1+alpha)
-    G = jnp.linalg.pinv(jnp.eye(W.shape[1]) +  (W.T @ (W/Ups_hat))/(1+alpha))
-    e = (m0 - m)
-    k1 = eta/Ups_hat
-    k2 = (e - (1/(1+alpha)) * (W @ G) @ ((W/Ups_hat).T @ e))
-    K = eta/Ups_hat.ravel() * (e - (1/(1+alpha)) * (W @ G) @ ((W/Ups_hat).T @ e))
-    m_pred = gamma*m + gamma*alpha/(1+alpha) * K
+    if inflation == 'bayesian':
+        Ups_hat = Ups/(1+alpha) + alpha*eta/(1+alpha)
+        G = jnp.linalg.pinv(jnp.eye(W.shape[1]) +  (W.T @ (W/Ups_hat))/(1+alpha))
+        e = (m0 - m)
+        K = eta/Ups_hat.ravel() * (e - (1/(1+alpha)) * (W @ G) @ ((W/Ups_hat).T @ e))
+        m_pred = gamma*m + gamma*alpha/(1+alpha) * K
+    elif inflation == 'simple':
+        m_pred = gamma*m
+        Ups_hat = Ups/(1+alpha)
+        eta = 0.0
+    elif inflation == 'hybrid':
+        m_pred = gamma*m
+        Ups_hat = Ups/(1+alpha) + alpha*eta/(1+alpha)
     
     # Covariance prediction
     eta_pred = eta/(gamma**2 + q*eta)
-    Ups_pred = 1/(gamma**2/Ups + q)
+    Ups_pred = 1/(gamma**2/Ups_hat + q)
     D = 1/(gamma**2 + q/(1+alpha)*(Ups + alpha*eta))
     chol_factor = jnp.linalg.cholesky(
         jnp.linalg.pinv(
