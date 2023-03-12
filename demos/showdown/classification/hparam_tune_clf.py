@@ -19,7 +19,7 @@ def apply(flat_params, x, model, unflatten_fn):
 
 
 def bbf_lofi(
-    init_cov,
+    log_init_cov,
     log_dynamics_weights,
     log_dynamics_cov,
     log_alpha,
@@ -43,7 +43,7 @@ def bbf_lofi(
 
     dynamics_weights = 1 - jnp.exp(log_dynamics_weights).item()
     dynamics_covariance = jnp.exp(log_dynamics_cov).item()
-    initial_covariance = init_cov
+    initial_covariance = jnp.exp(log_init_cov).item()
     alpha = jnp.exp(log_alpha).item()
 
     test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
@@ -73,7 +73,7 @@ def bbf_lofi(
 
 
 def bbf_ekf(
-    init_cov,
+    log_init_cov,
     log_dynamics_weights,
     log_dynamics_cov,
     log_alpha,
@@ -96,7 +96,7 @@ def bbf_ekf(
 
     dynamics_weights = 1 - jnp.exp(log_dynamics_weights).item()
     dynamics_covariance = jnp.exp(log_dynamics_cov).item()
-    initial_covariance = init_cov
+    initial_covariance = jnp.exp(log_init_cov).item()
     alpha = jnp.exp(log_alpha).item()
 
     test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
@@ -249,7 +249,7 @@ def get_best_params(optimizer, method):
     max_params = optimizer.max["params"].copy()
 
     if "sgd" not in method:
-        initial_covariance = max_params["init_cov"]
+        initial_covariance = np.exp(max_params["log_init_cov"])
         dynamics_weights = 1 - np.exp(max_params["log_dynamics_weights"])
         dynamics_covariance = np.exp(max_params["log_dynamics_cov"])
         alpha = np.exp(max_params["log_alpha"])
