@@ -75,7 +75,7 @@ def make_avalanche_datasets_pytorch(dataset, ntrain_per_dist, ntrain_per_batch, 
 
     train_sets = []
     test_sets = []
-    for exp in trange(nexperiences, desc='Translating avalanche dataset to pytorch...'):
+    for exp in range(nexperiences):
         key, *subkeys = jr.split(key, 3)
         ds = train_stream[exp].dataset
         train_ndx = jr.choice(subkeys[0], len(ds), shape=(ntrain_per_dist,), replace=False)
