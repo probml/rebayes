@@ -13,33 +13,36 @@ from demos.showdown.classification import hparam_tune_clf as hpt
 def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
     print(f'Training {agent_type} agent...')
     X_train, y_train = dataset['train']
-    train = (X_train[:1000], y_train[:1000])
+    train = (X_train[:500], y_train[:500])
     model, emission_mean_function, emission_cov_function = \
         model_dict['model'], model_dict['emission_mean_function'], model_dict['emission_cov_function']
     
     if 'sgd' in agent_type:
         pbounds = {
-            'log_lr': (-8.0, 0.0),
+            'learning_rate': (1e-6, 1e-2),
         }
+        init_points, n_iter = 10, 15
     else:
         pbounds={
-            'log_init_cov': (-10, 5.0),
+            'log_init_cov': (-10, 0.0),
             'log_dynamics_weights': (-90, -90),
             'log_dynamics_cov': (-90, -90),
-            'log_alpha': (-40, 0),
+            'log_alpha': (-40, -10),
         }
         if 'lofi' in agent_type:
             agent_type = 'lofi'
+        init_points, n_iter = 20, 25
     
     ll_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_ll)
     optimizer, *_ = hpt.create_optimizer(
         model, pbounds, 314, train, dataset['val'], emission_mean_function,
-        emission_cov_function, callback=ll_callback, method=agent_type, verbose=1, **kwargs
+        emission_cov_function, callback=ll_callback, method=agent_type, verbose=1, 
+        callback_at_end=False, **kwargs
     )
     
     optimizer.maximize(
-        init_points=20,
-        n_iter=25,
+        init_points=init_points,
+        n_iter=n_iter,
     )
     best_hparams = hpt.get_best_params(optimizer, method=agent_type)
     print(f"Best target: {optimizer.max['target']}")
@@ -54,27 +57,18 @@ def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
         **kwargs,
     )
     
-    nll_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_nll)
-    nll_mean, nll_std = benchmark.mnist_eval_agent(
-        dataset['train'], dataset['test'], model_dict['apply_fn'], callback=nll_callback, agent=estimator
-    )
-    
     miscl_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_miscl)
     miscl_mean, miscl_std = benchmark.mnist_eval_agent(
         dataset['train'], dataset['test'], model_dict['apply_fn'], callback=miscl_callback, agent=estimator
     )
-    
-    nll_result = jax.block_until_ready({
-        'mean': nll_mean,
-        'std': nll_std,
-    })
+
     miscl_result = jax.block_until_ready({
         'mean': miscl_mean,
         'std': miscl_std,
     })
     print('\n')
     
-    return nll_result, miscl_result
+    return miscl_result
 
 
 if __name__ == "__main__":
@@ -90,14 +84,14 @@ if __name__ == "__main__":
     dataset = benchmark.load_mnist_dataset(fashion=fashion) # load data
     model_dict = benchmark.init_model(type='cnn') # initialize model
     
-    lofi_ranks = (1, 5, 10, 20, 50)
+    lofi_ranks = (2, 5, 10, 20, 50)
     lofi_agents = {
         f'lofi-{rank}': {
-            LoFiParams(memory_size=rank, diagonal_covariance=False)
+            'lofi_params': LoFiParams(memory_size=rank, diagonal_covariance=True)
         } for rank in lofi_ranks
     }
     
-    sgd_ranks = (1, 5, 10, 20, 50)
+    sgd_ranks = (1, 10)
     sgd_agents = {
         f'sgd-rb-{rank}': {
             'loss_fn': optax.softmax_cross_entropy,
@@ -108,28 +102,22 @@ if __name__ == "__main__":
     
     agents = {
         **sgd_agents,
-        'fdekf': None,
-        'vdekf': None,
-        **lofi_agents,
+        # 'fdekf': None,
+        # 'vdekf': None,
+        # **lofi_agents,
     }
     
     nll_results, miscl_results = {}, {}
     for agent, kwargs in agents.items():
         if kwargs is None:
-            nll, miscl = train_agent(model_dict, dataset, agent_type=agent)
+            miscl = train_agent(model_dict, dataset, agent_type=agent)
         else:
-            nll, miscl = train_agent(model_dict, dataset, agent_type=agent, **kwargs)
-        benchmark.store_results(nll, f'{agent}_mnist_nll', output_path)
+            miscl = train_agent(model_dict, dataset, agent_type=agent, **kwargs)
         benchmark.store_results(miscl, f'{agent}_mnist_miscl', output_path)
-        nll_results[agent] = nll
         miscl_results[agent] = miscl
         
     # Store results and plot
-    benchmark.store_results(nll_results, 'mnist_nll', output_path)
     benchmark.store_results(miscl_results, 'mnist_miscl', output_path)
-    
-    nll_title = "Test-set average NLL"
-    benchmark.plot_results(nll_results, "mnist_nll", output_path, ylim=(0.5, 2.5), title=nll_title)
     
     miscl_title = "Test-set average misclassification rate"
     benchmark.plot_results(miscl_results, "mnist_miscl", output_path, ylim=(0.0, 0.8), title=miscl_title)
