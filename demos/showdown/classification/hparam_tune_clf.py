@@ -240,6 +240,7 @@ def create_optimizer(
         pbounds=bounds,
         random_state=random_state,
         verbose=verbose,
+        allow_duplicate_points=True,
     )
 
     return optimizer, apply_fn, n_features
