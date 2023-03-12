@@ -126,7 +126,7 @@ def bbf_ekf(
 
 
 def bbf_rsgd(
-    log_lr,
+    learning_rate,
     # Specify before running
     train,
     test,
@@ -144,7 +144,7 @@ def bbf_rsgd(
     X_train, y_train = train
     X_test, y_test = test
 
-    tx = optax.sgd(learning_rate=jnp.exp(log_lr).item())
+    tx = optax.sgd(learning_rate=learning_rate)
 
     test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
     
@@ -262,7 +262,7 @@ def get_best_params(optimizer, method):
         }
     else:
         hparams = {
-            "learning_rate": np.exp(max_params["log_lr"]),
+            "learning_rate": max_params["learning_rate"],
         }
 
     return hparams
