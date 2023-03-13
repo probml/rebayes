@@ -27,7 +27,7 @@ def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
             'log_init_cov': (-10, 0.0),
             'log_dynamics_weights': (-90, -90),
             'log_dynamics_cov': (-90, -90),
-            'log_alpha': (-40, -10),
+            'log_alpha': (-40, 0),
         }
         if 'lofi' in agent_type:
             agent_type = 'lofi'
@@ -59,7 +59,8 @@ def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
     
     miscl_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_miscl)
     miscl_mean, miscl_std = benchmark.mnist_eval_agent(
-        dataset['train'], dataset['test'], model_dict['apply_fn'], callback=miscl_callback, agent=estimator
+        dataset['train'], dataset['test'], model_dict['apply_fn'], callback=miscl_callback, agent=estimator,
+        n_iter=20
     )
 
     miscl_result = jax.block_until_ready({
@@ -77,21 +78,22 @@ if __name__ == "__main__":
     output_path = os.environ.get("REBAYES_OUTPUT")
     if output_path is None:
         dataset_name = "mnist" if not fashion else "f-mnist"
-        output_path = Path(Path.cwd(), "output", dataset_name)
+        output_path = Path(Path.cwd(), "output", "final", "stationary")
         output_path.mkdir(parents=True, exist_ok=True)
     print(f"Output path: {output_path}")
     
     dataset = benchmark.load_mnist_dataset(fashion=fashion) # load data
     model_dict = benchmark.init_model(type='cnn') # initialize model
     
-    lofi_ranks = (2, 5, 10, 20, 50)
+    lofi_ranks = (1, 2, 5, 10, 20, 50)
     lofi_agents = {
         f'lofi-{rank}': {
-            'lofi_params': LoFiParams(memory_size=rank, diagonal_covariance=True)
+            'lofi_params': LoFiParams(memory_size=rank, diagonal_covariance=True),
+            'inflation': 'hybrid',
         } for rank in lofi_ranks
     }
     
-    sgd_ranks = (1, 10)
+    sgd_ranks = (1, 10, 20)
     sgd_agents = {
         f'sgd-rb-{rank}': {
             'loss_fn': optax.softmax_cross_entropy,
@@ -102,18 +104,18 @@ if __name__ == "__main__":
     
     agents = {
         **sgd_agents,
-        # 'fdekf': None,
-        # 'vdekf': None,
-        # **lofi_agents,
+        'fdekf': None,
+        'vdekf': None,
+        **lofi_agents,
     }
     
-    nll_results, miscl_results = {}, {}
+    miscl_results = {}
     for agent, kwargs in agents.items():
         if kwargs is None:
             miscl = train_agent(model_dict, dataset, agent_type=agent)
         else:
             miscl = train_agent(model_dict, dataset, agent_type=agent, **kwargs)
-        benchmark.store_results(miscl, f'{agent}_mnist_miscl', output_path)
+        benchmark.store_results(miscl, f'{agent}_miscl', output_path)
         miscl_results[agent] = miscl
         
     # Store results and plot

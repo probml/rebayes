@@ -35,7 +35,7 @@ if __name__ == "__main__":
     output_path = os.environ.get("REBAYES_OUTPUT")
     if output_path is None:
         dataset_name = "mnist" if not fashion else "f-mnist"
-        output_path = Path(Path.cwd(), "output", "stationary", "ablation")
+        output_path = Path(Path.cwd(), "output", "ablation", "stationary")
         output_path.mkdir(parents=True, exist_ok=True)
     print(f"Output path: {output_path}")
     
