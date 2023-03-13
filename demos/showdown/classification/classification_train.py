@@ -92,8 +92,8 @@ def load_mnist_dataset(fashion=False):
     ds_builder = tfds.builder(dataset)
     ds_builder.download_and_prepare()
     
-    train_ds = tfds.as_numpy(ds_builder.as_dataset(split='train[2%:]', batch_size=-1))
-    val_ds = tfds.as_numpy(ds_builder.as_dataset(split='train[:2%]', batch_size=-1))
+    train_ds = tfds.as_numpy(ds_builder.as_dataset(split='train[5%:]', batch_size=-1))
+    val_ds = tfds.as_numpy(ds_builder.as_dataset(split='train[:5%]', batch_size=-1))
     test_ds = tfds.as_numpy(ds_builder.as_dataset(split='test', batch_size=-1))
     
     # Normalize pixel values
@@ -294,15 +294,38 @@ def mnist_eval_agent(
     return mean, std
 
 
+def nonstationary_mnist_callback(bel, pred_obs, t, x, y, bel_pred, i, **kwargs):
+    accuracy_fn = lambda logits, label: jnp.mean(logits.argmax(axis=-1) == label)
+    evaluate_accuracy = partial(
+        evaluate_function,
+        loss_fn=accuracy_fn
+    )
+    X_test, y_test, apply_fn = kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
+    ntest_per_batch = kwargs["ntest_per_batch"]
+    
+    prev_test_batch, curr_test_batch = i*ntest_per_batch, (i+1)*ntest_per_batch
+    curr_X_test, curr_y_test = X_test[prev_test_batch:curr_test_batch], y_test[prev_test_batch:curr_test_batch]
+    cum_X_test, cum_y_test = X_test[:curr_test_batch], y_test[:curr_test_batch]
+    
+    overall_accuracy = evaluate_accuracy(bel.mean, apply_fn, cum_X_test, cum_y_test)
+    current_accuracy = evaluate_accuracy(bel.mean, apply_fn, curr_X_test, curr_y_test)
+    task1_accuracy = evaluate_accuracy(bel.mean, apply_fn, X_test[:ntest_per_batch], y_test[:ntest_per_batch])
+    result = {
+        'overall': overall_accuracy,
+        'current': current_accuracy,
+        'task1': task1_accuracy,
+    }
+    return result
+
+
 def nonstationary_mnist_eval_agent(
     load_dataset_fn, 
     ntrain_per_task,
     ntest_per_task,
     apply_fn,
-    agent, 
-    callback, 
+    agent,  
     bel=None,
-    n_iter=5,
+    n_iter=10,
 ):
     overall_accs, current_accs, first_task_accs = [], [], []
     for i in trange(n_iter, desc='Evaluating agent...'):
@@ -323,11 +346,12 @@ def nonstationary_mnist_eval_agent(
         
         _, accs = agent.scan_dataloader(
             train_loader, 
-            callback=callback,
+            callback=nonstationary_mnist_callback,
             bel=bel,
-            callback_at_end=True,
+            callback_at_end=False,
             **test_kwargs
         )
+        
         overall_accs.append(jnp.array([res['overall'] for res in accs]))
         current_accs.append(jnp.array([res['current'] for res in accs]))
         first_task_accs.append(jnp.array([res['first_task'] for res in accs]))

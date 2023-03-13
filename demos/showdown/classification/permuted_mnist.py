@@ -10,16 +10,15 @@ from demos.showdown.classification import classification_train as benchmark
 from demos.showdown.classification import hparam_tune_clf as hpt
 
 
-def generate_warmup_data(data_dict, ntrain_per_task, nval_per_task, val_after=5):
-    (Xtr, Ytr), (Xval, Yval), _ = data_dict.values()
-    Xtr_warmup, Ytr_warmup = Xtr[:val_after*ntrain_per_task], Ytr[:val_after*ntrain_per_task]
-    warmup_train = (Xtr_warmup, Ytr_warmup)
+# def generate_warmup_data(data_dict, ntrain_per_task, nval_per_task, val_after=50):
+#     (Xtr, Ytr), (Xval, Yval), _ = data_dict.values()
+#     Xtr_warmup, Ytr_warmup = Xtr[:val_after*ntrain_per_task], Ytr[:val_after*ntrain_per_task]
+#     warmup_train = (Xtr_warmup, Ytr_warmup)
 
-    Xval_warmup = Xval[(val_after-1)*nval_per_task:val_after*nval_per_task]
-    Yval_warmup = Yval[(val_after-1)*nval_per_task:val_after*nval_per_task]
-    warmup_val = (Xval_warmup, Yval_warmup)
+#     Xval_warmup, Yval_warmup = Xval[:val_after*nval_per_task], Yval[:val_after*nval_per_task]
+#     warmup_val = (Xval_warmup, Yval_warmup)
     
-    return warmup_train, warmup_val
+#     return warmup_train, warmup_val
 
 
 def train_agent(
@@ -37,22 +36,26 @@ def train_agent(
     
     if 'sgd' in agent_type:
         pbounds = {
-            'log_lr': (-8.0, 0.0),
+            'learning_rate': (1e-8, 1e-1),
         }
     else:
         pbounds={
-            'log_init_cov': (-10, 1),
-            'log_dynamics_weights': (-50, 0),
-            'log_dynamics_cov': (-50, 0),
-            'log_alpha': (-50, 0),
+            'log_init_cov': (-10, 0),
+            'log_dynamics_weights': (-40, 0),
+            'log_dynamics_cov': (-40, 0),
+            'log_alpha': (-40, 0),
         }
         if 'lofi' in agent_type:
             agent_type = 'lofi'
     
-    ll_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_ll)
+    ll_callback = partial(
+        benchmark.osa_eval_callback, 
+        evaluate_fn=lambda y_pred, y: -optax.softmax_cross_entropy(y_pred, y).mean(),
+    )
     optimizer, *_ = hpt.create_optimizer(
-        model, pbounds, 314, dataset['warmup_train'], dataset['warmup_val'], emission_mean_function,
-        emission_cov_function, callback=ll_callback, method=agent_type, verbose=1, **kwargs
+        model, pbounds, 314, dataset['train'], dataset['val'], emission_mean_function,
+        emission_cov_function, callback=ll_callback, method=agent_type, verbose=2, 
+        callback_at_end=False, **kwargs
     )
     
     optimizer.maximize(
@@ -72,8 +75,7 @@ def train_agent(
         **kwargs,
     )
     
-    per_batch_miscl_callback = partial(benchmark.per_batch_callback, evaluate_fn=benchmark.mnist_evaluate_miscl)
-    
+    # per_batch_miscl_callback = partial(benchmark.per_batch_callback, evaluate_fn=benchmark.mnist_evaluate_miscl)
     miscl_result = jax.block_until_ready(
         benchmark.nonstationary_mnist_eval_agent(
             load_dataset_fn,
@@ -81,8 +83,7 @@ def train_agent(
             ntest_per_task,
             model_dict['apply_fn'],
             estimator,
-            callback=per_batch_miscl_callback,
-            n_iter=5,
+            n_iter=10,
         )
     )
     print('\n')
@@ -93,35 +94,37 @@ def train_agent(
 if __name__ == "__main__":
     output_path = os.environ.get("REBAYES_OUTPUT")
     if output_path is None:
-        output_path = Path(Path.cwd(), "output", "permuted-mnist")
+        output_path = Path(Path.cwd(), "output", "final", "nonstationary")
         output_path.mkdir(parents=True, exist_ok=True)
     print(f"Output path: {output_path}")
     
     data_kwargs = {
-        'n_tasks': 100,
-        'ntrain_per_task': 600,
+        'n_tasks': 5,
+        'ntrain_per_task': 300,
         'nval_per_task': 1_000,
         'ntest_per_task': 1_000,
     }
     dataset = benchmark.load_permuted_mnist_dataset(**data_kwargs, fashion=True) # load data
     dataset_load_fn = partial(benchmark.load_permuted_mnist_dataset, **data_kwargs, fashion=True)
-    warmup_train, warmup_val = generate_warmup_data(
-        dataset, data_kwargs["ntrain_per_task"], data_kwargs["nval_per_task"], val_after=5
-    )
-    dataset['warmup_train'] = warmup_train
-    dataset['warmup_val'] = warmup_val
     
-    features = [400, 400, 10]
+    # warmup_train, warmup_val = generate_warmup_data(
+    #     dataset, data_kwargs["ntrain_per_task"], data_kwargs["nval_per_task"], val_after=50
+    # )
+    # dataset['warmup_train'] = warmup_train
+    # dataset['warmup_val'] = warmup_val
+    
+    features = [100, 100, 10]
     model_dict = benchmark.init_model(type='mlp', features=features)
     
-    lofi_ranks = (1, 5, 10, 20, 50)
+    lofi_ranks = (1, 2, 5, 10, 20, 50)
     lofi_agents = {
         f'lofi-{rank}': {
-            LoFiParams(memory_size=rank, diagonal_covariance=False)
+            'lofi_params': LoFiParams(memory_size=rank, diagonal_covariance=True),
+            'inflation': 'hybrid',
         } for rank in lofi_ranks
     }
     
-    sgd_ranks = (1, 5, 10, 20, 50)
+    sgd_ranks = (1, 20)
     sgd_agents = {
         f'sgd-rb-{rank}': {
             'loss_fn': optax.softmax_cross_entropy,
@@ -137,10 +140,10 @@ if __name__ == "__main__":
         **lofi_agents,
     }
     
-    nll_results, miscl_results = {}, {}
+    miscl_results = {}
     for agent, kwargs in agents.items():
         if kwargs is None:
-            nll, miscl = train_agent(
+            miscl = train_agent(
                 data_kwargs["ntrain_per_task"],
                 data_kwargs["ntest_per_task"],
                 model_dict, 
@@ -149,7 +152,7 @@ if __name__ == "__main__":
                 agent_type=agent
             )
         else:
-            nll, miscl = train_agent(
+            miscl = train_agent(
                 data_kwargs["ntrain_per_task"],
                 data_kwargs["ntest_per_task"],
                 model_dict, 
@@ -158,17 +161,11 @@ if __name__ == "__main__":
                 agent_type=agent,
                 **kwargs
             )
-        benchmark.store_results(nll, f'{agent}_mnist_nll', output_path)
         benchmark.store_results(miscl, f'{agent}_mnist_miscl', output_path)
-        nll_results[agent] = nll
         miscl_results[agent] = miscl
         
     # Store results and plot
-    benchmark.store_results(nll_results, 'mnist_nll', output_path)
     benchmark.store_results(miscl_results, 'mnist_miscl', output_path)
-    
-    nll_title = "Test-set average NLL"
-    benchmark.plot_results(nll_results, "mnist_nll", output_path, ylim=(0.5, 2.5), title=nll_title)
     
     miscl_title = "Test-set average misclassification rate"
     benchmark.plot_results(miscl_results, "mnist_miscl", output_path, ylim=(0.0, 0.8), title=miscl_title)
