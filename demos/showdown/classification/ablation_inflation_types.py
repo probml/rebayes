@@ -1,13 +1,8 @@
 import os
 from pathlib import Path
-from functools import partial
-
-import jax
-import optax
 
 from rebayes.low_rank_filter.lofi import LoFiParams
 from demos.showdown.classification import classification_train as benchmark
-from demos.showdown.classification import hparam_tune_clf as hpt
 from demos.showdown.classification.mnist import train_agent
 
 
