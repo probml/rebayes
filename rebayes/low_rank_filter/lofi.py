@@ -24,7 +24,7 @@ _project_to_columns = lambda A, x: \
 
 @chex.dataclass
 class LoFiBel:
-    initial_mean: chex.Array
+    pp_mean: chex.Array
     mean: chex.Array
     basis: chex.Array
     sigma: chex.Array
@@ -102,7 +102,7 @@ class RebayesLoFi(Rebayes):
         if inflation not in ('bayesian', 'simple', 'hybrid'):
             raise ValueError(f"Unknown inflation method {inflation}.")
         self.inflation = inflation
-        self.initial_mean = model_params.initial_mean
+        self.pp_mean = model_params.initial_mean
         self.nobs, self.obs_noise_var = 0, 0.0
         self.model_params = model_params
         self.adaptive_variance = model_params.adaptive_emission_cov
@@ -113,7 +113,7 @@ class RebayesLoFi(Rebayes):
 
     def init_bel(self):
         return LoFiBel(
-            initial_mean=self.model_params.initial_mean,
+            pp_mean=self.model_params.initial_mean,
             mean=self.model_params.initial_mean, basis=self.U0, sigma=self.Sigma0,
             nobs=self.nobs, obs_noise_var=self.obs_noise_var,
             eta=self.eta, Ups=self.Ups, gamma=self.gamma, q=self.q,
@@ -121,20 +121,25 @@ class RebayesLoFi(Rebayes):
     
     @partial(jit, static_argnums=(0,))
     def predict_state(self, bel):
-        m0, m, U, Sigma, nobs, obs_noise_var, eta, Ups_pred = \
-            bel.initial_mean, bel.mean, bel.basis, bel.sigma, bel.nobs, bel.obs_noise_var, bel.eta, bel.Ups
+        m0, m, U, Sigma, nobs, obs_noise_var, eta, Ups_pred, gamma = \
+            bel.pp_mean, bel.mean, bel.basis, bel.sigma, bel.nobs, bel.obs_noise_var, bel.eta, bel.Ups, bel.gamma
             
         if self.method == 'orfit':
             return bel
         elif self.diagonal_covariance:
-            m_pred, U_pred, Sigma_pred, eta_pred, Ups_pred = \
-                _lofi_diagonal_cov_predict(m0, m, U, Sigma, self.gamma, self.q, eta, Ups_pred, self.alpha, inflation=self.inflation)
+            m_pred, U_pred, Sigma_pred, Ups_pred = \
+                _lofi_diagonal_cov_predict(m, U, Sigma, self.gamma, self.q, Ups_pred)
+            m_pred, U_pred, Sigma_pred, Ups_pred, eta_pred = \
+                _lofi_diagonal_cov_inflate(m0, m_pred, U_pred, Sigma_pred, self.gamma, self.q, eta, Ups_pred, self.alpha, self.inflation)
         else:
             m_pred, U_pred, Sigma_pred, eta_pred = \
-                _lofi_spherical_cov_predict(m0, m, U, Sigma, self.gamma, self.q, eta, self.alpha, self.steady_state)
-
+                _lofi_spherical_cov_predict(m, U, Sigma, self.gamma, self.q, eta, self.steady_state)
+            m_pred, U_pred, Sigma_pred, eta_pred = \
+                _lofi_spherical_cov_inflate(m0, m_pred, U_pred, Sigma_pred, eta_pred, self.alpha, self.inflation)
+        m0 = gamma*m0
+        
         return bel.replace(
-            mean=m_pred, basis=U_pred, sigma=Sigma_pred,
+            pp_mean=m0, mean=m_pred, basis=U_pred, sigma=Sigma_pred,
             nobs=nobs, obs_noise_var=obs_noise_var, eta=eta_pred, Ups=Ups_pred,
         )
 
@@ -476,7 +481,37 @@ def _lofi_estimate_noise(m, y_cond_mean, u, y, nobs, obs_noise_var, adaptive_var
     return nobs, obs_noise_var
 
 
-def _lofi_spherical_cov_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0, steady_state=False):
+def _lofi_spherical_cov_inflate(m0, m, U, Sigma, eta, alpha, inflation='bayesian'):
+    """Inflate the diagonal covariance matrix.
+
+    Args:
+        Ups (D_hid,): Prior diagonal covariance.
+        alpha (float): Covariance inflation factor.
+
+    Returns:
+        Ups (D_hid,): Inflated diagonal covariance.
+    """
+    Sigma_pred = Sigma/jnp.sqrt(1+alpha)
+    U_pred = U
+    W_pred = U_pred * Sigma_pred
+    
+    if inflation == 'bayesian':
+        eta_pred = eta
+        G = jnp.linalg.pinv(jnp.eye(W_pred.shape[1]) +  (W_pred.T @ (W_pred/eta_pred)))
+        e = (m0 - m)
+        K = e - ((W_pred/eta_pred) @ G) @ (W_pred.T @ e)
+        m_pred = m + alpha/(1+alpha) * K.ravel()
+    elif inflation == 'simple':
+        eta_pred = eta/(1+alpha)
+        m_pred = m
+    elif inflation == 'hybrid':
+        eta_pred = eta
+        m_pred = m
+    
+    return m_pred, U_pred, Sigma_pred, eta_pred
+
+
+def _lofi_spherical_cov_predict(m, U, Sigma, gamma, q, eta, steady_state=False):
     """Predict step of the low-rank filter algorithm.
 
     Args:
@@ -496,11 +531,8 @@ def _lofi_spherical_cov_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0, stead
         eta_pred (float): Predicted precision.
     """
     # Mean prediction
-    G = (Sigma**2)/((1+alpha)*eta + Sigma**2)
-    e = (m0 - m)
-    K = e - (G * U) @ (U.T @ e)
-    m_pred = gamma*m + gamma*alpha/(1+alpha)*K
-    
+    m_pred = gamma*m
+
     # Covariance prediction
     U_pred = U
     
@@ -508,19 +540,52 @@ def _lofi_spherical_cov_predict(m0, m, U, Sigma, gamma, q, eta, alpha=0.0, stead
         eta_pred = eta
         Sigma_pred = jnp.sqrt(
             (gamma**2 * Sigma**2) /
-            (1 + alpha + q*Sigma**2)
+            (1 + q*Sigma**2)
         )
     else:
         eta_pred = eta/(gamma**2 + q*eta)
         Sigma_pred = jnp.sqrt(
             (gamma**2 * Sigma**2) /
-            ((gamma**2*(1+alpha) + q*(1+alpha)*eta + q*Sigma**2) * (gamma**2 + q*eta))
+            ((gamma**2 + q*eta) * (gamma**2 + q*eta + q*Sigma**2))
         )
 
     return m_pred, U_pred, Sigma_pred, eta_pred
 
 
-def _lofi_diagonal_cov_predict(m0, m, U, Sigma, gamma, q, eta, Ups, alpha=0.0, steady_state=False, inflation='bayesian'):
+def _lofi_diagonal_cov_inflate(m0, m, U, Sigma, gamma, q, eta, Ups, alpha, inflation='bayesian'):
+    """Inflate the diagonal covariance matrix.
+
+    Args:
+        Ups (D_hid,): Prior diagonal covariance.
+        alpha (float): Covariance inflation factor.
+
+    Returns:
+        Ups (D_hid,): Inflated diagonal covariance.
+    """
+    W = U * Sigma
+    eta_pred = eta/(gamma**2 + q*eta)
+    
+    if inflation == 'bayesian':
+        W_pred = W/jnp.sqrt(1+alpha)
+        Ups_pred = Ups/(1+alpha) + alpha*eta/(1+alpha)
+        G = jnp.linalg.pinv(jnp.eye(W.shape[1]) +  (W_pred.T @ (W_pred/Ups_pred)))
+        e = (m0 - m)
+        K = 1/Ups_pred * (e - (W_pred @ G) @ ((W_pred/Ups_pred).T @ e))
+        m_pred = m + alpha*eta/(1+alpha) * K.ravel()
+    elif inflation == 'simple':
+        W_pred = W/jnp.sqrt(1+alpha)
+        Ups_pred = Ups/(1+alpha)
+        m_pred = m
+    elif inflation == 'hybrid':
+        W_pred = W/jnp.sqrt(1+alpha)
+        Ups_pred = Ups/(1+alpha) + alpha*eta/(1+alpha)
+        m_pred = m
+    U_pred, Sigma_pred, _ = jnp.linalg.svd(W_pred, full_matrices=False)
+    
+    return m_pred, U_pred, Sigma_pred, Ups_pred, eta_pred
+
+
+def _lofi_diagonal_cov_predict(m, U, Sigma, gamma, q, Ups, steady_state=False):
     """Predict step of the generalized low-rank filter algorithm.
 
     Args:
@@ -542,33 +607,15 @@ def _lofi_diagonal_cov_predict(m0, m, U, Sigma, gamma, q, eta, Ups, alpha=0.0, s
     """
     # Mean prediction
     W = U * Sigma
-    if inflation == 'bayesian':
-        Ups_hat = Ups/(1+alpha) + alpha*eta/(1+alpha)
-        G = jnp.linalg.pinv(jnp.eye(W.shape[1]) +  (W.T @ (W/Ups_hat))/(1+alpha))
-        e = (m0 - m)
-        K = eta/Ups_hat.ravel() * (e - (1/(1+alpha)) * (W @ G) @ ((W/Ups_hat).T @ e))
-        m_pred = gamma*m + gamma*alpha/(1+alpha) * K
-    elif inflation == 'simple':
-        m_pred = gamma*m
-        Ups_hat = Ups/(1+alpha)
-        eta = 0.0
-    elif inflation == 'hybrid':
-        m_pred = gamma*m
-        Ups_hat = Ups/(1+alpha) + alpha*eta/(1+alpha)
-    
+    m_pred = gamma*m
+
     # Covariance prediction
-    eta_pred = eta/(gamma**2 + q*eta)
-    Ups_pred = 1/(gamma**2/Ups_hat + q)
-    D = 1/(gamma**2 + q/(1+alpha)*(Ups + alpha*eta))
-    chol_factor = jnp.linalg.cholesky(
-        jnp.linalg.pinv(
-            (1 + alpha)*jnp.eye(W.shape[1]) + W.T @ (q*D*W)
-        )
-    )
-    W_pred = gamma*(D*W) @ chol_factor
+    Ups_pred = 1/(gamma**2/Ups + q)
+    C = jnp.linalg.pinv(jnp.eye(W.shape[1]) + q*W.T @ (W*(Ups_pred/Ups)))
+    W_pred = gamma*(Ups_pred/Ups)*W @ jnp.linalg.cholesky(C)
     U_pred, Sigma_pred, _ = jnp.linalg.svd(W_pred, full_matrices=False)
     
-    return m_pred, U_pred, Sigma_pred, eta_pred, Ups_pred
+    return m_pred, U_pred, Sigma_pred, Ups_pred
     
 
 def orthogonal_recursive_fitting(
