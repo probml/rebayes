@@ -570,8 +570,8 @@ def _lofi_diagonal_cov_inflate(m0, m, U, Sigma, gamma, q, eta, Ups, alpha, infla
         Ups_pred = Ups/(1+alpha) + alpha*eta/(1+alpha)
         G = jnp.linalg.pinv(jnp.eye(W.shape[1]) +  (W_pred.T @ (W_pred/Ups_pred)))
         e = (m0 - m)
-        K = 1/Ups_pred * (e - (W_pred @ G) @ ((W_pred/Ups_pred).T @ e))
-        m_pred = m + alpha*eta/(1+alpha) * K.ravel()
+        K = 1/Ups_pred.ravel() * (e - (W_pred @ G) @ ((W_pred/Ups_pred).T @ e))
+        m_pred = m + alpha*eta/(1+alpha) * K
     elif inflation == 'simple':
         W_pred = W/jnp.sqrt(1+alpha)
         Ups_pred = Ups/(1+alpha)
