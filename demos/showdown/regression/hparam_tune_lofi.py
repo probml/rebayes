@@ -50,7 +50,7 @@ def bbf(
         dynamics_covariance_inflation_factor=inflation,
     )
 
-    estimator = lofi.RebayesLoFi(params_rebayes, params_lofi, method=method)
+    estimator = lofi.RebayesLoFi(params_rebayes, params_lofi, method=method, inflation="hybrid")
 
     bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
     metric = callback(bel, **test_callback_kwargs)["test"].item()
@@ -169,5 +169,5 @@ def build_estimator(init_mean, hparams, params_lofi, apply_fn, method="full_svd_
             **hparams,
         )
 
-    estimator = lofi.RebayesLoFi(params, params_lofi, method)
+    estimator = lofi.RebayesLoFi(params, params_lofi, method, inflation="hybrid")
     return estimator
