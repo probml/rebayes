@@ -52,7 +52,7 @@ class RebayesParams:
     #emission_covariance: CovMat
     emission_mean_function: FnStateAndInputToEmission
     emission_cov_function: FnStateAndInputToEmission2
-    emission_dist: EmissionDistFn = lambda mean, cov: MVN(loc=mean, covariance_matrix=cov)
+    #emission_dist: EmissionDistFn = lambda mean, cov: MVN(loc=mean, covariance_matrix=cov)
     #emission_dist=lambda mu, Sigma: tfd.Poisson(log_rate = jnp.log(mu))
     adaptive_emission_cov: bool=False
     dynamics_covariance_inflation_factor: float=0.0
