@@ -23,32 +23,7 @@ from dataclasses import dataclass
 from collections import namedtuple
 from itertools import cycle
 
-from rebayes.base import RebayesParams, Rebayes, Belief, make_rebayes_params
-
-
-RebayesEstimator = namedtuple("RebayesEstimator", ["init", "predict_state", "update_state", "predict_obs", "update_params"])
-
-def rebayes_scan(
-        estimator,
-        X: Float[Array, "ntime input_dim"],
-        Y: Float[Array, "ntime emission_dim"],
-        callback=None
-    ) -> Tuple[Belief, Any]:
-        """Apply filtering to entire sequence of data. Return final belief state and outputs from callback."""
-        num_timesteps = X.shape[0]
-        def step(carry, t):
-            params, bel = carry
-            pred_bel = estimator.predict_state(params, bel)
-            pred_obs = estimator.predict_obs(params, bel, X[t])
-            bel = estimator.update_state(params, pred_bel, X[t], Y[t])
-            params = estimator.update_params(params, t,  X[t], Y[t], pred_obs)
-            out = None
-            if callback is not None:
-                out = callback(bel, pred_obs, t, X[t], Y[t], pred_bel)
-            return (params, bel), out
-        params, bel = estimator.init()
-        carry, outputs = jax.lax.scan(step, (params, bel), jnp.arange(num_timesteps))
-        return carry, outputs
+from rebayes.dual_estimator import RebayesParams, RebayesEstimator, Belief, make_rebayes_params, rebayes_scan
 
 def make_my_estimator(model_params, est_params):
     """The belief state is the sum of all the scaled input X_t values.
