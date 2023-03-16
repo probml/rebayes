@@ -80,10 +80,8 @@ def test_kalman():
     assert allclose(cov_batch, cov_kf)
 
 
-def setup_ssm():
-    X, Y = make_data()
+def setup_ssm(nfeatures):
     (obs_var, mu0, Sigma0) = make_params()
-    nfeatures = X.shape[1]
     # we pass in X not X1 since DNN has a bias term 
     
     # Define Linear Regression as MLP with no hidden layers
@@ -106,7 +104,8 @@ def setup_ssm():
 
 def test_rebayes_loop():
     (X, Y) = make_data()
-    params  = setup_ssm()
+    N, D = X.shape
+    params  = setup_ssm(D)
     estimator = RebayesEKF(params, method='fcekf')
 
     lgssm_posterior = run_kalman()
@@ -136,7 +135,8 @@ def test_rebayes_loop():
 
 def test_rebayes_scan():
     (X, Y) = make_data()
-    params  = setup_ssm()
+    N, D = X.shape
+    params  = setup_ssm(D)
     estimator = RebayesEKF(params, method='fcekf')
 
     lgssm_posterior = run_kalman()
@@ -158,3 +158,9 @@ def test_rebayes_scan():
     print(lls)
     ll = jnp.sum(lls)
     assert jnp.allclose(ll, ll_kf, atol=1e-1)
+
+if __name__ == "__main__":
+    test_kalman()
+    test_rebayes_loop()
+    test_rebayes_scan()
+    

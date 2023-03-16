@@ -96,6 +96,8 @@ def run_kalman(X, Y):
     lgssm_posterior = lgssm.filter(params, Y) 
     return lgssm_posterior
 
+
+
 def test():
     (X, Y) = make_linreg_data()
     lgssm_posterior = run_kalman(X, Y)
@@ -107,12 +109,20 @@ def test():
     params, obs_model = make_linreg_rebayes(D)
     estimator = make_dual_ekf_estimator(params, obs_model, 'fcekf')
 
-    carry, outputs = rebayes_scan(estimator,  X, Y)
+    def callback(params, bel, pred_obs, t, u, y, bel_pred):
+        m = pred_obs # estimator.predict_obs(params, bel_pred, u)
+        P = estimator.predict_obs_cov(params, bel_pred, u)
+        ll = MVN(m, P).log_prob(jnp.atleast_1d(y))
+        return ll
+
+    carry, lls = rebayes_scan(estimator,  X, Y, callback)
     params, final_bel = carry
     print(carry)
     T = mu_kf.shape[0]
     assert allclose(final_bel.mean, mu_kf[T-1])
     assert allclose(final_bel.cov, cov_kf[T-1])
+    ll = jnp.sum(lls)
+    assert jnp.allclose(ll, ll_kf, atol=1e-1)
 
 
 if __name__ == "__main__":

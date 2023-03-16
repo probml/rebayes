@@ -8,7 +8,7 @@ import optax
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-from jax import lax, jacfwd, vmap, grad, jit
+from jax import lax, jacfwd, vmap, grad, jit, jacrev
 from jax.tree_util import tree_map, tree_reduce
 from jax.flatten_util import ravel_pytree
 
@@ -25,6 +25,8 @@ from itertools import cycle
 from rebayes.dual_filter.dual_estimator import RebayesHParams, RebayesObsModel, GaussBel, RebayesEstimator
 from rebayes.extended_kalman_filter.ekf import _full_covariance_dynamics_predict, _diagonal_dynamics_predict
 from rebayes.extended_kalman_filter.ekf import _full_covariance_condition_on,  _variational_diagonal_ekf_condition_on,  _fully_decoupled_ekf_condition_on
+
+_jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
 
 EKFMethods = Literal["fcekf", "vdekf", "fdekf"]
 
@@ -71,7 +73,22 @@ def make_dual_ekf_estimator(params: RebayesHParams, obs: RebayesObsModel, method
         return y_pred
 
     def predict_obs_cov(params, bel, X):
-        return None
+        prior_mean, prior_cov = bel.mean, bel.cov
+        m_Y = lambda z: obs.emission_mean_function(z, X)
+        H =  _jacrev_2d(m_Y, prior_mean)
+        y_pred = jnp.atleast_1d(m_Y(prior_mean))
+        if scalar_obs_var:
+            R = jnp.eye(y_pred.shape[0]) * params.r
+        else:
+            R = jnp.atleast_2d(obs.emission_cov_function(prior_mean, X))
+        if method == 'fcekf':
+            V_epi = H @ prior_cov @ H.T
+        else:
+            V_epi = (prior_cov * H) @ H.T
+        Sigma_obs = V_epi + R
+        return Sigma_obs
+
+
     
     def update_params(params, t, X, Y, Yhat):
         #jax.debug.print("t={t}", t=t)

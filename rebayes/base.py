@@ -48,8 +48,6 @@ class RebayesParams:
     initial_covariance: CovMat
     dynamics_weights: CovMat
     dynamics_covariance: CovMat
-    #emission_function: FnStateAndInputToEmission
-    #emission_covariance: CovMat
     emission_mean_function: FnStateAndInputToEmission
     emission_cov_function: FnStateAndInputToEmission2
     #emission_dist: EmissionDistFn = lambda mean, cov: MVN(loc=mean, covariance_matrix=cov)
