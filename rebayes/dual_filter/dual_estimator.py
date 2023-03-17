@@ -40,21 +40,22 @@ class GaussBel:
     cov: chex.Array
 
 @chex.dataclass
-class RebayesHParams:
+class DualBayesParams:
     mu0: chex.Array
     eta0: float
     gamma: float = 1.0
     q: float = 0.0
-    r: float = 1.0
-    alpha: float = 0.0
+    obs_noise_var: float = 1.0
+    alpha: float = 0.0 # covariance inflation
+    nobs: int = 0 # counts number of observations seen so far (for adaptive estimation)
 
 # immutable set of functions for observation model
-RebayesObsModel = namedtuple("RebayesObsModel", ["emission_mean_function", "emission_cov_function"])
+ObsModel = namedtuple("ObsModel", ["emission_mean_function", "emission_cov_function"])
 
-def make_rebayes_hparams():
+def make_dual_bayes_params():
     # dummy constructor
-    params = RebayesHParams(mu0=None, eta0=None, gamma=None, q=None, alpha=None, r=None)
-    obs = RebayesObsModel(emission_mean_function=None, emission_cov_function=None)
+    params = DualBayesParams(mu0=None, eta0=None, gamma=None, q=None, obs_noise_var=None, alpha=None, nobs=None)
+    obs = ObsModel(emission_mean_function=None, emission_cov_function=None)
     return params, obs
 
 def rebayes_scan(
@@ -70,7 +71,7 @@ def rebayes_scan(
             pred_bel = estimator.predict_state(params, bel)
             pred_obs = estimator.predict_obs(params, bel, X[t])
             bel = estimator.update_state(params, pred_bel, X[t], Y[t])
-            params = estimator.update_params(params, t,  X[t], Y[t], pred_obs)
+            params = estimator.update_params(params, t,  X[t], Y[t], pred_obs, bel)
             out = None
             if callback is not None:
                 out = callback(params, bel, pred_obs, t, X[t], Y[t], pred_bel)

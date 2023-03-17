@@ -22,9 +22,9 @@ from dataclasses import dataclass
 from collections import namedtuple
 from itertools import cycle
 
-from rebayes.dual_filter.dual_estimator import rebayes_scan, RebayesEstimator, DummyBel, RebayesHParams, RebayesObsModel, make_rebayes_hparams
+from rebayes.dual_filter.dual_estimator import rebayes_scan, RebayesEstimator, DummyBel, DualBayesParams, ObsModel, make_dual_bayes_params
 
-def make_my_estimator(params: RebayesHParams, obs: RebayesObsModel, est_params: Any):
+def make_my_estimator(params: DualBayesParams, obs: ObsModel, est_params: Any):
     """The belief state is the sum of all the scaled input X_t values.
     The model parameters sets the dynamics covariance at time t to t."""
 
@@ -72,7 +72,7 @@ def test():
 
     scale_factor = 2
     est_params = (ndim_in, ndim_out, scale_factor)
-    params, obs = make_rebayes_hparams()
+    params, obs = make_dual_bayes_params()
     params.q = 0
     estimator = make_my_estimator(params, obs, est_params)
 

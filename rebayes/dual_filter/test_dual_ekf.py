@@ -26,8 +26,8 @@ from dynamax.linear_gaussian_ssm import LinearGaussianSSM
 
 from rebayes.utils.utils import get_mlp_flattened_params
 from rebayes.extended_kalman_filter.ekf import RebayesEKF
-from rebayes.dual_filter.dual_estimator import rebayes_scan, RebayesHParams, RebayesObsModel
-from rebayes.dual_filter.dual_ekf import make_dual_ekf_estimator
+from rebayes.dual_filter.dual_estimator import rebayes_scan, DualBayesParams, ObsModel
+from rebayes.dual_filter.dual_ekf import make_dual_ekf_estimator, EKFParams
 
 def allclose(u, v):
     return jnp.allclose(u, v, atol=1e-3)
@@ -49,7 +49,7 @@ def make_linreg_prior():
     Sigma0 = jnp.eye(2) * 1
     return (obs_var, mu0, Sigma0)
 
-def make_linreg_rebayes(nfeatures):
+def make_linreg_dual_bayes(nfeatures):
     (obs_var, mu0, Sigma0) = make_linreg_prior()
     
     # Define Linear Regression as MLP with no hidden layers
@@ -58,17 +58,17 @@ def make_linreg_rebayes(nfeatures):
     _, flat_params, _, apply_fn = get_mlp_flattened_params(model_dims)
     nparams = len(flat_params)
     
-    params = RebayesHParams(
+    params = DualBayesParams(
         mu0=mu0,
         eta0=1/Sigma0[0,0],
         gamma = 1.0,
         q = 0.0,
-        r = obs_var,
-        alpha = 0
+        obs_noise_var = obs_var,
+        alpha = 0,
     )
-    obs_model = RebayesObsModel(
+    obs_model = ObsModel(
         emission_mean_function = lambda w, x: apply_fn(w, x),
-        emission_cov_function = None 
+        emission_cov_function = lambda w, x: obs_var
     )
 
     return params, obs_model
@@ -98,7 +98,7 @@ def run_kalman(X, Y):
 
 
 
-def test():
+def test_linreg():
     (X, Y) = make_linreg_data()
     lgssm_posterior = run_kalman(X, Y)
     mu_kf = lgssm_posterior.filtered_means
@@ -106,8 +106,9 @@ def test():
     ll_kf = lgssm_posterior.marginal_loglik
 
     N,D = X.shape
-    params, obs_model = make_linreg_rebayes(D)
-    estimator = make_dual_ekf_estimator(params, obs_model, 'fcekf')
+    params, obs_model = make_linreg_dual_bayes(D)
+    ekf_params = EKFParams(method="fcekf", obs_noise_var_lr=0)
+    estimator = make_dual_ekf_estimator(params, obs_model, ekf_params)
 
     def callback(params, bel, pred_obs, t, u, y, bel_pred):
         m = pred_obs # estimator.predict_obs(params, bel_pred, u)
@@ -126,4 +127,4 @@ def test():
 
 
 if __name__ == "__main__":
-    test()
+    test_linreg()
