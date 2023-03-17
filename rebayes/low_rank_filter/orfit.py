@@ -48,7 +48,7 @@ class RebayesORFit(Rebayes):
     def predict_obs(
         self,
         bel: ORFitBel,
-        x: float
+        x: Float[Array, "input_dim"],
     ) -> Union[Float[Array, "output_dim"], Any]: 
         m = bel.mean
         m_Y = lambda z: self.params.emission_mean_function(z, x)
@@ -60,7 +60,7 @@ class RebayesORFit(Rebayes):
     def predict_obs_cov(
         self,
         bel: ORFitBel,
-        x: float,
+        x: Float[Array, "input_dim"],
     ) -> Union[Float[Array, "output_dim output_dim"], Any]: 
         m, U = bel.mean, bel.basis
         m_Y = lambda z: self.params.emission_mean_function(z, x)
@@ -95,7 +95,7 @@ class RebayesORFit(Rebayes):
 
 def _orfit_condition_on(
     m: Float[Array, "state_dim"],
-    U: Float[Array, "state_dim", "memory_size"],
+    U: Float[Array, "state_dim memory_size"],
     Lambda: Float[Array, "memory_size"],
     apply_fn: Callable,
     x: Float[Array, "input_dim"],
