@@ -47,7 +47,7 @@ def make_my_estimator(params: DualBayesParams, obs: ObsModel, est_params: Any):
     def predict_obs_cov(params, bel, X):
         return None
     
-    def update_params(params, t, X, Y, Yhat):
+    def update_params(params, t, X, Y, Yhat, bel):
         #jax.debug.print("t={t}", t=t)
         params.q = t*1.0 # abritrary update
         return params

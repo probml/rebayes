@@ -28,28 +28,13 @@ from rebayes.utils.utils import get_mlp_flattened_params
 from rebayes.extended_kalman_filter.ekf import RebayesEKF
 from rebayes.dual_filter.dual_estimator import rebayes_scan, DualBayesParams, ObsModel
 from rebayes.dual_filter.dual_ekf import make_dual_ekf_estimator, EKFParams
+from rebayes.extended_kalman_filter.test_ekf import make_linreg_rebayes_params, run_kalman, make_linreg_data, make_linreg_prior
+
 
 def allclose(u, v):
     return jnp.allclose(u, v, atol=1e-3)
 
-
-def make_linreg_data():
-    n_obs = 21
-    x = jnp.linspace(0, 20, n_obs)
-    X = x[:, None] # reshape to (T,1)
-    y = jnp.array(
-        [2.486, -0.303, -4.053, -4.336, -6.174, -5.604, -3.507, -2.326, -4.638, -0.233, -1.986, 1.028, -2.264,
-        -0.451, 1.167, 6.652, 4.145, 5.268, 6.34, 9.626, 14.784])
-    Y = y[:, None] # reshape to (T,1)
-    return X, Y
-
-def make_linreg_prior():
-    obs_var = 0.1
-    mu0 = jnp.zeros(2)
-    Sigma0 = jnp.eye(2) * 1
-    return (obs_var, mu0, Sigma0)
-
-def make_linreg_dual_bayes(nfeatures):
+def make_linreg_dual_params(nfeatures):
     (obs_var, mu0, Sigma0) = make_linreg_prior()
     
     # Define Linear Regression as MLP with no hidden layers
@@ -60,7 +45,7 @@ def make_linreg_dual_bayes(nfeatures):
     
     params = DualBayesParams(
         mu0=mu0,
-        eta0=1/Sigma0[0,0],
+        eta0=1/Sigma0[0,0], 
         gamma = 1.0,
         q = 0.0,
         obs_noise_var = obs_var,
@@ -73,32 +58,9 @@ def make_linreg_dual_bayes(nfeatures):
 
     return params, obs_model
 
-    
-def run_kalman(X, Y):
-    N = X.shape[0]
-    X1 = jnp.column_stack((jnp.ones(N), X))  # Include column of 1s
-    (obs_var, mu0, Sigma0) = make_linreg_prior()
-    nfeatures = X1.shape[1]
-    # we use H=X1 since z=(b, w), so z'u = (b w)' (1 x)
-    lgssm = LinearGaussianSSM(state_dim = nfeatures, emission_dim = 1, input_dim = 0)
-    F = jnp.eye(nfeatures) # dynamics = I
-    Q = jnp.zeros((nfeatures, nfeatures))  # No parameter drift.
-    R = jnp.ones((1, 1)) * obs_var
-
-    params, _ = lgssm.initialize(
-        initial_mean=mu0,
-        initial_covariance=Sigma0,
-        dynamics_weights=F,
-        dynamics_covariance=Q,
-        emission_weights=X1[:, None, :], # (t, 1, D) where D = num input features
-        emission_covariance=R,
-        )
-    lgssm_posterior = lgssm.filter(params, Y) 
-    return lgssm_posterior
-
-
 
 def test_linreg():
+    # check that dual estimator matches KF for linear regression
     (X, Y) = make_linreg_data()
     lgssm_posterior = run_kalman(X, Y)
     mu_kf = lgssm_posterior.filtered_means
@@ -106,8 +68,8 @@ def test_linreg():
     ll_kf = lgssm_posterior.marginal_loglik
 
     N,D = X.shape
-    params, obs_model = make_linreg_dual_bayes(D)
-    ekf_params = EKFParams(method="fcekf", obs_noise_var_lr=0)
+    params, obs_model = make_linreg_dual_params(D)
+    ekf_params = EKFParams(method="fcekf")
     estimator = make_dual_ekf_estimator(params, obs_model, ekf_params)
 
     def callback(params, bel, pred_obs, t, u, y, bel_pred):
@@ -125,6 +87,56 @@ def test_linreg():
     ll = jnp.sum(lls)
     assert jnp.allclose(ll, ll_kf, atol=1e-1)
 
+def test_adaptive_backwards_compatibility():
+    # check that we estimate the same obs noise as Peter's EKF code (for certain settings)
+    (X, Y) = make_linreg_data()
+
+    # old estimator
+    N, D = X.shape
+    params  = make_linreg_rebayes_params(D)
+    params.adaptive_emission_cov = True
+    estimator = RebayesEKF(params, method='fcekf')
+    final_bel, lls = estimator.scan(X, Y)
+    obs_noise_var_est_ekf = final_bel.obs_noise_var
+    print(obs_noise_var_est_ekf)
+
+    params, obs_model = make_linreg_dual_params(D)
+    # if we use the post-update estimator, initialized with q=0 and lr=1, we should match peter's code
+    params.obs_noise_var = 0.0
+    ekf_params = EKFParams(method="fcekf", obs_noise_var_estimator = "post", obs_noise_var_lr=1.0)
+
+    estimator = make_dual_ekf_estimator(params, obs_model, ekf_params)
+    carry, lls = rebayes_scan(estimator,  X, Y)
+    params, final_bel = carry
+    obs_noise_var_est_dual = params.obs_noise_var
+    print(obs_noise_var_est_dual)
+    assert jnp.allclose(obs_noise_var_est_dual, obs_noise_var_est_ekf)
+
+
+def test_adaptive():
+    (X, Y) = make_linreg_data()
+    N, D = X.shape
+    params, obs_model = make_linreg_dual_params(D)
+    init_R =  0.1*jnp.std(Y)
+    lr = 0.01
+
+    params.obs_noise_var = init_R
+    ekf_params = EKFParams(method="fcekf", obs_noise_var_estimator = "post", obs_noise_var_lr=lr)
+    estimator = make_dual_ekf_estimator(params, obs_model, ekf_params)
+    (params,final_bel), lls = rebayes_scan(estimator,  X, Y)
+    obs_noise_var_post = params.obs_noise_var
+
+    params.obs_noise_var = init_R
+    ekf_params = EKFParams(method="fcekf", obs_noise_var_estimator = "pre", obs_noise_var_lr=lr)
+    estimator = make_dual_ekf_estimator(params, obs_model, ekf_params)
+    (params,final_bel), lls = rebayes_scan(estimator,  X, Y)
+    obs_noise_var_pre = params.obs_noise_var
+
+    print("post ", obs_noise_var_post, "pre ", obs_noise_var_pre)
+
+
 
 if __name__ == "__main__":
-    test_linreg()
+    #test_linreg()
+    #test_adaptive_backwards_compatibility()
+    test_adaptive()
