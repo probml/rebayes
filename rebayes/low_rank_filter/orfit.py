@@ -1,8 +1,10 @@
 from functools import partial
+from typing import Callable, Union, Tuple, Any
 
 import jax.numpy as jnp
 import chex
 from jax import jacrev, jit, vmap
+from jaxtyping import Float, Array
 
 from rebayes.base import Rebayes, RebayesParams
 
@@ -47,7 +49,7 @@ class RebayesORFit(Rebayes):
         self,
         bel: ORFitBel,
         x: float
-    ):
+    ) -> Union[Float[Array, "output_dim"], Any]: 
         m = bel.mean
         m_Y = lambda z: self.params.emission_mean_function(z, x)
         y_pred = jnp.atleast_1d(m_Y(m))
@@ -59,7 +61,7 @@ class RebayesORFit(Rebayes):
         self,
         bel: ORFitBel,
         x: float,
-    ):
+    ) -> Union[Float[Array, "output_dim output_dim"], Any]: 
         m, U = bel.mean, bel.basis
         m_Y = lambda z: self.params.emission_mean_function(z, x)
         
@@ -73,9 +75,9 @@ class RebayesORFit(Rebayes):
     def update_state(
         self,
         bel: ORFitBel,
-        x: float,
-        y: float,
-    ):
+        x: Float[Array, "input_dim"],
+        y: Float[Array, "obs_dim"],
+    ) -> ORFitBel:
         m, U, Lambda = bel.mean, bel.basis, bel.singular_values
         
         # Update the state
@@ -91,7 +93,14 @@ class RebayesORFit(Rebayes):
         return bel_cond
 
 
-def _orfit_condition_on(m, U, Lambda, apply_fn, x, y):
+def _orfit_condition_on(
+    m: Float[Array, "state_dim"],
+    U: Float[Array, "state_dim", "memory_size"],
+    Lambda: Float[Array, "memory_size"],
+    apply_fn: Callable,
+    x: Float[Array, "input_dim"],
+    y: Float[Array, "obs_dim"]
+):
     """Condition on the emission using ORFit.
 
     Args:
