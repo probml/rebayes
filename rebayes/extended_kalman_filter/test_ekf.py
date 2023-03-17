@@ -16,7 +16,7 @@ def allclose(u, v):
     return jnp.allclose(u, v, atol=1e-3)
 
 
-def make_data():
+def make_linreg_data():
     n_obs = 21
     x = jnp.linspace(0, 20, n_obs)
     X = x[:, None] # reshape to (T,1)
@@ -27,7 +27,7 @@ def make_data():
     return X, Y
 
 
-def make_params():
+def make_linreg_prior():
     obs_var = 0.1
     mu0 = jnp.zeros(2)
     Sigma0 = jnp.eye(2) * 1
@@ -38,7 +38,7 @@ def batch_bayes(X,Y):
     N = X.shape[0]
     X1 = jnp.column_stack((jnp.ones(N), X))  # Include column of 1s
     y = Y[:,0] # extract column vector
-    (obs_var, mu0, Sigma0) = make_params()
+    (obs_var, mu0, Sigma0) = make_linreg_prior()
     posterior_prec = jnp.linalg.inv(Sigma0) + X1.T @ X1 / obs_var
     cov_batch = jnp.linalg.inv(posterior_prec)
     b = jnp.linalg.inv(Sigma0) @ mu0 + X1.T @ y / obs_var
@@ -46,11 +46,10 @@ def batch_bayes(X,Y):
     return mu_batch, cov_batch
 
 
-def run_kalman():
-    X, Y = make_data()
+def run_kalman(X, Y):
     N = X.shape[0]
     X1 = jnp.column_stack((jnp.ones(N), X))  # Include column of 1s
-    (obs_var, mu0, Sigma0) = make_params()
+    (obs_var, mu0, Sigma0) = make_linreg_prior()
     nfeatures = X1.shape[1]
     # we use H=X1 since z=(b, w), so z'u = (b w)' (1 x)
     lgssm = LinearGaussianSSM(state_dim = nfeatures, emission_dim = 1, input_dim = 0)
@@ -71,8 +70,8 @@ def run_kalman():
 
 
 def test_kalman():
-    X, Y = make_data()
-    lgssm_posterior = run_kalman()
+    X, Y = make_linreg_data()
+    lgssm_posterior = run_kalman(X, Y)
     mu_kf = lgssm_posterior.filtered_means[-1]
     cov_kf = lgssm_posterior.filtered_covariances[-1]
     mu_batch, cov_batch = batch_bayes(X,Y)
@@ -80,8 +79,8 @@ def test_kalman():
     assert allclose(cov_batch, cov_kf)
 
 
-def setup_ssm(nfeatures):
-    (obs_var, mu0, Sigma0) = make_params()
+def make_linreg_rebayes_params(nfeatures):
+    (obs_var, mu0, Sigma0) = make_linreg_prior()
     # we pass in X not X1 since DNN has a bias term 
     
     # Define Linear Regression as MLP with no hidden layers
@@ -103,12 +102,12 @@ def setup_ssm(nfeatures):
 
 
 def test_rebayes_loop():
-    (X, Y) = make_data()
+    (X, Y) = make_linreg_data()
     N, D = X.shape
-    params  = setup_ssm(D)
+    params  = make_linreg_rebayes_params(D)
     estimator = RebayesEKF(params, method='fcekf')
 
-    lgssm_posterior = run_kalman()
+    lgssm_posterior = run_kalman(X, Y)
     mu_kf = lgssm_posterior.filtered_means
     cov_kf = lgssm_posterior.filtered_covariances
     ll_kf = lgssm_posterior.marginal_loglik
@@ -134,12 +133,12 @@ def test_rebayes_loop():
 
 
 def test_rebayes_scan():
-    (X, Y) = make_data()
+    (X, Y) = make_linreg_data()
     N, D = X.shape
-    params  = setup_ssm(D)
+    params  = make_linreg_rebayes_params(D)
     estimator = RebayesEKF(params, method='fcekf')
 
-    lgssm_posterior = run_kalman()
+    lgssm_posterior = run_kalman(X, Y)
     mu_kf = lgssm_posterior.filtered_means
     cov_kf = lgssm_posterior.filtered_covariances
     ll_kf = lgssm_posterior.marginal_loglik
@@ -163,4 +162,3 @@ if __name__ == "__main__":
     test_kalman()
     test_rebayes_loop()
     test_rebayes_scan()
-    
