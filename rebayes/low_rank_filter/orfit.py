@@ -7,12 +7,11 @@ from jax import jacrev, jit, vmap
 from jaxtyping import Float, Array
 
 from rebayes.base import Rebayes, RebayesParams
+from rebayes.low_rank_filter.lofi import _jacrev_2d, _normalize
 
 
 # Helper functions
-_jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
 _stable_division = lambda a, b: jnp.where(b.any(), a / b, jnp.zeros(shape=a.shape))
-_normalize = lambda v: jnp.where(v.any(), v / jnp.linalg.norm(v), jnp.zeros(shape=v.shape))
 _project = lambda a, x: _stable_division(a * (a.T @ x), (a.T @ a))
 _project_to_columns = lambda A, x: \
     jnp.where(A.any(), vmap(_project, (1, None))(A, x).sum(axis=0), jnp.zeros(shape=x.shape))
@@ -122,12 +121,12 @@ def _orfit_condition_on(
     v = jacrev(f_fn)(m).squeeze()
     v_prime = v - _project_to_columns(U, v)
 
-    # Update the U matrix
+    # Update the basis and singular values
     u = _normalize(v_prime)
     U_cond = jnp.where(Lambda.min() < u @ v_prime, U.at[:, Lambda.argmin()].set(u), U)
     Lambda_cond = jnp.where(Lambda.min() < u @ v_prime, Lambda.at[Lambda.argmin()].set(u.T @ v_prime), Lambda)
     
-    # Update the parameters
+    # Update the mean
     m_cond = m - _stable_division((f_fn(m) - y) * v_prime, v.T @ v_prime)
 
     return m_cond, U_cond, Lambda_cond
