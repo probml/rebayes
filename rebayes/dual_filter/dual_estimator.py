@@ -62,7 +62,9 @@ def rebayes_scan(
         estimator,
         X: Float[Array, "ntime input_dim"],
         Y: Float[Array, "ntime emission_dim"],
-        callback=None
+        callback=None,
+        params = None,
+        bel = None,
     ) -> Tuple[Any, Any]:
         """Apply filtering to entire sequence of data. Return final belief state and list of outputs from callback."""
         num_timesteps = X.shape[0]
@@ -76,6 +78,24 @@ def rebayes_scan(
             if callback is not None:
                 out = callback(params, bel, pred_obs, t, X[t], Y[t], pred_bel)
             return (params, bel), out
-        params, bel = estimator.init()
+        if params is None or bel is None:
+            params, bel = estimator.init()
         carry, outputs = jax.lax.scan(step, (params, bel), jnp.arange(num_timesteps))
         return carry, outputs
+
+def rebayes_scan_dataloader( # not tested!
+        estimator,
+        data_loader,
+        callback=None,
+        callback_on_batch_end=None,
+    ) -> Tuple[Any, Any]:
+        outputs = []   
+        params, bel = estimator.init() 
+        for i, batch in enumerate(data_loader):
+            Xtr, Ytr = batch[0], batch[1]
+            (params, bel), out = rebayes_scan(estimator, Xtr, Ytr, callback, params, bel)
+            outputs.append(out)
+            if callback_on_batch_end is not None:
+                 out = callback_on_batch_end(params, bel, i, batch)
+                 outputs.append(out)
+        return (params, bel), outputs

@@ -70,7 +70,7 @@ def make_dual_ekf_estimator(params: DualBayesParams, obs: ObsModel, ekf_params: 
                             adaptive_variance=adapt_obs_noise,
                             obs_noise_var=params.obs_noise)
         return GaussBel(mean=mu, cov=Sigma)
-    
+
     def predict_obs(params, bel, X):
         prior_mean, prior_cov = bel.mean, bel.cov
         m_Y = lambda z: obs.emission_mean_function(z, X)
