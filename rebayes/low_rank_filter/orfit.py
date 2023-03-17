@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Callable, Union, Tuple, Any
+from typing import Callable, Union, Any
 
 import jax.numpy as jnp
 import chex
