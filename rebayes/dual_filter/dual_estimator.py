@@ -43,10 +43,10 @@ class GaussBel:
 class DualBayesParams:
     mu0: chex.Array
     eta0: float
-    gamma: float = 1.0
-    q: float = 0.0
-    obs_noise_var: float = 1.0
-    alpha: float = 0.0 # covariance inflation
+    dynamics_scale_factor: float = 1.0 # gamma
+    dynamics_noise: float = 0.0 # Q
+    obs_noise: float = 1.0 # R
+    cov_inflation_factor: float = 0.0 # alpha  
     nobs: int = 0 # counts number of observations seen so far (for adaptive estimation)
 
 # immutable set of functions for observation model

@@ -33,8 +33,8 @@ EKFMethods = Literal["fcekf", "vdekf", "fdekf"]
 @chex.dataclass
 class EKFParams:
     method: EKFMethods
-    obs_noise_var_estimator: str = None
-    obs_noise_var_lr: float = 0.01
+    obs_noise_estimator: str = None
+    obs_noise_lr_fn: Callable = None # fn(t) -> lr
 
 
 def make_dual_ekf_estimator(params: DualBayesParams, obs: ObsModel, ekf_params: EKFParams):
@@ -51,9 +51,9 @@ def make_dual_ekf_estimator(params: DualBayesParams, obs: ObsModel, ekf_params: 
     def predict_state(params, bel):
         m, P = bel.mean, bel.cov
         if ekf_params.method == 'fcekf':
-            pred_mean, pred_cov = _full_covariance_dynamics_predict(m, P, params.q, params.gamma, params.alpha)
+            pred_mean, pred_cov = _full_covariance_dynamics_predict(m, P, params.dynamics_noise, params.dynamics_scale_factor, params.cov_inflation_factor)
         else:
-            pred_mean, pred_cov = _diagonal_dynamics_predict(m, P, params.q, params.gamma, params.alpha)
+            pred_mean, pred_cov = _diagonal_dynamics_predict(m, P, params.dynamics_noise, params.dynamics_scale_factor, params.cov_inflation_factor)
         return GaussBel(mean=pred_mean, cov=pred_cov)
     
     def update_state(params, bel, X, Y):
@@ -64,11 +64,11 @@ def make_dual_ekf_estimator(params: DualBayesParams, obs: ObsModel, ekf_params: 
             update_fn = _variational_diagonal_ekf_condition_on
         elif ekf_params.method == 'fdekf':
             update_fn = _fully_decoupled_ekf_condition_on
-        adapt_obs_noise_var = (ekf_params.obs_noise_var_lr > 0)
+        adapt_obs_noise = (ekf_params.obs_noise_estimator is not None)
         mu, Sigma = update_fn(m, P, obs.emission_mean_function,
                             obs.emission_cov_function, X, Y, num_iter=1,
-                            adaptive_variance=adapt_obs_noise_var,
-                            obs_noise_var=params.obs_noise_var)
+                            adaptive_variance=adapt_obs_noise,
+                            obs_noise_var=params.obs_noise)
         return GaussBel(mean=mu, cov=Sigma)
     
     def predict_obs(params, bel, X):
@@ -82,8 +82,8 @@ def make_dual_ekf_estimator(params: DualBayesParams, obs: ObsModel, ekf_params: 
         m_Y = lambda z: obs.emission_mean_function(z, X)
         H =  _jacrev_2d(m_Y, prior_mean)
         y_pred = jnp.atleast_1d(m_Y(prior_mean))
-        if ekf_params.obs_noise_var_estimator is not None:
-            R = jnp.eye(y_pred.shape[0]) * params.obs_noise_var
+        if ekf_params.obs_noise_estimator is not None:
+            R = jnp.eye(y_pred.shape[0]) * params.obs_noise
         else:
             R = jnp.atleast_2d(obs.emission_cov_function(prior_mean, X))
         if ekf_params.method == 'fcekf':
@@ -93,26 +93,26 @@ def make_dual_ekf_estimator(params: DualBayesParams, obs: ObsModel, ekf_params: 
         Sigma_obs = V_epi + R
         return Sigma_obs
 
-    def update_params(params, t, X, y, yhat, bel):
-        if ekf_params.obs_noise_var_estimator is None:
+    def update_params(params, t, X, y, ypred, bel):
+        if ekf_params.obs_noise_estimator is None:
             return params
         nobs = params.nobs + 1
-        if ekf_params.obs_noise_var_estimator == "post":
+        #lr = ekf_params.obs_noise_var_lr/nobs # decay learning rate over time
+        lr = ekf_params.obs_noise_lr_fn(t)
+        if ekf_params.obs_noise_estimator == "post":
             # prediction after the belief update 
             yhat = obs.emission_mean_function(bel.mean, X)
-            lr = ekf_params.obs_noise_var_lr/nobs # decay learning rate over time
         else:
+            yhat = ypred
             # use yhat before the belief update
-            lr = ekf_params.obs_noise_var_lr/nobs # decay learning rate over time
 
         yhat = jnp.atleast_1d(yhat)
-        obs_noise_var = params.obs_noise_var
+        obs_noise = params.obs_noise
         sqerr = ((yhat - y).T @ (yhat - y)).squeeze() / yhat.shape[0]
           
-        r = (1-lr)*obs_noise_var + lr*sqerr
-        #r = obs_noise_var + 1/nobs * (sqerr - obs_noise_var)
-        obs_noise_var = jnp.max(jnp.array([1e-6, r]))
-        params = params.replace(nobs = nobs, obs_noise_var = obs_noise_var)
+        r = (1-lr)*obs_noise + lr*sqerr
+        obs_noise = jnp.max(jnp.array([1e-6, r]))
+        params = params.replace(nobs = nobs, obs_noise = obs_noise)
         return params
     
     return RebayesEstimator(init, predict_state, update_state, predict_obs, predict_obs_cov, update_params)
