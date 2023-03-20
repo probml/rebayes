@@ -46,10 +46,10 @@ def make_linreg_dual_params(nfeatures):
     params = DualBayesParams(
         mu0=mu0,
         eta0=1/Sigma0[0,0], 
-        gamma = 1.0,
-        q = 0.0,
-        obs_noise_var = obs_var,
-        alpha = 0,
+        dynamics_scale_factor = 1.0,
+        dynamics_noise = 0.0,
+        obs_noise = obs_var,
+        cov_inflation_factor = 0,
     )
     obs_model = ObsModel(
         emission_mean_function = lambda w, x: apply_fn(w, x),
@@ -97,20 +97,20 @@ def test_adaptive_backwards_compatibility():
     params.adaptive_emission_cov = True
     estimator = RebayesEKF(params, method='fcekf')
     final_bel, lls = estimator.scan(X, Y)
-    obs_noise_var_est_ekf = final_bel.obs_noise_var
-    print(obs_noise_var_est_ekf)
+    obs_noise_ekf = final_bel.obs_noise_var
+    print(obs_noise_ekf)
 
     params, obs_model = make_linreg_dual_params(D)
-    # if we use the post-update estimator, initialized with q=0 and lr=1, we should match peter's code
-    params.obs_noise_var = 0.0
-    ekf_params = EKFParams(method="fcekf", obs_noise_var_estimator = "post", obs_noise_var_lr=1.0)
+    # if we use the post-update estimator, initialized with q=0 and lr=1/N(t), we should match peter's code
+    params.obs_noise = 0.0
+    ekf_params = EKFParams(method="fcekf", obs_noise_estimator = "post", obs_noise_lr_fn= lambda t: 1.0/(t+1))
 
     estimator = make_dual_ekf_estimator(params, obs_model, ekf_params)
     carry, lls = rebayes_scan(estimator,  X, Y)
     params, final_bel = carry
-    obs_noise_var_est_dual = params.obs_noise_var
-    print(obs_noise_var_est_dual)
-    assert jnp.allclose(obs_noise_var_est_dual, obs_noise_var_est_ekf)
+    obs_noise_dual = params.obs_noise
+    print(obs_noise_dual)
+    assert jnp.allclose(obs_noise_dual, obs_noise_ekf)
 
 
 def test_adaptive():
@@ -120,23 +120,23 @@ def test_adaptive():
     init_R =  0.1*jnp.std(Y)
     lr = 0.01
 
-    params.obs_noise_var = init_R
-    ekf_params = EKFParams(method="fcekf", obs_noise_var_estimator = "post", obs_noise_var_lr=lr)
+    params.obs_noise = init_R
+    ekf_params = EKFParams(method="fcekf", obs_noise_estimator = "post", obs_noise_lr_fn=lambda t: lr)
     estimator = make_dual_ekf_estimator(params, obs_model, ekf_params)
     (params,final_bel), lls = rebayes_scan(estimator,  X, Y)
-    obs_noise_var_post = params.obs_noise_var
+    obs_noise_post = params.obs_noise
 
-    params.obs_noise_var = init_R
-    ekf_params = EKFParams(method="fcekf", obs_noise_var_estimator = "pre", obs_noise_var_lr=lr)
+    params.obs_noise = init_R
+    ekf_params = EKFParams(method="fcekf", obs_noise_estimator = "pre", obs_noise_lr_fn= lambda t: lr)
     estimator = make_dual_ekf_estimator(params, obs_model, ekf_params)
     (params,final_bel), lls = rebayes_scan(estimator,  X, Y)
-    obs_noise_var_pre = params.obs_noise_var
+    obs_noise_pre = params.obs_noise
 
-    print("post ", obs_noise_var_post, "pre ", obs_noise_var_pre)
+    print("post ", obs_noise_post, "pre ", obs_noise_pre)
 
 
 
 if __name__ == "__main__":
-    #test_linreg()
-    #test_adaptive_backwards_compatibility()
+    test_linreg()
+    test_adaptive_backwards_compatibility()
     test_adaptive()

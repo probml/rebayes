@@ -478,7 +478,8 @@ def train_agents(key, dim_rank, dataset_name, path, output_path, ix):
 
     pbounds_lofi = pbounds.copy()
     pbounds_lofi.pop("dynamics_log_cov")
-    pbounds_lofi["dynamics_covariance"] = None
+    pbounds_lofi["dynamics_covariance"] = None # (0.0, 1.0)
+    pbounds_lofi["log_inflation"] = (-40, 0.0)
 
     pbounds_lrvga = {
         "std": (-0.34, 0.0),
@@ -529,15 +530,15 @@ def train_agents(key, dim_rank, dataset_name, path, output_path, ix):
     params_lofi = lofi.LoFiParams(
         memory_size=dim_rank,
         sv_threshold=0,
-        steady_state=True,
-        diagonal_covariance=True,
+        steady_state=False,
+        diagonal_covariance=False,
     )
     res, apply_fn, hparams = train_lofi_agent(
         params, params_lofi, model, method, dataset, pbounds_lofi,
         train_callback, eval_callback,
         optimizer_eval_kwargs,
     )
-    method = "lofi_diag"
+    method = "lofi_diag_hybrid"
     res["method"] = method
 
     metric_final = res["output"]["test"][-1]
