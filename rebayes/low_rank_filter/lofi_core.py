@@ -141,7 +141,7 @@ def _lofi_spherical_cov_predict(
     eta: float,
     steady_state: bool = False
 ):
-    """Predict step of the spherical low-rank filter algorithm.
+    """Predict step of the low-rank filter with spherical covariance matrix.
 
     Args:
         m0 (D_hid,): Prior predictive mean.
@@ -157,6 +157,7 @@ def _lofi_spherical_cov_predict(
     Returns:
         m0_pred (D_hid,): Predicted predictive mean.
         m_pred (D_hid,): Predicted mean.
+        U_pred (D_hid, D_mem,): Predicted basis.
         Lambda_pred (D_mem,): Predicted singular values.
         eta_pred (float): Predicted precision.
     """
@@ -195,7 +196,7 @@ def _lofi_spherical_cov_condition_on(
     adaptive_variance: bool = False,
     obs_noise_var: float = 1.0,
 ):
-    """Condition step of the low-rank filter with adaptive observation variance.
+    """Condition step of the low-rank filter with spherical covariance matrix.
 
     Args:
         m (D_hid,): Prior mean.
@@ -246,117 +247,169 @@ def _lofi_spherical_cov_condition_on(
 
 # Diagonal LOFI ----------------------------------------------------------------
 
-def _lofi_diagonal_cov_inflate(m0, m, U, Sigma, gamma, q, eta, Ups, alpha, inflation='bayesian'):
-    """Inflate the diagonal covariance matrix.
+def _lofi_diagonal_cov_inflate(
+    m0: Float[Array, "state_dim"],
+    m: Float[Array, "state_dim"],
+    U: Float[Array, "state_dim memory_size"],
+    Lambda: Float[Array, "memory_size"],
+    eta: float,
+    gamma: float,
+    q: float,
+    Ups: Float[Array, "state_dim"],
+    alpha: float,
+    inflation: str = "bayesian"
+):
+    """Inflate the diagonal posterior covariance matrix.
 
     Args:
+        m0 (D_hid,): Prior predictive mean.
+        m (D_hid,): Prior mean.
+        U (D_hid, D_mem,): Prior basis.
+        Lambda (D_mem,): Prior signular values.
+        eta (float): Prior precision.
+        gamma (float): Dynamics decay factor.
+        q (float): Dynamics noise factor.
         Ups (D_hid,): Prior diagonal covariance.
         alpha (float): Covariance inflation factor.
+        inflation (str, optional): Type of inflation. Defaults to 'bayesian'.
 
     Returns:
-        Ups (D_hid,): Inflated diagonal covariance.
+        m_infl (D_hid,): Post-inflation mean.
+        U_infl (D_hid, D_mem,): Post-inflation basis.
+        Lambda_infl (D_mem,): Post-inflation singular values.
+        Ups_infl (D_hid,): Post-inflation diagonal covariance.
     """
-    W = U * Sigma
-    eta_pred = eta/(gamma**2 + q*eta)
+    P, L = U.shape
+    W = U * Lambda
     
     if inflation == 'bayesian':
-        W_pred = W/jnp.sqrt(1+alpha)
-        Ups_pred = Ups/(1+alpha) + alpha*eta/(1+alpha)
-        G = jnp.linalg.pinv(jnp.eye(W.shape[1]) +  (W_pred.T @ (W_pred/Ups_pred)))
+        W_infl = W/jnp.sqrt(1+alpha)
+        Ups_infl = Ups/(1+alpha) + alpha*eta/(1+alpha)
+        G = jnp.linalg.pinv(jnp.eye(L) +  (W_infl.T @ (W_infl/Ups_infl)))
         e = (m0 - m)
-        K = 1/Ups_pred.ravel() * (e - (W_pred @ G) @ ((W_pred/Ups_pred).T @ e))
-        m_pred = m + alpha*eta/(1+alpha) * K
+        K = 1/Ups_infl.ravel() * (e - (W_infl @ G) @ ((W_infl/Ups_infl).T @ e))
+        m_infl = m + alpha*eta/(1+alpha) * K
     elif inflation == 'simple':
-        W_pred = W/jnp.sqrt(1+alpha)
-        Ups_pred = Ups/(1+alpha)
-        m_pred = m
+        W_infl = W/jnp.sqrt(1+alpha)
+        Ups_infl = Ups/(1+alpha)
+        m_infl = m
     elif inflation == 'hybrid':
-        W_pred = W/jnp.sqrt(1+alpha)
-        Ups_pred = Ups/(1+alpha) + alpha*eta/(1+alpha)
-        m_pred = m
-    U_pred, Sigma_pred, _ = jnp.linalg.svd(W_pred, full_matrices=False)
+        W_infl = W/jnp.sqrt(1+alpha)
+        Ups_infl = Ups/(1+alpha) + alpha*eta/(1+alpha)
+        m_infl = m
+    U_infl, Lambda_infl = W_infl, jnp.ones(L)
     
-    return m_pred, U_pred, Sigma_pred, Ups_pred, eta_pred
+    return  m_infl, U_infl, Lambda_infl, Ups_infl
 
 
-def _lofi_diagonal_cov_predict(m, U, Sigma, gamma, q, Ups, steady_state=False):
-    """Predict step of the generalized low-rank filter algorithm.
+def _lofi_diagonal_cov_predict(
+    m0: Float[Array, "state_dim"],
+    m: Float[Array, "state_dim"],
+    U: Float[Array, "state_dim memory_size"],
+    Lambda: Float[Array, "memory_size"],
+    gamma: float,
+    q: float,
+    eta: float,
+    Ups: Float[Array, "state_dim"],
+):
+    """Predict step of the low-rank filter with diagonal covariance matrix.
 
     Args:
         m0 (D_hid,): Initial mean.
         m (D_hid,): Prior mean.
         U (D_hid, D_mem,): Prior basis.
-        Sigma (D_mem,): Prior singluar values.
+        Lambda (D_mem,): Prior singluar values.
         gamma (float): Dynamics decay factor.
         q (float): Dynamics noise factor.
         eta (float): Prior precision.
         Ups (D_hid,): Prior diagonal covariance.
-        alpha (float): Covariance inflation factor.
 
     Returns:
+        m0_pred (D_hid,): Predicted predictive mean.
         m_pred (D_hid,): Predicted mean.
         U_pred (D_hid, D_mem,): Predicted basis.
-        Sigma_pred (D_mem,): Predicted singular values.
+        Lambda_pred (D_mem,): Predicted singular values.
         eta_pred (float): Predicted precision.
+        Ups_pred (D_hid,): Predicted diagonal covariance.
     """
+    P, L = U.shape
+    
     # Mean prediction
-    W = U * Sigma
+    m0_pred = gamma*m0
+    W = U * Lambda
     m_pred = gamma*m
 
     # Covariance prediction
+    eta_pred = eta/(gamma**2 + q*eta)
     Ups_pred = 1/(gamma**2/Ups + q)
-    C = jnp.linalg.pinv(jnp.eye(W.shape[1]) + q*W.T @ (W*(Ups_pred/Ups)))
+    C = jnp.linalg.pinv(jnp.eye(L) + q*W.T @ (W*(Ups_pred/Ups)))
     W_pred = gamma*(Ups_pred/Ups)*W @ jnp.linalg.cholesky(C)
-    U_pred, Sigma_pred, _ = jnp.linalg.svd(W_pred, full_matrices=False)
+    U_pred, Lambda_pred = W_pred, jnp.ones(L)
     
-    return m_pred, U_pred, Sigma_pred, Ups_pred
+    return m0_pred, m_pred, U_pred, Lambda_pred, eta_pred, Ups_pred
 
 
-def _lofi_diagonal_cov_condition_on(m, U, Sigma, Ups, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=1.0):
-    """Condition step of the low-rank filter with adaptive observation variance.
+def _lofi_diagonal_cov_condition_on(
+    m: Float[Array, "state_dim"],
+    U: Float[Array, "state_dim memory_size"],
+    Lambda: Float[Array, "memory_size"],
+    Ups: Float[Array, "state_dim"],
+    y_cond_mean: Callable,
+    y_cond_cov: Callable,
+    x: Float[Array, "input_dim"],
+    y: Float[Array, "obs_dim"],
+    adaptive_variance: bool = False,
+    obs_noise_var: float = 1.0,
+):
+    """Condition step of the low-rank filter with diagonal covariance matrix.
 
     Args:
         m (D_hid,): Prior mean.
         U (D_hid, D_mem,): Prior basis.
-        Sigma (D_mem,): Prior singular values.
+        Lambda (D_mem,): Prior singular values.
         Ups (D_hid): Prior precision. 
         y_cond_mean (Callable): Conditional emission mean function.
         y_cond_cov (Callable): Conditional emission covariance function.
         x (D_in,): Control input.
         y (D_obs,): Emission.
-        sv_threshold (float): Threshold for singular values.
         adaptive_variance (bool): Whether to use adaptive variance.
+        obs_noise_var (float): Observation noise variance.
 
     Returns:
         m_cond (D_hid,): Posterior mean.
         U_cond (D_hid, D_mem,): Posterior basis.
-        Sigma_cond (D_mem,): Posterior singular values.
+        Lambda_cond (D_mem,): Posterior singular values.
+        Ups_cond (D_hid,): Posterior precision.
     """
+    P, L = U.shape
     m_Y = lambda w: y_cond_mean(w, x)
     Cov_Y = lambda w: y_cond_cov(w, x)
     
     yhat = jnp.atleast_1d(m_Y(m))
+    C = yhat.shape[0]
+    
     if adaptive_variance:
-        R = jnp.eye(yhat.shape[0]) * obs_noise_var
+        R = jnp.eye(C) * obs_noise_var
     else:
         R = jnp.atleast_2d(Cov_Y(m))
-    L = jnp.linalg.cholesky(R)
-    A = jnp.linalg.lstsq(L, jnp.eye(L.shape[0]))[0].T
+    R_chol = jnp.linalg.cholesky(R)
+    A = jnp.linalg.lstsq(R_chol, jnp.eye(C))[0].T
     H = _jacrev_2d(m_Y, m)
-    W_tilde = jnp.hstack([Sigma * U, (H.T @ A).reshape(U.shape[0], -1)])
+    W_tilde = jnp.hstack([Lambda * U, (H.T @ A).reshape(P, -1)])
     
     # Update the U matrix
     u, lamb, _ = jnp.linalg.svd(W_tilde, full_matrices=False)
-    U_cond, U_extra = u[:, :U.shape[1]], u[:, U.shape[1]:]
-    Sigma_cond, Sigma_extra = lamb[:U.shape[1]], lamb[U.shape[1]:]
-    W_extra = Sigma_extra * U_extra
+    
+    U_cond, U_extra = u[:, :L], u[:, L:]
+    Lambda_cond, Lambda_extra = lamb[:L], lamb[L:]
+    W_extra = Lambda_extra * U_extra
     Ups_cond = Ups + jnp.einsum('ij,ij->i', W_extra, W_extra)[:, jnp.newaxis]
     
     G = jnp.linalg.pinv(jnp.eye(W_tilde.shape[1]) + W_tilde.T @ (W_tilde/Ups))
     K = (H.T @ A) @ A.T/Ups - (W_tilde/Ups @ G) @ ((W_tilde/Ups).T @ (H.T @ A) @ A.T)
     m_cond = m + K @ (y - yhat)
     
-    return m_cond, U_cond, Sigma_cond, Ups_cond
+    return m_cond, U_cond, Lambda_cond, Ups_cond
 
 
 # Orthogonal LOFI --------------------------------------------------------------

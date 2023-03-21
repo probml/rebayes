@@ -7,7 +7,7 @@ from jax import jacrev, jit, vmap
 from jaxtyping import Float, Array
 
 from rebayes.base import Rebayes, RebayesParams
-from rebayes.low_rank_filter.lofi import _jacrev_2d, _normalize
+from rebayes.low_rank_filter.lofi_core import _jacrev_2d, _normalize
 
 
 # Helper functions
