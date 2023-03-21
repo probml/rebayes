@@ -21,7 +21,7 @@ _project_to_columns = lambda A, x: \
 class ORFitBel:
     mean: chex.Array
     basis: chex.Array
-    singular_values: chex.Array
+    svs: chex.Array
 
     
 class RebayesORFit(Rebayes):
@@ -35,12 +35,12 @@ class RebayesORFit(Rebayes):
     
     def init_bel(self):
         init_basis = jnp.zeros((len(self.params.initial_mean), self.memory_size))
-        init_singular_values = jnp.zeros((self.memory_size,))
+        init_svs = jnp.zeros((self.memory_size,))
         
         return ORFitBel(
             mean=self.params.initial_mean,
             basis=init_basis,
-            singular_values=init_singular_values,
+            svs=init_svs,
         )
     
     @partial(jit, static_argnums=(0,))
@@ -77,7 +77,7 @@ class RebayesORFit(Rebayes):
         x: Float[Array, "input_dim"],
         y: Float[Array, "obs_dim"],
     ) -> ORFitBel:
-        m, U, Lambda = bel.mean, bel.basis, bel.singular_values
+        m, U, Lambda = bel.mean, bel.basis, bel.svs
         
         # Update the state
         m_cond, U_cond, Lambda_cond = _orfit_condition_on(
@@ -86,7 +86,7 @@ class RebayesORFit(Rebayes):
         bel_cond =  bel.replace(
             mean = m_cond,
             basis = U_cond,
-            singular_values = Lambda_cond,
+            svs = Lambda_cond,
         )
         
         return bel_cond

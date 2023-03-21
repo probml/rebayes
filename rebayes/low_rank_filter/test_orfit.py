@@ -1,15 +1,13 @@
-import pytest
-import numpy as np
-import jax.numpy as jnp
 import time
 
+import jax.numpy as jnp
+import numpy as np
+
+from rebayes.base import RebayesParams
+from rebayes.extended_kalman_filter.ekf import RebayesEKF
+from rebayes.low_rank_filter.orfit import RebayesORFit
 from rebayes.utils import rotating_mnist_data
 from rebayes.utils.utils import get_mlp_flattened_params
-from rebayes.low_rank_filter.orfit import RebayesORFit
-from rebayes.extended_kalman_filter.ekf import RebayesEKF
-from dynamax.generalized_gaussian_ssm.models import ParamsGGSSM
-from dynamax.generalized_gaussian_ssm.inference import EKFIntegrals, conditional_moments_gaussian_filter
-from rebayes.base import RebayesParams
 
 
 def allclose(u, v):
