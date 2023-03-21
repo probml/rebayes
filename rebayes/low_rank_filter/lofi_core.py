@@ -183,38 +183,52 @@ def _lofi_spherical_cov_predict(
     return m0_pred, m_pred, U_pred, Lambda_pred, eta_pred
 
 
-def _lofi_spherical_cov_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, x, y, sv_threshold, adaptive_variance=False, obs_noise_var=1.0):
+def _lofi_spherical_cov_condition_on(
+    m: Float[Array, "state_dim"],
+    U: Float[Array, "state_dim memory_size"],
+    Lambda: Float[Array, "memory_size"],
+    eta: float,
+    y_cond_mean: Callable,
+    y_cond_cov: Callable,
+    x: Float[Array, "input_dim"],
+    y: Float[Array, "obs_dim"],
+    adaptive_variance: bool = False,
+    obs_noise_var: float = 1.0,
+):
     """Condition step of the low-rank filter with adaptive observation variance.
 
     Args:
         m (D_hid,): Prior mean.
         U (D_hid, D_mem,): Prior basis.
-        Sigma (D_mem,): Prior singular values.
+        Lambda (D_mem,): Prior singular values.
         eta (float): Prior precision. 
         y_cond_mean (Callable): Conditional emission mean function.
         y_cond_cov (Callable): Conditional emission covariance function.
         x (D_in,): Control input.
         y (D_obs,): Emission.
-        sv_threshold (float): Threshold for singular values.
         adaptive_variance (bool): Whether to use adaptive variance.
+        obs_noise_var (float): Observation noise variance.
 
     Returns:
         m_cond (D_hid,): Posterior mean.
         U_cond (D_hid, D_mem,): Posterior basis.
-        Sigma_cond (D_mem,): Posterior singular values.
+        Lambda_cond (D_mem,): Posterior singular values.
     """
+    P, L = U.shape
     m_Y = lambda w: y_cond_mean(w, x)
     Cov_Y = lambda w: y_cond_cov(w, x)
     
     yhat = jnp.atleast_1d(m_Y(m))
+    C = yhat.shape[0]
+    
     if adaptive_variance:
-        R = jnp.eye(yhat.shape[0]) * obs_noise_var
+        R = jnp.eye(C) * obs_noise_var
     else:
         R = jnp.atleast_2d(Cov_Y(m))
-    L = jnp.linalg.cholesky(R)
-    A = jnp.linalg.lstsq(L, jnp.eye(L.shape[0]))[0].T
+    R_chol = jnp.linalg.cholesky(R)
+    A = jnp.linalg.lstsq(R_chol, jnp.eye(C))[0].T
     H = _jacrev_2d(m_Y, m)
-    W_tilde = jnp.hstack([Sigma * U, (H.T @ A).reshape(U.shape[0], -1)])
+    W_tilde = jnp.hstack([Lambda * U, (H.T @ A).reshape(P, -1)])
 
     # Update the U matrix
     u, lamb, _ = jnp.linalg.svd(W_tilde, full_matrices=False)
@@ -222,12 +236,12 @@ def _lofi_spherical_cov_condition_on(m, U, Sigma, eta, y_cond_mean, y_cond_cov, 
     D = (lamb**2)/(eta**2 + eta * lamb**2)
     K = (H.T @ A) @ A.T/eta - (D * u) @ (u.T @ ((H.T @ A) @ A.T))
 
-    U_cond = u[:, :U.shape[1]]
-    Sigma_cond = lamb[:U.shape[1]]
+    U_cond = u[:, :L]
+    Lambda_cond = lamb[:L]
 
     m_cond = m + K @ (y - yhat)
 
-    return m_cond, U_cond, Sigma_cond, eta
+    return m_cond, U_cond, Lambda_cond
 
 
 # Diagonal LOFI ----------------------------------------------------------------
