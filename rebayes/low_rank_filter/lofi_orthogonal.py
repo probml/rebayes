@@ -70,7 +70,8 @@ class RebayesLoFiOrthogonal(RebayesLoFi):
         
         return Sigma_obs
     
-    # @partial(jit, static_argnums=(0,))
+    
+    @partial(jit, static_argnums=(0,))
     def update_state(
         self,
         bel: LoFiBel,
