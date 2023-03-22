@@ -253,8 +253,6 @@ def _lofi_diagonal_cov_inflate(
     U: Float[Array, "state_dim memory_size"],
     Lambda: Float[Array, "memory_size"],
     eta: float,
-    gamma: float,
-    q: float,
     Ups: Float[Array, "state_dim"],
     alpha: float,
     inflation: str = "bayesian"
@@ -267,8 +265,6 @@ def _lofi_diagonal_cov_inflate(
         U (D_hid, D_mem,): Prior basis.
         Lambda (D_mem,): Prior signular values.
         eta (float): Prior precision.
-        gamma (float): Dynamics decay factor.
-        q (float): Dynamics noise factor.
         Ups (D_hid,): Prior diagonal covariance.
         alpha (float): Covariance inflation factor.
         inflation (str, optional): Type of inflation. Defaults to 'bayesian'.
