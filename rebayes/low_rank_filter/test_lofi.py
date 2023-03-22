@@ -1,10 +1,13 @@
 import pytest
 
 from rebayes.base import RebayesParams
-from rebayes.low_rank_filter.lofi import LoFiParams, INFLATION_METHODS
-from rebayes.low_rank_filter.lofi_orthogonal import RebayesLoFiOrthogonal
-from rebayes.low_rank_filter.lofi_spherical import RebayesLoFiSpherical
-from rebayes.low_rank_filter.lofi_diagonal import RebayesLoFiDiagonal
+from rebayes.low_rank_filter.lofi import (
+    LoFiParams,
+    INFLATION_METHODS,
+    RebayesLoFiOrthogonal,
+    RebayesLoFiSpherical,
+    RebayesLoFiDiagonal,
+)
 from rebayes.low_rank_filter.test_orfit import load_rmnist_data
 from rebayes.utils.utils import get_mlp_flattened_params
 
