@@ -61,7 +61,7 @@ def make_dual_lofi_estimator(
         bel = DualLoFiBel(
             pp_mean = params.mu0,
             mean = params.mu0,
-            basis = jnp.zeroes((P, m)),
+            basis = jnp.zeros((P, m)),
             svs = jnp.zeros(m),
             eta = params.eta0,
             gamma = params.dynamics_scale_factor,
@@ -253,7 +253,7 @@ def make_dual_lofi_orthogonal_estimator(
         return bel_cond
 
     spherical_estimator = make_dual_lofi_spherical_estimator(params, obs, lofi_params)
-    estimator = spherical_estimator.replace(update_state = update_state)
+    estimator = spherical_estimator._replace(update_state = update_state)
     
     return estimator
 

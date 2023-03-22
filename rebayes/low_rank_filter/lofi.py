@@ -41,7 +41,7 @@ class LoFiBel:
     
     Ups: CovMat = None
     nobs: int = 0
-    obs_noise_var: float = 0.0
+    obs_noise_var: float = 1.0
 
     # @property
     # def cov(self):
@@ -205,19 +205,18 @@ class RebayesLoFiSpherical(RebayesLoFi):
         m, U, Lambda, eta, nobs, obs_noise_var = \
             bel.mean, bel.basis, bel.svs, bel.eta, bel.nobs, bel.obs_noise_var
         
-        # Estimate emission covariance.
-        nobs_est, obs_noise_var_est = \
-            _lofi_estimate_noise(m, self.model_params.emission_mean_function,
-                                 x, y, nobs, obs_noise_var, 
-                                 self.model_params.adaptive_emission_cov)
-        
         # Condition on observation.
         m_cond, U_cond, Lambda_cond = \
             _lofi_spherical_cov_condition_on(m, U, Lambda, eta, 
                                              self.model_params.emission_mean_function,
                                              self.model_params.emission_cov_function,
                                              x, y, self.model_params.adaptive_emission_cov,
-                                             obs_noise_var_est)
+                                             obs_noise_var)
+        
+        # Estimate emission covariance.
+        nobs_est, obs_noise_var_est = \
+            _lofi_estimate_noise(m_cond, self.model_params.emission_mean_function,
+                                 x, y, nobs, obs_noise_var, self.model_params.adaptive_emission_cov)
         
         bel_cond = bel.replace(
             mean = m_cond,
@@ -243,19 +242,19 @@ class RebayesLoFiOrthogonal(RebayesLoFiSpherical):
         m, U, Lambda, eta, nobs, obs_noise_var = \
             bel.mean, bel.basis, bel.svs, bel.eta, bel.nobs, bel.obs_noise_var
         
-        # Estimate emission covariance.
-        nobs_est, obs_noise_var_est = \
-            _lofi_estimate_noise(m, self.model_params.emission_mean_function,
-                                 x, y, nobs, obs_noise_var, 
-                                 self.model_params.adaptive_emission_cov)
-        
         # Condition on observation.
         m_cond, U_cond, Lambda_cond = \
             _lofi_orth_condition_on(m, U, Lambda, eta, 
                                     self.model_params.emission_mean_function,
                                     self.model_params.emission_cov_function,
                                     x, y, self.model_params.adaptive_emission_cov,
-                                    obs_noise_var_est, nobs_est)
+                                    obs_noise_var, nobs)
+        
+        # Estimate emission covariance.
+        nobs_est, obs_noise_var_est = \
+            _lofi_estimate_noise(m, self.model_params.emission_mean_function,
+                                 x, y, nobs, obs_noise_var, 
+                                 self.model_params.adaptive_emission_cov)
         
         bel_cond = bel.replace(
             mean = m_cond,
@@ -339,19 +338,19 @@ class RebayesLoFiDiagonal(RebayesLoFi):
         m, U, Lambda, Ups, nobs, obs_noise_var = \
             bel.mean, bel.basis, bel.svs, bel.Ups, bel.nobs, bel.obs_noise_var
         
-        # Estimate emission covariance.
-        nobs_est, obs_noise_var_est = \
-            _lofi_estimate_noise(m, self.model_params.emission_mean_function,
-                                 x, y, nobs, obs_noise_var, 
-                                 self.model_params.adaptive_emission_cov)
-        
         # Condition on observation.
         m_cond, U_cond, Lambda_cond, Ups_cond = \
             _lofi_diagonal_cov_condition_on(m, U, Lambda, Ups,
                                             self.model_params.emission_mean_function,
                                             self.model_params.emission_cov_function,
                                             x, y, self.model_params.adaptive_emission_cov,
-                                            obs_noise_var_est)
+                                            obs_noise_var)
+        
+        # Estimate emission covariance.
+        nobs_est, obs_noise_var_est = \
+            _lofi_estimate_noise(m, self.model_params.emission_mean_function,
+                                 x, y, nobs, obs_noise_var, 
+                                 self.model_params.adaptive_emission_cov)
         
         bel_cond = bel.replace(
             mean = m_cond,
