@@ -20,7 +20,7 @@ from rebayes.low_rank_filter.lofi_core import (
 )
 
 
-# Common classes ---------------------------------------------------------------
+# Common Classes ---------------------------------------------------------------
 
 INFLATION_METHODS = [
     'bayesian', 
