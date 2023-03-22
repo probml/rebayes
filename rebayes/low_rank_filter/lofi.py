@@ -252,7 +252,7 @@ class RebayesLoFiOrthogonal(RebayesLoFiSpherical):
         
         # Estimate emission covariance.
         nobs_est, obs_noise_var_est = \
-            _lofi_estimate_noise(m, self.model_params.emission_mean_function,
+            _lofi_estimate_noise(m_cond, self.model_params.emission_mean_function,
                                  x, y, nobs, obs_noise_var, 
                                  self.model_params.adaptive_emission_cov)
         
@@ -348,7 +348,7 @@ class RebayesLoFiDiagonal(RebayesLoFi):
         
         # Estimate emission covariance.
         nobs_est, obs_noise_var_est = \
-            _lofi_estimate_noise(m, self.model_params.emission_mean_function,
+            _lofi_estimate_noise(m_cond, self.model_params.emission_mean_function,
                                  x, y, nobs, obs_noise_var, 
                                  self.model_params.adaptive_emission_cov)
         
