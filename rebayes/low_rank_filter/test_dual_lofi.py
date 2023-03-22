@@ -21,6 +21,10 @@ from rebayes.extended_kalman_filter.test_ekf import make_linreg_rebayes_params, 
 from rebayes.utils.utils import get_mlp_flattened_params
 
 
+RebayesLoFiEstimators = [RebayesLoFiOrthogonal, RebayesLoFiSpherical, RebayesLoFiDiagonal]
+make_dual_lofi_estimator_methods = [make_dual_lofi_orthogonal_estimator, make_dual_lofi_spherical_estimator, make_dual_lofi_diagonal_estimator]
+
+
 def allclose(u, v):
     return jnp.allclose(u, v, atol=1e-2)
 
@@ -49,89 +53,19 @@ def make_linreg_dual_params(nfeatures):
 
 
 @pytest.mark.parametrize(
-    "steady_state, inflation_type",
-    [(ss, it) for ss in [True, False] for it in INFLATION_METHODS]
+    "steady_state, inflation_type, estimator_class, make_dual_estimator_method",
+    [(ss, it, RebayesLoFiEstimators[i], make_dual_lofi_estimator_methods[i]) 
+     for ss in [True, False] for it in INFLATION_METHODS for i in range(len(RebayesLoFiEstimators))]
 )
-def test_lofi_orth_adaptive_backwards_compatibility(steady_state, inflation_type):
-    # check that we estimate the same obs noise as Peter's EKF code (for certain settings)
+def test_lofi_adaptive_backwards_compatibility(steady_state, inflation_type, estimator_class, make_dual_estimator_method):
     (X, Y) = make_linreg_data()
 
     # old estimator
-    N, D = X.shape
-    params = make_linreg_rebayes_params(D)
-    params.adaptive_emission_cov = True
-    lofi_params = LoFiParams(memory_size=10, steady_state=steady_state, inflation=inflation_type)
-    estimator = RebayesLoFiOrthogonal(params, lofi_params)
-    final_bel, _ = estimator.scan(X, Y)
-    obs_noise_lofi = final_bel.obs_noise_var
-
-    params, obs_model = make_linreg_dual_params(D)
-    params.obs_noise = 1.0
-    dual_lofi_params = DualLoFiParams(
-        memory_size=10,
-        inflation=inflation_type,
-        steady_state=steady_state,
-        obs_noise_estimator = "post",
-        obs_noise_lr_fn= lambda t: 1.0/(t+1)
-    )
-
-    dual_estimator = make_dual_lofi_orthogonal_estimator(params, obs_model, dual_lofi_params)
-    carry, _ = dual_rebayes_scan(dual_estimator,  X, Y)
-    params, final_bel = carry
-    obs_noise_dual = params.obs_noise
-    
-    assert allclose(obs_noise_dual, obs_noise_lofi)
-
-
-@pytest.mark.parametrize(
-    "steady_state, inflation_type",
-    [(ss, it) for ss in [True, False] for it in INFLATION_METHODS]
-)
-def test_lofi_spherical_adaptive_backwards_compatibility(steady_state, inflation_type):
-    # check that we estimate the same obs noise as Peter's EKF code (for certain settings)
-    (X, Y) = make_linreg_data()
-
-    # old estimator
-    N, D = X.shape
+    _, D = X.shape
     params = make_linreg_rebayes_params(D)
     params.adaptive_emission_cov = True
     lofi_params = LoFiParams(memory_size=1, steady_state=steady_state, inflation=inflation_type)
-    estimator = RebayesLoFiSpherical(params, lofi_params)
-    final_bel, _ = estimator.scan(X, Y)
-    obs_noise_lofi = final_bel.obs_noise_var
-
-    params, obs_model = make_linreg_dual_params(D)
-    params.obs_noise = 1.0
-    dual_lofi_params = DualLoFiParams(
-        memory_size=1,
-        inflation=inflation_type,
-        steady_state=steady_state,
-        obs_noise_estimator = "post", 
-        obs_noise_lr_fn= lambda t: 1.0/(t+1)
-    )
-
-    dual_estimator = make_dual_lofi_spherical_estimator(params, obs_model, dual_lofi_params)
-    carry, _ = dual_rebayes_scan(dual_estimator,  X, Y)
-    params, final_bel = carry
-    obs_noise_dual = params.obs_noise
-    
-    assert allclose(obs_noise_dual, obs_noise_lofi)
-    
-
-@pytest.mark.parametrize(
-    "steady_state, inflation_type",
-    [(ss, it) for ss in [True, False] for it in INFLATION_METHODS]
-)
-def test_lofi_diagonal_adaptive_backwards_compatibility(steady_state, inflation_type):
-    # check that we estimate the same obs noise as Peter's EKF code (for certain settings)
-    (X, Y) = make_linreg_data()
-
-    # old estimator
-    N, D = X.shape
-    params = make_linreg_rebayes_params(D)
-    params.adaptive_emission_cov = True
-    lofi_params = LoFiParams(memory_size=1, steady_state=steady_state, inflation=inflation_type)
-    estimator = RebayesLoFiDiagonal(params, lofi_params)
+    estimator = estimator_class(params, lofi_params)
     final_bel, _ = estimator.scan(X, Y)
     obs_noise_lofi = final_bel.obs_noise_var
 
@@ -145,7 +79,7 @@ def test_lofi_diagonal_adaptive_backwards_compatibility(steady_state, inflation_
         obs_noise_lr_fn= lambda t: 1.0/(t+1)
     )
 
-    dual_estimator = make_dual_lofi_diagonal_estimator(params, obs_model, dual_lofi_params)
+    dual_estimator = make_dual_estimator_method(params, obs_model, dual_lofi_params)
     carry, _ = dual_rebayes_scan(dual_estimator,  X, Y)
     params, final_bel = carry
     obs_noise_dual = params.obs_noise

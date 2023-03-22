@@ -12,6 +12,9 @@ from rebayes.low_rank_filter.test_orfit import load_rmnist_data
 from rebayes.utils.utils import get_mlp_flattened_params
 
 
+RebayesLoFiEstimators = [RebayesLoFiOrthogonal, RebayesLoFiSpherical, RebayesLoFiDiagonal]
+
+
 def setup_lofi(memory_size, steady_state, inflation_type):
     input_dim, hidden_dims, output_dim = 784, [2, 2], 1
     model_dims = [input_dim, *hidden_dims, output_dim]
@@ -35,13 +38,13 @@ def setup_lofi(memory_size, steady_state, inflation_type):
     )
     
     return model_params, lofi_params
-
+    
 
 @pytest.mark.parametrize(
-    "memory_size, steady_state, inflation_type",
-    [(10, ss, it) for ss in [True, False] for it in INFLATION_METHODS]
+    "memory_size, steady_state, inflation_type, estimator_class",
+    [(10, ss, it, ec) for ss in [True, False] for it in INFLATION_METHODS for ec in RebayesLoFiEstimators]
 )
-def test_lofi_orthogonal(memory_size, steady_state, inflation_type):
+def test_lofi(memory_size, steady_state, inflation_type, estimator_class):
     # Load rotated MNIST dataset
     n_train = 200
     X_train, y_train = load_rmnist_data(n_train)
@@ -52,55 +55,7 @@ def test_lofi_orthogonal(memory_size, steady_state, inflation_type):
     
     # Test if run without error
     model_params, lofi_params = setup_lofi(memory_size, steady_state, inflation_type)
-    lofi_estimator = RebayesLoFiOrthogonal(
-        model_params = model_params,
-        lofi_params = lofi_params,
-    )
-    _ = lofi_estimator.scan(X_train, y_train, callback)
-    
-    assert True
-    
-
-@pytest.mark.parametrize(
-    "memory_size, steady_state, inflation_type",
-    [(10, ss, it) for ss in [True, False] for it in INFLATION_METHODS]
-)
-def test_lofi_spherical(memory_size, steady_state, inflation_type):
-    # Load rotated MNIST dataset
-    n_train = 200
-    X_train, y_train = load_rmnist_data(n_train)
-    
-    # Define mean callback function
-    def callback(bel, *args, **kwargs):
-        return bel.mean
-    
-    # Test if run without error
-    model_params, lofi_params = setup_lofi(memory_size, steady_state, inflation_type)
-    lofi_estimator = RebayesLoFiSpherical(
-        model_params = model_params,
-        lofi_params = lofi_params,
-    )
-    _ = lofi_estimator.scan(X_train, y_train, callback)
-    
-    assert True
-    
-    
-@pytest.mark.parametrize(
-    "memory_size, steady_state, inflation_type",
-    [(10, ss, it) for ss in [True, False] for it in INFLATION_METHODS]
-)
-def test_lofi_diagonal(memory_size, steady_state, inflation_type):
-    # Load rotated MNIST dataset
-    n_train = 200
-    X_train, y_train = load_rmnist_data(n_train)
-    
-    # Define mean callback function
-    def callback(bel, *args, **kwargs):
-        return bel.mean
-    
-    # Test if run without error
-    model_params, lofi_params = setup_lofi(memory_size, steady_state, inflation_type)
-    lofi_estimator = RebayesLoFiDiagonal(
+    lofi_estimator = estimator_class(
         model_params = model_params,
         lofi_params = lofi_params,
     )
