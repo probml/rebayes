@@ -1,19 +1,16 @@
 from abc import ABC
-from abc import abstractmethod
+from collections import namedtuple
 from functools import partial
+from typing import Callable, Union, Tuple, Any
 
-import jax.numpy as jnp
-from jax import jacrev, jit
-from jax.lax import scan
-from jaxtyping import Float, Array
-from typing import Callable, NamedTuple, Union, Tuple, Any
 import chex
+from jax import jit
+from jax.lax import scan
+import jax.numpy as jnp
+from jaxtyping import Float, Array
 from jax_tqdm import scan_tqdm
-from itertools import cycle
-
-_jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
-
 import tensorflow_probability.substrates.jax as tfp
+
 tfd = tfp.distributions
 MVN = tfd.MultivariateNormalFullCovariance
 
@@ -22,11 +19,9 @@ FnStateToState = Callable[ [Float[Array, "state_dim"]], Float[Array, "state_dim"
 FnStateAndInputToState = Callable[ [Float[Array, "state_dim"], Float[Array, "input_dim"]], Float[Array, "state_dim"]]
 FnStateToEmission = Callable[ [Float[Array, "state_dim"]], Float[Array, "emission_dim"]]
 FnStateAndInputToEmission = Callable[ [Float[Array, "state_dim"], Float[Array, "input_dim"] ], Float[Array, "emission_dim"]]
-
 FnStateToEmission2 = Callable[[Float[Array, "state_dim"]], Float[Array, "emission_dim emission_dim"]]
 FnStateAndInputToEmission2 = Callable[[Float[Array, "state_dim"], Float[Array, "input_dim"]], Float[Array, "emission_dim emission_dim"]]
 EmissionDistFn = Callable[ [Float[Array, "state_dim"], Float[Array, "state_dim state_dim"]], tfd.Distribution]
-
 CovMat = Union[float, Float[Array, "dim"], Float[Array, "dim dim"]]
 
 
@@ -35,11 +30,13 @@ class Gaussian:
     mean: chex.Array
     cov: chex.Array
 
+
 @chex.dataclass
 class Belief:
     dummy: float
     # The belief state can be a Gaussian or some other representation (eg samples)
     # This must be a chex dataclass so that it works with lax.scan as a return type for carry
+
 
 @chex.dataclass
 class RebayesParams:
@@ -55,6 +52,7 @@ class RebayesParams:
     adaptive_emission_cov: bool=False
     dynamics_covariance_inflation_factor: float=0.0
 
+
 def make_rebayes_params():
     # dummy constructor
     model_params = RebayesParams(
@@ -65,7 +63,9 @@ def make_rebayes_params():
         emission_mean_function=None,
         emission_cov_function=None,
     ) 
+    
     return model_params
+
 
 class Rebayes(ABC):
     def __init__(
