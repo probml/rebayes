@@ -9,6 +9,7 @@ dist/
 *.pkl
 *-ubyte*
 *.log
+*.mp4
 
 # ignore figures unless manually added
 *.png
