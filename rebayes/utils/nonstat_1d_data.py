@@ -44,7 +44,11 @@ def make_coefs(key, n_dist):
     """
     Make c0, c1 distributions
     """
-    coefs = jax.random.uniform(key, shape=(n_dist, 2), minval=-5, maxval=5)
+    key_slope, key_distort = jax.random.split(key)
+    coefs = jax.random.uniform(key_distort, shape=(n_dist, 2), minval=-5, maxval=5)
+    coef_slope = jax.random.uniform(key_slope, shape=(n_dist, 1), minval=-1.0, maxval=1.0)
+
+    coefs = jnp.c_[coefs, coef_slope]
     return coefs
 
 
@@ -56,7 +60,7 @@ def sample_1d_regression_sequence(key, n_dist, n_train=100, n_test=100):
     @jax.vmap
     def vsample_dataset(key, coefs):
         train, test = make_1d_regression(
-            key, n_train, n_test, coef0=coefs[0], coef1=coefs[1]
+            key, n_train, n_test, coef0=coefs[0], coef1=coefs[1], coef2=coefs[2]
         )
         return train, test
     
