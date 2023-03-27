@@ -53,8 +53,8 @@ class SLANG(Rebayes):
         self.params = params
         self.log_lik = lambda mu, x, y: \
             self.params.likelihood_dist(
-                self.emission_mean_function(mu, x), 
-                self.emission_cov_function(mu, x)
+                self.params.emission_mean_function(mu, x), 
+                self.params.emission_cov_function(mu, x)
             ).log_prob(y)
         self.grad_log_lik = jit(grad(self.log_lik, argnums=(0)))
     
@@ -94,14 +94,14 @@ class SLANG(Rebayes):
             self.params.alpha, self.params.beta, self.params.lamb, self.params.n_eig
         
         theta = self._fast_sample(bel)
-        g = self.grad_log_lik(theta, x, y)
+        g = self.grad_log_lik(theta, x, y).reshape((D, -1))
         V = self._fast_eig(bel, g, beta, n_eig)
-        diag_corr = (1-beta) * (U**2).sum(dim=1) + beta * (g**2) - (V**2).sum(dim=1)
+        diag_corr = (1-beta) * (U**2).sum(axis=1) + beta * (g**2).ravel() - (V**2).sum(axis=1)
         
         U_post = V
         d_post = (1-beta) * d + diag_corr + lamb * jnp.ones(D)
         
-        ghat = g + lamb*m
+        ghat = g + lamb*m.reshape((D, -1))
         m_post = m - alpha*self._fast_inverse(SLANGBel(mean=m, cov_lr=U_post, cov_diag=d_post), ghat)
         
         # Construct the new belief
@@ -153,7 +153,7 @@ class SLANG(Rebayes):
             return Q_orth, Q_orth
         
         Q_orth, _ = scan(_orth_step, Q, jnp.arange(n_iter))
-        V, _ = jnp.linalg.svd(Q_orth, full_matrices=False)
+        V, *_ = jnp.linalg.svd(Q_orth, full_matrices=False)
         V = V[:, :L]
 
         return V
@@ -167,6 +167,6 @@ class SLANG(Rebayes):
         _, L = U.shape
         dinv = (1/d).reshape((d.shape[0], 1))
         A = jnp.linalg.pinv(jnp.eye(L) + U.T @ (U*dinv))
-        y = dinv.ravel() * g - ((U*dinv) @ A) @ ((U*dinv).T @ g)
+        y = dinv.ravel() * g.ravel() - ((U*dinv) @ A) @ ((U*dinv).T @ g).ravel()
 
         return y
