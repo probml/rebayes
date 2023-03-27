@@ -63,50 +63,6 @@ class FifoTrainState(TrainState):
         )
 
 
-class FSGD(Rebayes):
-    """
-    FIFO Replay-buffer SGD training procedure
-    """
-    def __init__(self, lossfn, n_inner=1):
-        self.lossfn = lossfn
-        self.loss_grad = jax.value_and_grad(self.lossfn, 0)
-        self.n_inner = n_inner
-
-    def init_bel(self):
-        raise NotImplementedError
-
-    def predict_obs(self, bel, X):
-        yhat = bel.apply_fn(bel.params, X)
-        return yhat
-
-    def predict_state(self, bel):
-        return bel
- 
-    @partial(jax.jit, static_argnums=(0,))
-    def _train_step(
-        self,
-        state: FifoTrainState,
-    ) -> Tuple[float, FifoTrainState]:
-        """
-        """
-        X, y = state.buffer_X, state.buffer_y
-        loss, grads = self.loss_grad(state.params, state.counter, X, y, state.apply_fn)
-        state = state.apply_gradients(grads=grads)
-        return loss, state
-
-    @partial(jax.jit, static_argnums=(0,))
-    def update_state(self, bel, Xt, yt):
-        bel = bel.apply_buffers(Xt, yt) 
-
-        def partial_step(_, bel):
-            _, bel = self._train_step(bel)
-            return bel
-        bel = jax.lax.fori_loop(0, self.n_inner - 1, partial_step, bel)
-        # Do not count inner steps as part of the outer step
-        _, bel = self._train_step(bel)
-        return bel
- 
-
 class FifoSGD(Rebayes):
     """
     FIFO Replay-buffer SGD training procedure
