@@ -68,15 +68,6 @@ class LoFiParams:
     inflation: str = 'bayesian'
 
 
-@chex.dataclass
-class PosteriorLoFiFiltered:
-    """Marginals of the Gaussian filtering posterior.
-    """
-    filtered_means: Float[Array, "ntime state_dim"]
-    filtered_bases: Float[Array, "ntime state_dim memory_size"]
-    filtered_svs: Float[Array, "ntime memory_size"] = None
-
-
 class RebayesLoFi(Rebayes):
     def __init__(
         self,
