@@ -6,14 +6,17 @@ from jax import jit, grad
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Int
 
-from rebayes.base import Rebayes, RebayesParams
+from rebayes.base import Rebayes
+
+
+_vec_pinv = lambda v: jnp.where(v != 0, 1/jnp.array(v), 0) # Vector pseudo-inverse
 
 
 @chex.dataclass
 class GGTBel:
     mean: chex.Array
     gradients: chex.Array
-    prev_grad = chex.Array
+    prev_grad: chex.Array
     num_obs: int = 0
     
     def update_buffer(self, g, beta):
@@ -37,7 +40,7 @@ class GGTParams:
     learning_rate: float
     beta1: float = 0.9 # momentum term
     beta2: float = 1.0 # forgetting term
-    eps: float = 1e-4
+    eps: float = 0 # regularization term
 
 
 class RebayesGGT(Rebayes):
@@ -45,7 +48,7 @@ class RebayesGGT(Rebayes):
         self,
         params: GGTParams,
     ):
-        super.__init__(params)
+        super().__init__(params)
     
     def init_bel(self) -> GGTBel:
         m0 = self.params.initial_mean
@@ -77,16 +80,18 @@ class RebayesGGT(Rebayes):
         y: Float[Array, "output_dim"],
     ) -> GGTBel:
         g_prev = bel.prev_grad
-        eta, eps = self.params.learning_rate, self.params.eps
+        beta1, beta2, eps, eta = \
+            self.params.beta1, self.params.beta2, self.params.eps, self.params.learning_rate
         
-        g = grad(self.params.loss_fn)(bel.mean, X, y) + self.params.beta1 * g_prev
-        bel = bel.update_buffer(g, self.params.beta2)
-        G = bel.gradients
+        g = beta1 * g_prev + (1-beta1) * grad(self.params.loss_fn)(bel.mean, X, y)
+        bel = bel.update_buffer(g, beta2)
+        effective_size = jnp.min(jnp.array([bel.num_obs, self.params.memory_size]))
+        G = bel.gradients / jnp.sqrt(effective_size)
 
-        V, S, _ = jnp.linalg.svd(G.T @ G, full_matrices=False, hermition=True)
+        V, S, _ = jnp.linalg.svd(G.T @ G, full_matrices=False, hermitian=True)
         Sig = jnp.sqrt(S)
-        U = G @ (V * 1/Sig)
-        update = g/eps + (U * (1/(Sig + eps) - 1/eps)) @ (U.T @ g)
+        U = G @ (V * _vec_pinv(Sig))
+        update = _vec_pinv(eps) * g + (U * (_vec_pinv(Sig + eps) - _vec_pinv(eps))) @ (U.T @ g)
         
         bel_post = bel.replace(
             mean = bel.mean - eta * update,
