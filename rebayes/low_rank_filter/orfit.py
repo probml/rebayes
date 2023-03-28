@@ -30,7 +30,7 @@ class RebayesORFit(Rebayes):
         params: RebayesParams,
         memory_size: int = 10,
     ):
-        self.params = params
+        super().__init__(params)
         self.memory_size = memory_size
     
     def init_bel(self):
