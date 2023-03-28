@@ -43,21 +43,6 @@ class LoFiBel:
     nobs: int = 0
     obs_noise_var: float = 1.0
 
-    # @property
-    # def cov(self):
-    #     """
-    #     For large-dimensional systems,
-    #     use at your own risk.
-    #     """
-    #     Lambda = self.singular_values
-    #     num_features = len(self.mean)
-    #     D = Lambda ** 2 / (self.eta * (self.eta + Lambda ** 2))
-    #     D = jnp.diag(D)
-
-    #     I = jnp.eye(num_features)
-    #     cov = I / self.eta - self.basis @ D @ self.basis.T
-    #     return cov
-
 
 @chex.dataclass
 class LoFiParams:
