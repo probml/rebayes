@@ -85,8 +85,7 @@ class RebayesGGT(Rebayes):
         
         g = beta1 * g_prev + (1-beta1) * grad(self.params.loss_fn)(bel.mean, X, y)
         bel = bel.update_buffer(g, beta2)
-        effective_size = jnp.min(jnp.array([bel.num_obs, self.params.memory_size]))
-        G = bel.gradients / jnp.sqrt(effective_size)
+        G = bel.gradients
 
         V, S, _ = jnp.linalg.svd(G.T @ G, full_matrices=False, hermitian=True)
         Sig = jnp.sqrt(S)
