@@ -45,7 +45,7 @@ class RebayesGGT(Rebayes):
         self,
         params: GGTParams,
     ):
-        self.params = params
+        super.__init__(params)
     
     def init_bel(self) -> GGTBel:
         m0 = self.params.initial_mean
