@@ -1,6 +1,6 @@
 from typing import Tuple, Callable
 
-from jax import jacrev
+from jax import jacrev, jit
 from jax.lax import scan
 import jax.numpy as jnp
 import jax.random as jr
@@ -11,6 +11,7 @@ from jaxtyping import Float, Array
 
 _jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
 _normalize = lambda v: jnp.where(v.any(), v / jnp.linalg.norm(v), jnp.zeros(shape=v.shape))
+_vec_pinv = lambda v: jnp.where(v != 0, 1/jnp.array(v), 0) # Vector pseudo-inverse
 
 
 def _invert_2x2_block_matrix(
@@ -42,6 +43,26 @@ def _invert_2x2_block_matrix(
     D_inv = K_inv
 
     return jnp.block([[A_inv, B_inv], [C_inv, D_inv]])
+
+
+def _fast_svd(
+    M: Float[Array, "m n"],
+) -> Tuple[Float[Array, "m k"], Float[Array, "k"]]:
+    """Singular value decomposition.
+
+    Args:
+        M (m, n): Matrix to decompose.
+
+    Returns:
+        U (m, k): Left singular vectors.
+        S (k,): Singular values.
+    """
+    U, S, _ = jnp.linalg.svd(M.T @ M, full_matrices = False, hermitian = True)
+    U = M @ (U * _vec_pinv(jnp.sqrt(S)))
+    S = jnp.sqrt(S)
+    
+    return U, S
+    
 
 
 # Common inference functions ---------------------------------------------------
@@ -232,7 +253,7 @@ def _lofi_spherical_cov_condition_on(
     W_tilde = jnp.hstack([Lambda * U, (H.T @ A).reshape(P, -1)])
 
     # Update the U matrix
-    u, lamb, _ = jnp.linalg.svd(W_tilde, full_matrices=False)
+    u, lamb = _fast_svd(W_tilde)
 
     D = (lamb**2)/(eta**2 + eta * lamb**2)
     K = (H.T @ A) @ A.T/eta - (D * u) @ (u.T @ ((H.T @ A) @ A.T))
@@ -394,7 +415,7 @@ def _lofi_diagonal_cov_condition_on(
     W_tilde = jnp.hstack([Lambda * U, (H.T @ A).reshape(P, -1)])
     
     # Update the U matrix
-    u, lamb, _ = jnp.linalg.svd(W_tilde, full_matrices=False)
+    u, lamb = _fast_svd(W_tilde)
     
     U_cond, U_extra = u[:, :L], u[:, L:]
     Lambda_cond, Lambda_extra = lamb[:L], lamb[L:]
@@ -482,3 +503,7 @@ def _lofi_orth_condition_on(
     m_cond = m + K/eta @ (y - yhat)
 
     return m_cond, U_cond, Lambda_cond
+
+
+# Kernel LOFI --------------------------------------------------------------
+

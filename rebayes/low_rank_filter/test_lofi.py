@@ -1,5 +1,8 @@
 import pytest
 
+import jax.numpy as jnp
+import jax.random as jr
+
 from rebayes.base import RebayesParams
 from rebayes.low_rank_filter.lofi import (
     LoFiParams,
@@ -8,6 +11,7 @@ from rebayes.low_rank_filter.lofi import (
     RebayesLoFiSpherical,
     RebayesLoFiDiagonal,
 )
+from rebayes.low_rank_filter.lofi_core import _fast_svd
 from rebayes.low_rank_filter.test_orfit import load_rmnist_data
 from rebayes.utils.utils import get_mlp_flattened_params
 
@@ -39,6 +43,16 @@ def setup_lofi(memory_size, steady_state, inflation_type):
     
     return model_params, lofi_params
     
+
+def test_fast_svd():
+    for i in [10, 100, 1_000, 1_000_000]:
+        print(i)
+        A = jr.normal(jr.PRNGKey(i), (i, 10))
+        u_n, s_n, _ = jnp.linalg.svd(A, full_matrices=False)
+        u_s, s_s = _fast_svd(A)
+        
+        assert jnp.allclose(jnp.abs(u_n), jnp.abs(u_s), atol=1e-2) and jnp.allclose(s_n, s_s, atol=1e-2)
+        
 
 @pytest.mark.parametrize(
     "memory_size, steady_state, inflation_type, estimator_class",
