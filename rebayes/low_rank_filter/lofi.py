@@ -364,7 +364,7 @@ class RebayesLoFiDiagonal(RebayesLoFi):
         return bel_cond
 
     @partial(jax.jit, static_argnums=(0,4))
-    def sample_posterior_obs(self, key, bel, x, shape=None):
+    def pred_obs_mc(self, key, bel, x, shape=None):
         """
         Sample observations from the posterior predictive distribution.
         """
