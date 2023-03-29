@@ -1,13 +1,17 @@
+from functools import partial
 from typing import Any, Callable, Literal, Tuple, Union
 
 import chex
+from flax.training.train_state import TrainState
 from jax import jit
 import jax.numpy as jnp
+import jax.random as jr
 from jaxtyping import Float, Array
 
 from rebayes.base import CovMat
 from rebayes.dual_base import (
     DualRebayesParams,
+    form_tril_matrix,
     ObsModel,
     RebayesEstimator,
 )
@@ -71,6 +75,29 @@ def make_dual_lofi_estimator(
         
         return params, bel
     
+    def init_optimizer_params(
+        tx: Any,
+        C: int,
+        key: int = 0
+    ) -> TrainState:
+        """Initialize optimizer parameters for the observation noise.
+
+        Args:
+            tx (optimizer): Optax optimizer.
+            C (int): Emission dimension.
+            key (int, optional): PRNG key. Defaults to 0.
+        """
+        if isinstance(key, int):
+            key = jr.PRNGKey(key)
+        
+        params_bel = TrainState.create(
+            apply_fn = obs.emission_mean_function,
+            params = jr.normal(key, (int(C*(C+1)/2),)),
+            tx = tx,
+        )
+        
+        return params_bel
+    
     def predict_state(params, bel):
         return None
     
@@ -112,16 +139,30 @@ def make_dual_lofi_estimator(
         else:
             yhat = jnp.atleast_1d(y_pred)
 
-        obs_noise = params.obs_noise
-        sqerr = ((yhat - y).T @ (yhat - y)).squeeze() / yhat.shape[0]
+        yhat = jnp.atleast_1d(yhat)
+        obs_noise = jnp.atleast_2d(params.obs_noise)
+        sqerr = jnp.outer((yhat - y), (yhat - y)) / yhat.shape[0]
           
         r = (1-lr)*obs_noise + lr*sqerr
-        obs_noise = jnp.max(jnp.array([1e-6, r]))
+        obs_noise = jnp.where(jnp.linalg.norm(r) < 1e-6, 1e-6 * jnp.eye(r.shape[0]), r)
         params = params.replace(nobs = nobs, obs_noise = obs_noise)
         
         return params
     
-    return RebayesEstimator(init, predict_state, update_state, predict_obs, predict_obs_cov, update_params)
+    @partial(jit, static_argnums=(2,))
+    def update_optimizer_params(
+        params: DualRebayesParams,
+        params_bel: TrainState,
+        C: int,
+    ) -> DualRebayesParams:
+        theta = params_bel.params
+        L = form_tril_matrix(theta, C)
+        params = params.replace(obs_noise = L @ L.T)
+        
+        return params
+    
+    return RebayesEstimator(init, init_optimizer_params, predict_state, update_state, 
+                            predict_obs, predict_obs_cov, update_params, update_optimizer_params,)
 
 
 # Spherical LOFI Estimator -----------------------------------------------------
@@ -209,13 +250,10 @@ def make_dual_lofi_spherical_estimator(
         return Sigma_obs
     
     base_estimator = make_dual_lofi_estimator(params, obs, lofi_params)
-    estimator = RebayesEstimator(
-        init = base_estimator.init,
+    estimator = base_estimator._replace(
         predict_state = predict_state,
         update_state = update_state,
-        predict_obs = base_estimator.predict_obs,
         predict_obs_cov = predict_obs_cov,
-        update_params = base_estimator.update_params
     )
     
     return estimator
@@ -347,13 +385,10 @@ def make_dual_lofi_diagonal_estimator(
         return Sigma_obs
     
     base_estimator = make_dual_lofi_estimator(params, obs, lofi_params)
-    estimator = RebayesEstimator(
-        init = base_estimator.init,
+    estimator = base_estimator._replace(
         predict_state = predict_state,
         update_state = update_state,
-        predict_obs = base_estimator.predict_obs,
         predict_obs_cov = predict_obs_cov,
-        update_params = base_estimator.update_params
     )
     
     return estimator

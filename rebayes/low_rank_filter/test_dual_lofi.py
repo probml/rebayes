@@ -70,7 +70,7 @@ def test_lofi_adaptive_backwards_compatibility(steady_state, inflation_type, est
     obs_noise_lofi = final_bel.obs_noise_var
 
     params, obs_model = make_linreg_dual_params(D)
-    params.obs_noise = 1.0
+    params.obs_noise = 1.0 * jnp.eye(1)
     dual_lofi_params = DualLoFiParams(
         memory_size=1,
         inflation=inflation_type,
