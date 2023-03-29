@@ -35,7 +35,7 @@ def _full_covariance_condition_on(m, P, y_cond_mean, y_cond_cov, u, y, num_iter,
         prior_mean, prior_cov = carry
         yhat = jnp.atleast_1d(m_Y(prior_mean))
         if adaptive_variance:
-            R = jnp.eye(yhat.shape[0]) * obs_noise_var
+            R = jnp.atleast_2d(obs_noise_var)
         else:
             R = jnp.atleast_2d(Cov_Y(prior_mean))
         H =  _jacrev_2d(m_Y, prior_mean)
