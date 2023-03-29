@@ -37,5 +37,5 @@ def sample_dlr(key, W, diag, shape=None):
     n_elements = np.prod(shape)
     keys = jax.random.split(key, n_elements)
     samples = jax.vmap(sample_dlr_single, in_axes=(0, None, None))(keys, W, diag)
-    samples = samples.reshape(shape + W.shape)
+    samples = samples.reshape(*shape, -1)
     return samples
