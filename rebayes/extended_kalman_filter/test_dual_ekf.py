@@ -74,18 +74,18 @@ def test_adaptive_backwards_compatibility():
     params.adaptive_emission_cov = True
     estimator = RebayesEKF(params, method='fcekf')
     final_bel, lls = estimator.scan(X, Y)
-    obs_noise_ekf = final_bel.obs_noise_var
+    obs_noise_ekf = jnp.atleast_1d(final_bel.obs_noise_var).ravel()
     # print(obs_noise_ekf)
 
     params, obs_model = make_linreg_dual_params(D)
     # if we use the post-update estimator, initialized with q=0 and lr=1/N(t), we should match peter's code
-    params.obs_noise = 0.0
+    params.obs_noise = 0.0 * jnp.eye(1)
     ekf_params = EKFParams(method="fcekf", obs_noise_estimator = "post", obs_noise_lr_fn= lambda t: 1.0/(t+1))
 
     estimator = make_dual_ekf_estimator(params, obs_model, ekf_params)
     carry, lls = dual_rebayes_scan(estimator,  X, Y)
     params, final_bel = carry
-    obs_noise_dual = params.obs_noise
+    obs_noise_dual = jnp.atleast_1d(params.obs_noise).ravel()
     # print(obs_noise_dual)
     assert jnp.allclose(obs_noise_dual, obs_noise_ekf)
 
@@ -94,7 +94,7 @@ def test_adaptive():
     (X, Y) = make_linreg_data()
     N, D = X.shape
     params, obs_model = make_linreg_dual_params(D)
-    init_R =  0.1*jnp.std(Y)
+    init_R =  0.1*jnp.std(Y) * jnp.eye(1)
     lr = 0.01
 
     params.obs_noise = init_R

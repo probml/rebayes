@@ -129,7 +129,7 @@ def make_dual_ekf_estimator(params: DualRebayesParams, obs: ObsModel, ekf_params
 
         yhat = jnp.atleast_1d(yhat)
         obs_noise = jnp.atleast_2d(params.obs_noise)
-        sqerr = jnp.outer((yhat - y), (yhat - y)) / (yhat.shape[0] - 1)
+        sqerr = jnp.outer((yhat - y), (yhat - y)) / yhat.shape[0]
           
         r = (1-lr)*obs_noise + lr*sqerr
         obs_noise = jnp.where(jnp.linalg.norm(r) < 1e-6, 1e-6 * jnp.eye(r.shape[0]), r)
