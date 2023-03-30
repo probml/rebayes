@@ -1,6 +1,7 @@
 from collections import namedtuple
 from typing import Any, Tuple, Union
 
+import jax
 import chex
 from jax.lax import scan
 import jax.numpy as jnp
@@ -156,3 +157,4 @@ def dual_rebayes_optimize_scan(
                 epoch_range.set_description(f"Epoch {epoch} average loss: {jnp.mean(jnp.array(losses)):.4f}")
     
     return params
+
