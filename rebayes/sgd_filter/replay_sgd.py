@@ -1,4 +1,6 @@
 import jax
+import einops
+import numpy as np
 import jax.numpy as jnp
 from typing import Tuple
 from functools import partial
@@ -119,3 +121,18 @@ class FifoSGD(Rebayes):
         # Do not count inner steps as part of the outer step
         _, bel = self._train_step(bel)
         return bel
+    
+
+    @partial(jax.jit, static_argnums=(0,4))
+    def pred_obs_mc(self, key, bel, x, shape=None):
+        """
+        Sample observations from the posterior predictive distribution.
+        """
+        shape = shape or (1,)
+        nsamples = np.prod(shape)
+        # Belief posterior predictive.
+        bel = self.predict_state(bel)
+        # TODO: sample from a jax.lax.scan loop over bootstrap of elements in the buffer
+        params_sample = jax.tree_map(lambda x: einops.repeat(x, " ... -> b  ...", b=nsamples), bel)  # (b, ...)
+        yhat_samples = jax.vmap(self.predirebayes/low_rank_filter/lrvga.pyct_obs, (0, None))(params_sample, x)
+        return yhat_samples

@@ -1,3 +1,4 @@
+import jax
 from functools import partial
 from jax import jit, lax, jacrev, vmap
 from jax import numpy as jnp
@@ -110,6 +111,22 @@ class RebayesEKF(Rebayes):
                                                   u, y, nobs, obs_noise_var,
                                                   adaptive_variance=self.adaptive_variance)
         return EKFBel(mean=mu, cov=Sigma, nobs=nobs, obs_noise_var=obs_noise_var)
+    
+    @partial(jit, static_argnums=(0,4))
+    def pred_obs_mc(self, key, bel, x, shape=None):
+        """
+        Sample observations from the posterior predictive distribution.
+        """
+        shape = shape or (1,)
+        # Belief posterior predictive.
+        bel = self.predict_state(bel)
+        if self.method != "fcekf":
+            cov = jnp.diagflat(bel.cov)
+        else:
+            cov = bel.cov
+        params_sample = jax.random.multivariate_normal(key, bel.mean, cov, shape)
+        yhat_samples = vmap(self.params.emission_mean_function, (0, None))(params_sample, x)
+        return yhat_samples
 
 
 

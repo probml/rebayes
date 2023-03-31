@@ -16,6 +16,7 @@ from flax import struct
 from jaxtyping import Array, Float
 from rebayes.base import Rebayes
 from jax.flatten_util import ravel_pytree
+from rebayes.utils.sampling import sample_dlr
 
 
 # Homoskedastic case (we estimate sigma at a warmup stage)
@@ -292,3 +293,15 @@ class LRVGA(Rebayes):
             return bel
         bel = jax.lax.fori_loop(0, self.n_outer, _step, bel)
         return bel
+
+    @partial(jax.jit, static_argnums=(0,4))
+    def pred_obs_mc(self, key, bel, x, shape=None):
+        """
+        Sample observations from the posterior predictive distribution.
+        """
+        shape = shape or (1,)
+        # Belief posterior predictive.
+        bel = self.predict_state(bel)
+        params_sample = sample_dlr(key, bel.W, bel.Psi.ravel(), shape) + bel.mu
+        yhat_samples, _ = jax.vmap(self.fwd_link, (0, None, None))(params_sample, bel, x)
+        return yhat_samples
