@@ -134,5 +134,5 @@ class FifoSGD(Rebayes):
         bel = self.predict_state(bel)
         # TODO: sample from a jax.lax.scan loop over bootstrap of elements in the buffer
         params_sample = jax.tree_map(lambda x: einops.repeat(x, " ... -> b  ...", b=nsamples), bel)  # (b, ...)
-        yhat_samples = jax.vmap(self.predirebayes/low_rank_filter/lrvga.pyct_obs, (0, None))(params_sample, x)
+        yhat_samples = jax.vmap(self.predict_obs, (0, None))(params_sample, x)
         return yhat_samples
