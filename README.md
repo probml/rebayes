@@ -8,4 +8,4 @@ but the observation model can be non-linear and non-Gaussian.
 
 This is work in progress; a stable version will be releaed late Spring 2023.
 
-![flipbook-lofi-fourier](https://user-images.githubusercontent.com/4108759/229053590-05a4089e-146d-4bc8-88b6-1723880af88e.png)
+![flipbook-lofi-fourier (3)](https://user-images.githubusercontent.com/4108759/229059244-7de86845-e92d-44c6-905b-3f4d8f6d59a6.png)
