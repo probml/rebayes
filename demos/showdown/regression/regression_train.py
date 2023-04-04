@@ -264,7 +264,7 @@ def train_sgd_agent(params, model, method, datasets,
         apply_fn=model.apply,
         init_params=params,
         tx=optax.adam(learning_rate),
-        buffer_size=dim_rank,
+        buffer_size=rank,
         dim_features=X_train.shape[1],
         dim_output=1,
         n_inner=n_inner

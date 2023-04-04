@@ -10,8 +10,8 @@ from rebayes.low_rank_filter import lofi
 
 def bbf(
     log_init_cov,
-    dynamics_weights,
-    dynamics_covariance,
+    log_dynamics_weights,
+    dynamics_log_cov,
     log_emission_cov,
     log_inflation,
     # Specify before running
@@ -21,7 +21,7 @@ def bbf(
     callback,
     apply_fn,
     params_lofi,
-    method="full_svd_lofi",
+    method="full_svd_lofi", # TODO: Deprecate this
     emission_mean_function=None,
     emission_cov_function=None,
 ):
@@ -33,6 +33,8 @@ def bbf(
 
     initial_covariance = jnp.exp(log_init_cov).item()
     inflation = jnp.exp(log_inflation)
+    dynamics_weights = jnp.exp(log_dynamics_weights)
+    dynamics_covariance = jnp.exp(dynamics_log_cov)
     if emission_mean_function is None:
         emission_mean_function = apply_fn
     if emission_cov_function is None:
@@ -50,7 +52,7 @@ def bbf(
         dynamics_covariance_inflation_factor=inflation,
     )
 
-    estimator = lofi.RebayesLoFi(params_rebayes, params_lofi, method=method, inflation="hybrid")
+    estimator = lofi.RebayesLoFiDiagonal(params_rebayes, params_lofi)
 
     bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
     metric = callback(bel, **test_callback_kwargs)["test"].item()
@@ -85,9 +87,6 @@ def create_optimizer(
     flat_params, recfn = ravel_pytree(params_init)
 
     kwargs = {}
-    if bounds["dynamics_covariance"] is None:
-        bounds.pop("dynamics_covariance", None)
-        kwargs["dynamics_covariance"] = None
     if bounds.get("log_inflation") is None:
         bounds.pop("log_inflation", None)
         kwargs["log_inflation"] = -np.inf
@@ -135,8 +134,8 @@ def get_best_params(n_params, optimizer):
 
     init_cov = np.exp(max_params["log_init_cov"]).item()
     emission_cov = np.exp(max_params.get("log_emission_cov", 0.0))
-    dynamics_weights = max_params["dynamics_weights"]
-    dynamics_cov = max_params.get("dynamics_covariance")
+    dynamics_weights = np.exp(max_params["log_dynamics_weights"])
+    dynamics_cov = np.exp(max_params.get("dynamics_log_cov"))
     inflation = np.exp(max_params.get("log_inflation", -np.inf))
 
     def emission_cov_function(w, x): return emission_cov
@@ -169,5 +168,5 @@ def build_estimator(init_mean, hparams, params_lofi, apply_fn, method="full_svd_
             **hparams,
         )
 
-    estimator = lofi.RebayesLoFi(params, params_lofi, method, inflation="hybrid")
+    estimator = lofi.RebayesLoFiDiagonal(params, params_lofi)
     return estimator

@@ -113,7 +113,7 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
 
     pbounds = {
         "log_init_cov": (-10, 0),
-        "dynamics_weights": (0.7, 1.0), # Change to log-space close to 1.0
+        "log_dynamics_weights": (-5, 0), # Change to log-space close to 1.0
         "log_emission_cov": (-80, 0.0),
         "dynamics_log_cov": (-80, 0.0),
     }
@@ -137,17 +137,15 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
     # -------------------------------------------------------------------------
     # Low-rank filter
     pbounds_lofi = pbounds.copy()
-    pbounds_lofi.pop("dynamics_log_cov")
+    # pbounds_lofi.pop("dynamics_log_cov")
     # pbounds_lofi["dynamics_covariance"] = None # If steady-state
-    pbounds_lofi["dynamics_covariance"] = (0.0, 1.0)
+    # pbounds_lofi["dynamics_covariance"] = (0.0, 1.0)
     pbounds_lofi["log_inflation"] = (-40, 0.0)
 
     method = "lofi"
     params_lofi = lofi.LoFiParams(
         memory_size=rank,
-        sv_threshold=0,
-        steady_state=True,
-        diagonal_covariance=False,
+        steady_state=False,
     )
 
     res, apply_fn, hparams = benchmark.train_lofi_agent(
@@ -161,31 +159,6 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
     print(f"{metric_final:=0.4f}")
     print("-" * 80)
     benchmark.store_results(res, f"{dataset_name}_{method}", output_path)
-
-    # Generalised LoFi (Optional parameter)
-    fit_generalised = False
-    if fit_generalised:
-        method = "lofi"
-        params_lofi = lofi.LoFiParams(
-            memory_size=rank,
-            sv_threshold=0,
-            steady_state=False,
-            diagonal_covariance=True,
-        )
-
-        res, apply_fn, hparams = benchmark.train_lofi_agent(
-            params, params_lofi, model, method, dataset, pbounds_lofi,
-            benchmark.train_callback, eval_callback,
-            optimizer_eval_kwargs,
-        )
-        method = "lofi_diag"
-        res["method"] = method
-
-        metric_final = res["output"]["test"][-1]
-        print(method)
-        print(f"{metric_final:=0.4f}")
-        print("-" * 80)
-        benchmark.store_results(res, f"{dataset_name}_{method}", output_path)
 
     # -------------------------------------------------------------------------
     # Replay-buffer SGD
@@ -207,29 +180,7 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
     benchmark.store_results(res, f"{dataset_name}_{method}", output_path)
 
     # -------------------------------------------------------------------------
-    # ORFIT
-    method = "orfit"
-    params_orfit = base.RebayesParams(
-        initial_mean=params_flat,
-        emission_mean_function=apply_fn,
-        **hparams
-    )
-
-    agent = lofi.RebayesLoFi(params_orfit, params_lofi, method=method)
-    test_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
-    _, output = agent.scan(
-        X_train, y_train, callback=eval_callback, progress_bar=False, **test_kwargs
-    )
-    res = {
-        "output": output,
-        "method": method,
-    }
-
-    metric_final = res["output"]["test"][-1]
-    print(method)
-    print(f"{metric_final:=0.4f}")
-    print("-" * 80)
-    benchmark.store_results(res, f"{dataset_name}_{method}", output_path)
+    # Low-rank Variational Gaussian Approximation (LRVGA)
 
     # random_state = 314
     # optimizer_eval_kwargs = {
@@ -264,7 +215,7 @@ def train_agents_general(key, model, res, dataset_name, output_path, rank):
 if __name__ == "__main__":
     import os
     # output_path = "/home/gerardoduran/documents/rebayes/demos/showdown/output/rotating-mnist"
-    ranks = [2, 5, 10, 20, 50]
+    ranks = [5, 10, 15, 20, 50]
     output_path = os.environ.get("REBAYES_OUTPUT")
     if output_path is None:
         output_path = "/tmp/rebayes"
