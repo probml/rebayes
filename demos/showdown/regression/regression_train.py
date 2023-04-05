@@ -249,16 +249,6 @@ def train_sgd_agent(params, model, method, datasets,
     learning_rate = best_hparams["learning_rate"]
     n_inner = round(best_hparams["n_inner"])
 
-
-    bel_init = rsgd.FifoTrainState.create(
-        apply_fn=part_apply_fn_sgd,
-        params=params,
-        tx=optax.adam(learning_rate=learning_rate),
-        buffer_size=rank,
-        dim_features=X_train.shape[1],
-        dim_output=1,
-    )
-
     agent = rsgd.FifoSGD(
         lossfn_rmse_fifo,
         apply_fn=model.apply,
