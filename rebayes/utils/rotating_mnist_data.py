@@ -1,6 +1,7 @@
 """
 Prepcocessing and data augmentation for the datasets.
 """
+import os
 import torchvision
 import numpy as np
 import jax.numpy as jnp
@@ -82,7 +83,7 @@ class DataAugmentationFactory:
         return dataset_proc.reshape(num_elements, -1)
 
 
-def load_mnist(root="./data", download=True):
+def load_mnist(root="/tmp/data", download=True):
     mnist_train = torchvision.datasets.MNIST(root=root, train=True, download=download)
     images = np.array(mnist_train.data) / 255.0
     labels = mnist_train.targets
@@ -114,6 +115,13 @@ def generate_rotated_images(images, n_processes, minangle=0, maxangle=180):
     n_configs = len(images)
     processer = DataAugmentationFactory(rotate_mnist)
     angles = np.random.uniform(minangle, maxangle, n_configs)
+    configs = [{"angle": float(angle)} for angle in angles]
+    images_proc = processer(images, configs, n_processes=n_processes)
+    return images_proc, angles
+
+
+def generate_rotated_images_pairs(images, angles, n_processes=1):
+    processer = DataAugmentationFactory(rotate_mnist)
     configs = [{"angle": float(angle)} for angle in angles]
     images_proc = processer(images, configs, n_processes=n_processes)
     return images_proc, angles
@@ -174,5 +182,3 @@ def load_rotated_mnist(
     test = (X_test, y_test)
 
     return train, test
-
-
