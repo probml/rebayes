@@ -12,6 +12,10 @@ def make_1d_regression(
     keys_train = jax.random.split(key_train, n_train)
     keys_test = jax.random.split(key_test, n_test)
     minval, maxval = -0.5, 0.5
+
+    def f(x):
+        y = coef2 * x + 0.3 * jnp.sin(coef0 + coef1 * jnp.pi * x)
+        return y
         
     @jax.vmap
     def gen(key):
@@ -21,12 +25,14 @@ def make_1d_regression(
             x = jnp.sort(x)
         
         noise = jax.random.normal(key) * 0.02
-        y = coef2 * x + 0.3 * jnp.sin(coef0 + coef1 * jnp.pi * x)
-        y = y + noise        
+        y = f(x) + noise
         return x, y
     
     X_train, y_train = gen(keys_train)
     X_test, y_test = gen(keys_test)
+
+    X_eval = jnp.linspace(minval, maxval, 500)
+    y_eval = f(X_eval)
     
     # Standardize dataset
     if True:
@@ -34,10 +40,13 @@ def make_1d_regression(
         y_train = (y_train - y_train.mean()) / y_train.std()
         X_test = (X_test - X_test.mean()) / X_test.std()
         y_test = (y_test - y_test.mean()) / y_test.std()
+        X_eval = (X_eval - X_eval.mean()) / X_eval.std()
+        y_eval = (y_eval - y_eval.mean()) / y_eval.std()
 
     train = (X_train, y_train)
     test = (X_test, y_test)
-    return train, test
+    eval  = (X_eval, y_eval)
+    return train, test, eval
 
 
 def make_coefs(key, n_dist):
@@ -59,12 +68,12 @@ def sample_1d_regression_sequence(key, n_dist, n_train=100, n_test=100):
     
     @jax.vmap
     def vsample_dataset(key, coefs):
-        train, test = make_1d_regression(
+        train, test, eval = make_1d_regression(
             key, n_train, n_test, coef0=coefs[0], coef1=coefs[1], coef2=coefs[2]
         )
-        return train, test
+        return train, test, eval
     
-    collection = vsample_dataset(keys_dataset, coefs)
+    *collection, eval_dataset = vsample_dataset(keys_dataset, coefs)
     collection_flat = jax.tree_map(lambda x: x.reshape(-1, 1), collection)
     collection_train, collection_test = collection_flat
     
@@ -93,6 +102,10 @@ def sample_1d_regression_sequence(key, n_dist, n_train=100, n_test=100):
         "test": {
             "X": collection_test[0],
             "y": collection_test[1],
+        },
+        "eval": {
+            "X": eval_dataset[0],
+            "y": eval_dataset[1]
         }
     }
     
