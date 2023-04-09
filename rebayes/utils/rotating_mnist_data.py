@@ -5,7 +5,7 @@ import os
 import torchvision
 import numpy as np
 import jax.numpy as jnp
-from typing import Union
+from typing import Union, Callable
 from multiprocessing import Pool
 from augly import image
 
@@ -111,19 +111,10 @@ def rotate_mnist(X, angle):
 
     return X_shift
 
-def generate_rotated_images(images, n_processes, minangle=0, maxangle=180, angles=None):
+def generate_rotated_images(images, n_processes, minangle=0, maxangle=180, anglefn=None):
     n_configs = len(images)
-    # angles = np.random.uniform(minangle, maxangle, n_configs) if angles is None else angles
-    t = np.linspace(0, 1, n_configs)
-    angles = np.exp(t) * np.sin(35 * t)
+    angles = anglefn(n_configs, minangle, maxangle)
 
-    # t = np.linspace(0, 1, n_configs)
-    # angles = np.exp(-2 * t) * np.sin(35 * t)
-
-    # t = np.linspace(-1.5, 1.5, n_configs)
-    # angles = np.exp(-np.abs(t)) * np.sin(15 * t)
-
-    angles = (angles + 1) / 2 * (maxangle - minangle) + minangle + np.random.randn(n_configs) * 2
     processer = DataAugmentationFactory(rotate_mnist)
     configs = [{"angle": float(angle)} for angle in angles]
     images_proc = processer(images, configs, n_processes=n_processes)
@@ -138,6 +129,7 @@ def generate_rotated_images_pairs(images, angles, n_processes=1):
 
 
 def load_rotated_mnist(
+    anglefn: Callable,
     root: str = "/tmp/data",
     target_digit: Union[int, None] = None,
     minangle: int = 0,
@@ -167,8 +159,13 @@ def load_rotated_mnist(
         X_train = X_train[map_train]
         X_test = X_test[map_test]
 
+        digits_train = labels_train[map_train]
+        digits_test = labels_test[map_test]
+
     X = np.concatenate([X_train, X_test], axis=0)
-    (X, y) = generate_rotated_images(X, n_processes, minangle=minangle, maxangle=maxangle)
+    digits = np.concatenate([digits_train, digits_test], axis=0)
+
+    (X, y) = generate_rotated_images(X, n_processes, minangle=minangle, maxangle=maxangle, anglefn=anglefn)
 
     X = jnp.array(X)
     y = jnp.array(y)
@@ -180,15 +177,16 @@ def load_rotated_mnist(
     elif frac_train is not None:
         num_train = round(frac_train * len(X_train))
 
-    X_train, y_train = X[:num_train], y[:num_train]
-    X_test, y_test = X[num_train:], y[num_train:]
+    X_train, y_train, digits_train = X[:num_train], y[:num_train], digits[:num_train]
+    X_test, y_test, digits_test = X[num_train:], y[num_train:], digits[num_train:]
 
     if sort_by_angle:
         ix_sort = jnp.argsort(y_train)
         X_train = X_train[ix_sort]
         y_train = y_train[ix_sort]
+        digits_train = digits_train[ix_sort]
 
-    train = (X_train, y_train)
-    test = (X_test, y_test)
+    train = (X_train, y_train, digits_train)
+    test = (X_test, y_test, digits_test)
 
     return train, test
