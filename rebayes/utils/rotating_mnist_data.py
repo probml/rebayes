@@ -161,6 +161,9 @@ def load_rotated_mnist(
 
         digits_train = labels_train[map_train]
         digits_test = labels_test[map_test]
+    else:
+        digits_train = labels_train
+        digits_test = labels_test
 
     X = np.concatenate([X_train, X_test], axis=0)
     digits = np.concatenate([digits_train, digits_test], axis=0)
