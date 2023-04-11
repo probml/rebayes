@@ -6,6 +6,7 @@ from jaxtyping import Float, Array
 from tensorflow_probability.substrates.jax.distributions import MultivariateNormalDiag as MVN
 import chex
 
+from dynamax.linear_gaussian_ssm.inference import PosteriorGSSMFiltered
 from rebayes.base import Rebayes, RebayesParams 
 from rebayes.extended_kalman_filter.ekf_core import _stationary_dynamics_diagonal_predict, _full_covariance_dynamics_predict, _diagonal_dynamics_predict
 from rebayes.extended_kalman_filter.ekf_core import _full_covariance_condition_on,  _variational_diagonal_ekf_condition_on,  _fully_decoupled_ekf_condition_on
@@ -159,3 +160,119 @@ def _ekf_estimate_noise(m, y_cond_mean, u, y, nobs, obs_noise_var, adaptive_vari
     return nobs, obs_noise_var
 
 
+
+# DEPRECATED
+
+def stationary_dynamics_fully_decoupled_conditional_moments_gaussian_filter(
+    model_params: RebayesParams, 
+    emissions: Float[Array, "ntime emission_dim"], 
+    num_iter: int=1, 
+    inputs: Float[Array, "ntime input_dim"]=None,
+    adaptive_variance: bool=False
+) -> PosteriorGSSMFiltered:
+    """Run a fully decoupled EKF on a stationary dynamics model.
+
+    Args:
+        model_params (RebayesParams): Model parameters.
+        emissions (T, D_hid): Sequence of emissions.
+        num_iter (int, optional): Number of linearizations around posterior for update step.
+        inputs (T, D_in, optional): Array of inputs.
+
+    Returns:
+        filtered_posterior: GSSMPosterior instance containing,
+            filtered_means (T, D_hid)
+            filtered_covariances (T, D_hid, D_hid)
+    """    
+    num_timesteps = len(emissions)
+    initial_mean, initial_cov = model_params.initial_mean, model_params.initial_covariance
+    dynamics_cov = model_params.dynamics_covariance
+
+    # Process conditional emission moments to take in control inputs
+    m_Y, Cov_Y = model_params.emission_mean_function, model_params.emission_cov_function
+    m_Y, Cov_Y  = (_process_fn(fn, inputs) for fn in (m_Y, Cov_Y))
+    inputs = _process_input(inputs, num_timesteps)
+    nobs, obs_noise_var = 0, 0.0
+
+    def _step(carry, t):
+        pred_mean, pred_cov_diag, nobs, obs_noise_var = carry
+
+        # Get parameters and inputs for time index t
+        Q_diag = _get_params(dynamics_cov, 1, t)
+        u = inputs[t]
+        y = emissions[t]
+
+        # Condition on the emission
+        filtered_mean, filtered_cov_diag = \
+            _fully_decoupled_ekf_condition_on(pred_mean, pred_cov_diag, m_Y, Cov_Y, 
+                                              u, y, num_iter, adaptive_variance, obs_noise_var)
+
+        # Update observation noise
+        nobs, obs_noise_var = _ekf_estimate_noise(filtered_mean, m_Y, u, y, nobs, obs_noise_var, adaptive_variance)
+
+        # Predict the next state
+        pred_mean, pred_cov_diag = _stationary_dynamics_diagonal_predict(filtered_mean, filtered_cov_diag, Q_diag)
+
+        return (pred_mean, pred_cov_diag, nobs, obs_noise_var), (filtered_mean, filtered_cov_diag)
+
+    # Run the general linearization filter
+    carry = (initial_mean, initial_cov, nobs, obs_noise_var)
+    _, (filtered_means, filtered_covs) = lax.scan(_step, carry, jnp.arange(num_timesteps))
+    return PosteriorGSSMFiltered(marginal_loglik=None, filtered_means=filtered_means, filtered_covariances=filtered_covs)
+
+
+def stationary_dynamics_variational_diagonal_extended_kalman_filter(
+    model_params: RebayesParams, 
+    emissions: Float[Array, "ntime emission_dim"], 
+    num_iter: int=1, 
+    inputs: Float[Array, "ntime input_dim"]=None,
+    adaptive_variance: bool=False
+) -> PosteriorGSSMFiltered:
+    """Run a variational diagonal EKF on a stationary dynamics model.
+
+    Args:
+        model_params (RebayesParams): Model parameters.
+        emissions (T, D_hid): Sequence of emissions.
+        num_iter (int, optional): Number of linearizations around posterior for update step.
+        inputs (T, D_in, optional): Array of inputs.
+
+    Returns:
+        filtered_posterior: GSSMPosterior instance containing,
+            filtered_means (T, D_hid)
+            filtered_covariances (T, D_hid, D_hid)
+    """    
+    num_timesteps = len(emissions)
+    initial_mean, initial_cov = model_params.initial_mean, model_params.initial_covariance
+    dynamics_cov = model_params.dynamics_covariance
+
+    # Process conditional emission moments to take in control inputs
+    m_Y, Cov_Y = model_params.emission_mean_function, model_params.emission_cov_function
+    m_Y, Cov_Y  = (_process_fn(fn, inputs) for fn in (m_Y, Cov_Y))
+    inputs = _process_input(inputs, num_timesteps)
+    nobs, obs_noise_var = 0, 0.0
+
+    def _step(carry, t):
+        pred_mean, pred_cov_diag, nobs, obs_noise_var = carry
+
+        # Get parameters and inputs for time index t
+        Q_diag = _get_params(dynamics_cov, 1, t)
+        u = inputs[t]
+        y = emissions[t]
+
+        # Condition on the emission
+        filtered_mean, filtered_cov_diag = \
+            _variational_diagonal_ekf_condition_on(pred_mean, pred_cov_diag, m_Y, 
+                                                   Cov_Y, u, y, num_iter, adaptive_variance,
+                                                   obs_noise_var)
+
+        # Update observation noise
+        nobs, obs_noise_var = _ekf_estimate_noise(filtered_mean, m_Y, u, y, nobs, obs_noise_var, adaptive_variance)
+
+        # Predict the next state
+        pred_mean, pred_cov_diag = _stationary_dynamics_diagonal_predict(filtered_mean, filtered_cov_diag, Q_diag)
+
+        return (pred_mean, pred_cov_diag, nobs, obs_noise_var), (filtered_mean, filtered_cov_diag)
+
+    # Run the general linearization filter
+    carry = (initial_mean, initial_cov, nobs, obs_noise_var)
+    _, (filtered_means, filtered_covs) = lax.scan(_step, carry, jnp.arange(num_timesteps))
+    return PosteriorGSSMFiltered(marginal_loglik=None, filtered_means=filtered_means, filtered_covariances=filtered_covs)
