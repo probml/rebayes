@@ -139,6 +139,7 @@ def load_rotated_mnist(
     frac_train: Union[float, None] = None,
     seed: int = 314,
     sort_by_angle: bool = False,
+    num_test: int = None,
 ):
     """
     """
@@ -181,7 +182,10 @@ def load_rotated_mnist(
         num_train = round(frac_train * len(X_train))
 
     X_train, y_train, digits_train = X[:num_train], y[:num_train], digits[:num_train]
-    X_test, y_test, digits_test = X[num_train:], y[num_train:], digits[num_train:]
+    if num_test is not None:
+        X_test, y_test, digits_test = X[num_train : num_train + num_test], y[num_train : num_train + num_test], digits[num_train : num_train + num_test]
+    else:
+        X_test, y_test, digits_test = X[num_train:], y[num_train:], digits[num_train:]
 
     if sort_by_angle:
         ix_sort = jnp.argsort(y_train)
