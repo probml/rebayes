@@ -3,6 +3,7 @@ In this script, we consider the gradually-rotating
 MNIST problem for classification. We analyse the
 effect of the dynamics_weights (gamma) parameter
 and the dynamics_covariance (Q) parameter.
+We take an inflation factor of 0.0
 """
 
 import jax
@@ -33,6 +34,7 @@ class MLP(nn.Module):
         x = nn.Dense(self.n_hidden)(x)
         x = self.activation(x)
         x = nn.Dense(self.n_out)(x)
+        x = nn.softmax(x)
         return x
 
 
@@ -154,7 +156,7 @@ def categorise(labels):
     # One-hot-encoded
     n_classes = max(labels) + 1
     
-    ohed = jax.nn.ohe_hot(labels, n_classes)
+    ohed = jax.nn.one_hot(labels, n_classes)
     filter_columns = ~(ohed == 0).all(axis=0)
     ohed = ohed[:, filter_columns]
     return ohed
@@ -177,6 +179,7 @@ if __name__ == "__main__":
 
     model, dnn_params, flat_params, recfn = make_bnn_flax(dim_in, n_classes)
     apply_fn = partial(apply_fn_flat, model=model, recfn=recfn)
+    emission_cov_fn = partial(emission_cov_function, fn_mean=apply_fn)
 
     ssm_params = base.RebayesParams(
             initial_mean=flat_params,
@@ -184,7 +187,7 @@ if __name__ == "__main__":
             dynamics_weights=1,
             dynamics_covariance=0.0,
             emission_mean_function=apply_fn,
-            emission_cov_function = lambda w, x: apply_fn(w, x) * (1 - apply_fn(w, x)) + 1e-3,
+            emission_cov_function=emission_cov_fn,
             dynamics_covariance_inflation_factor=0.0
     )
 
