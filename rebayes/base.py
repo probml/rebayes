@@ -3,6 +3,7 @@ from collections import namedtuple
 from functools import partial
 from typing import Callable, Union, Tuple, Any
 
+import jax
 import chex
 from jax import jit
 from jax.lax import scan
@@ -123,6 +124,7 @@ class Rebayes(ABC):
         callback=None,
         bel=None,
         progress_bar=False,
+        debug=False,
         **kwargs
     ) -> Tuple[Belief, Any]:
         """Apply filtering to entire sequence of data. Return final belief state and outputs from callback."""
@@ -140,7 +142,15 @@ class Rebayes(ABC):
             carry = self.init_bel()
         if progress_bar:
             step = scan_tqdm(num_timesteps)(step)
-        bel, outputs = scan(step, carry, jnp.arange(num_timesteps))
+        if debug:
+            outputs = []
+            for t in range(num_timesteps):
+                carry, out = step(carry, t)
+                outputs.append(out)
+            bel = carry
+            outputs = jnp.stack(outputs)
+        else:
+            bel, outputs = scan(step, carry, jnp.arange(num_timesteps))
         return bel, outputs
     
     @partial(jit, static_argnums=(0, 4))
