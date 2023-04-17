@@ -33,8 +33,7 @@ class MLP(nn.Module):
         x = self.activation(x)
         x = nn.Dense(self.n_hidden)(x)
         x = self.activation(x)
-        x = nn.Dense(self.n_out)(x)
-        x = nn.softmax(x)
+        x = nn.Dense(self.n_out, name="last-layer")(x)
         return x
 
 
@@ -111,7 +110,6 @@ def make_bnn_flax(dim_in, dim_out, nhidden=50):
     model = MLP(dim_out, nhidden)
     params = model.init(key, jnp.ones((1, dim_in)))
     flat_params, recfn = ravel_pytree(params)
-    n_params = len(flat_params)
     return model, params, flat_params, recfn
 
 
@@ -179,10 +177,11 @@ if __name__ == "__main__":
 
     model, dnn_params, flat_params, recfn = make_bnn_flax(dim_in, n_classes)
     apply_fn = partial(apply_fn_flat, model=model, recfn=recfn)
-    emission_cov_fn = partial(emission_cov_function, fn_mean=apply_fn)
+    def emission_mean_fn(w, x): return nn.softmax(apply_fn(w, x))
+    emission_cov_fn = partial(emission_cov_function, fn_mean=emission_mean_fn)
 
     outputs = []
-    dynamics_shift = [0, 1e-6, 5e-6, 1e-5, 5e-5, 1e-4]
+    dynamics_shift = [0, 1e-6]
     for dshift in dynamics_shift:
         print(f"Dynamics shift: {dshift: 0.3e}", end="\r")
         ssm_params = base.RebayesParams(
