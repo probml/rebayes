@@ -163,6 +163,8 @@ def categorise(labels):
 if __name__ == "__main__":
     target_digits = [2, 3]
     n_classes = len(target_digits)
+    dynamics_weight = 1.0
+    dynamics_covariance = 0.0
     num_train = 6_000
     mem = 10
 
@@ -180,32 +182,26 @@ if __name__ == "__main__":
     def emission_mean_fn(w, x): return nn.softmax(apply_fn(w, x))
     emission_cov_fn = partial(emission_cov_function, fn_mean=emission_mean_fn)
 
-    outputs = []
-    dynamics_shift = [0, 1e-6]
-    for dshift in dynamics_shift:
-        print(f"Dynamics shift: {dshift: 0.3e}", end="\r")
-        ssm_params = base.RebayesParams(
-                initial_mean=flat_params,
-                initial_covariance=0.1,
-                dynamics_weights=1 - dshift,
-                dynamics_covariance=0.0,
-                emission_mean_function=apply_fn,
-                emission_cov_function=emission_cov_fn,
-                dynamics_covariance_inflation_factor=0.0
-        )
+    ssm_params = base.RebayesParams(
+            initial_mean=flat_params,
+            initial_covariance=0.1,
+            dynamics_weights=dynamics_weight,
+            dynamics_covariance=dynamics_covariance,
+            emission_mean_function=apply_fn,
+            emission_cov_function=emission_cov_fn,
+            dynamics_covariance_inflation_factor=0.0
+    )
 
-        lofi_params = lofi.LoFiParams(memory_size=mem, steady_state=False, inflation="hybrid")
+    lofi_params = lofi.LoFiParams(memory_size=mem, steady_state=False, inflation="hybrid")
 
-        agent = lofi.RebayesLoFiDiagonal(ssm_params, lofi_params)
+    agent = lofi.RebayesLoFiDiagonal(ssm_params, lofi_params)
 
-        ymean, ystd = data["ymean"], data["ystd"]
-        callback_part = partial(callback,
-                                apply_fn=agent.params.emission_mean_function,
-                                X_test=X_train, y_test=Y_train,
-                            )
+    ymean, ystd = data["ymean"], data["ystd"]
+    callback_part = partial(callback,
+                            apply_fn=agent.params.emission_mean_function,
+                            X_test=X_train, y_test=Y_train,
+                        )
 
-        bel, outputs_lofi = agent.scan(X_train, Y_train, progress_bar=True, callback=callback_part)
-        bel = jax.block_until_ready(bel)
-        outputs_lofi = tree_to_cpu(outputs_lofi)
-        outputs_lofi["dynamics_shift"] = dshift
-        outputs.append(outputs_lofi)
+    bel, outputs_lofi = agent.scan(X_train, Y_train, progress_bar=True, callback=callback_part)
+    bel = jax.block_until_ready(bel)
+    outputs_lofi = tree_to_cpu(outputs_lofi)
