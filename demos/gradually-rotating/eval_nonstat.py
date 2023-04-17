@@ -153,21 +153,28 @@ def categorise(labels):
     """
     # One-hot-encoded
     n_classes = max(labels) + 1
-    
+
     ohed = jax.nn.one_hot(labels, n_classes)
     filter_columns = ~(ohed == 0).all(axis=0)
     ohed = ohed[:, filter_columns]
     return ohed
 
 
+def load_lofi_agent():
+    ...
+
+
+def load_rsgd_agent():
+    ...
+
+
 if __name__ == "__main__":
+    from cfg_regression import get_config
     target_digits = [2, 3]
     n_classes = len(target_digits)
-    dynamics_weight = 1.0
-    dynamics_covariance = 0.0
-    initial_covariance = 0.1
     num_train = 6_000
-    mem = 10
+
+    cfg = get_config()
 
     data = load_data(damp_angle, target_digits, num_train, sort_by_angle=False)
     X_train, signal_train, labels_train = data["dataset"]["train"]
@@ -185,15 +192,15 @@ if __name__ == "__main__":
 
     ssm_params = base.RebayesParams(
             initial_mean=flat_params,
-            initial_covariance=initial_covariance,
-            dynamics_weights=dynamics_weight,
-            dynamics_covariance=dynamics_covariance,
+            initial_covariance=cfg.lofi.initial_covariance,
+            dynamics_weights=cfg.lofi.dynamics_weight,
+            dynamics_covariance=cfg.lofi.dynamics_covariance,
             emission_mean_function=apply_fn,
             emission_cov_function=emission_cov_fn,
             dynamics_covariance_inflation_factor=0.0
     )
 
-    lofi_params = lofi.LoFiParams(memory_size=mem, steady_state=False, inflation="hybrid")
+    lofi_params = lofi.LoFiParams(memory_size=cfg.lofi.memory, steady_state=False, inflation="hybrid")
 
     agent = lofi.RebayesLoFiDiagonal(ssm_params, lofi_params)
 
