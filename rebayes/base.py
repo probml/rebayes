@@ -76,7 +76,11 @@ class Rebayes(ABC):
         self.params = params
 
 
-    def init_bel(self) -> Belief:
+    def init_bel(
+        self,
+        Xinit = None,
+        Yinit = None,
+    ) -> Belief:
         raise NotImplementedError
 
     @partial(jit, static_argnums=(0,))
@@ -125,6 +129,8 @@ class Rebayes(ABC):
         bel=None,
         progress_bar=False,
         debug=False,
+        Xinit=None,
+        Yinit=None,
         **kwargs
     ) -> Tuple[Belief, Any]:
         """Apply filtering to entire sequence of data. Return final belief state and outputs from callback."""
@@ -139,7 +145,10 @@ class Rebayes(ABC):
             return bel, out
         carry = bel
         if bel is None:
-            carry = self.init_bel()
+            if Xinit is not None:
+                carry = self.init_bel(Xinit, Yinit)
+            else:
+                carry = self.init_bel()
         if progress_bar:
             step = scan_tqdm(num_timesteps)(step)
         if debug:

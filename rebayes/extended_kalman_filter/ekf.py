@@ -47,18 +47,21 @@ class RebayesEKF(Rebayes):
         self.alpha = params.dynamics_covariance_inflation_factor
         self.nobs, self.obs_noise_var = 0, 0.0
 
-    def init_bel(self):
+    def init_bel(self, Xinit=None, Yinit=None):
         if self.method == 'fcekf':
             cov = self.params.initial_covariance * jnp.eye(self.params.initial_mean.shape[0])
         else:
             cov = self.params.initial_covariance * jnp.ones(self.params.initial_mean.shape[0])
-        return EKFBel(
+        bel = EKFBel(
             mean=self.params.initial_mean, 
             cov=cov,
             nobs=self.nobs,
             obs_noise_var=self.obs_noise_var,
         )
-
+        if Xinit is not None: # warmup sequentially
+            bel, _ = self.scan(Xinit, Yinit, bel=bel)
+        return bel
+       
     @partial(jit, static_argnums=(0,))
     def predict_state(self, bel):
         m, P, nobs, obs_noise_var = bel.mean, bel.cov, bel.nobs, bel.obs_noise_var
