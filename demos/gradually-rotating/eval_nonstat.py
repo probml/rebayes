@@ -165,6 +165,7 @@ if __name__ == "__main__":
     n_classes = len(target_digits)
     dynamics_weight = 1.0
     dynamics_covariance = 0.0
+    initial_covariance = 0.1
     num_train = 6_000
     mem = 10
 
@@ -184,7 +185,7 @@ if __name__ == "__main__":
 
     ssm_params = base.RebayesParams(
             initial_mean=flat_params,
-            initial_covariance=0.1,
+            initial_covariance=initial_covariance,
             dynamics_weights=dynamics_weight,
             dynamics_covariance=dynamics_covariance,
             emission_mean_function=apply_fn,
