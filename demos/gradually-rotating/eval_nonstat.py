@@ -39,6 +39,7 @@ class MLP(nn.Module):
 
 def callback(bel, pred_obs, t, X, y, bel_pred, apply_fn, lagn=20, store_fro=True, **kwargs):
     X_test, y_test = kwargs["X_test"], kwargs["y_test"]
+    recfn = kwargs["recfn"]
     
     slice_ix = jnp.arange(0, lagn) + t
     
@@ -103,7 +104,19 @@ def load_data(
     }
 
     return res
+
+
+@partial(jax.jit, static_argnames=("apply_fn",))
+def lossfn_fifo(params, counter, X, y, apply_fn):
+    yhat = apply_fn(params, X)
+    yhat = jax.nn.softmax(yhat).squeeze()
+    y = y.squeeze()
+
+    logits = jnp.log(yhat)
+    loss = -(logits * y * counter).sum() / counter.sum()
     
+    return loss
+
 
 def make_bnn_flax(dim_in, dim_out, nhidden=50):
     key = jax.random.PRNGKey(314)
@@ -160,56 +173,85 @@ def categorise(labels):
     return ohed
 
 
-def load_lofi_agent():
-    ...
+# def load_lofi_agent(cfg, emission_mean_fn, emission_cov_fn, dim_in, n_classes):
+def load_lofi_agent(
+    cfg,
+    mean_init,
+    emission_mean_fn,
+    emission_cov_fn,
+):
+    ssm_params = base.RebayesParams(
+            initial_mean=mean_init,
+            initial_covariance=cfg.lofi.initial_covariance,
+            dynamics_weights=cfg.lofi.dynamics_weight,
+            dynamics_covariance=cfg.lofi.dynamics_covariance,
+            emission_mean_function=emission_mean_fn,
+            emission_cov_function=emission_cov_fn,
+            dynamics_covariance_inflation_factor=0.0
+    )
+
+    lofi_params = lofi.LoFiParams(memory_size=cfg.memory, steady_state=False, inflation="hybrid")
+
+    agent = lofi.RebayesLoFiDiagonal(ssm_params, lofi_params)
+    return agent
 
 
-def load_rsgd_agent():
-    ...
+# TODO: Finish RSGD agent
+def load_rsgd_agent(
+    cfg,
+    mean_init,
+    apply_fn,
+    lossfn,
+    dim_in,
+    dim_out,
+):
+    lr, buffer = 5e-4, 10
+    agent = rsgd.FifoSGD(lossfn, 
+        apply_fn=apply_fn,
+        init_params=mean_init,
+        tx=optax.adam(learning_rate=lr),
+        buffer_size=cfg.memory,
+        dim_features=dim_in,
+        dim_output=dim_out,
+        n_inner=cfg.rsgd.n_inner
+        )
+
 
 
 if __name__ == "__main__":
+    ...
+
+def main():
     from cfg_regression import get_config
     target_digits = [2, 3]
     n_classes = len(target_digits)
     num_train = 6_000
 
-    cfg = get_config()
-
     data = load_data(damp_angle, target_digits, num_train, sort_by_angle=False)
     X_train, signal_train, labels_train = data["dataset"]["train"]
     X_test, signal_test, labels_test = data["dataset"]["test"]
-
     Y_train = categorise(labels_train)
     Y_test = categorise(labels_test)
 
-    _, dim_in = data["dataset"]["train"][0].shape
+    cfg = get_config()
 
-    model, dnn_params, flat_params, recfn = make_bnn_flax(dim_in, n_classes)
+    model, tree_params, flat_params, recfn = make_bnn_flax(dim_in, n_classes)
     apply_fn = partial(apply_fn_flat, model=model, recfn=recfn)
     def emission_mean_fn(w, x): return nn.softmax(apply_fn(w, x))
     emission_cov_fn = partial(emission_cov_function, fn_mean=emission_mean_fn)
 
-    ssm_params = base.RebayesParams(
-            initial_mean=flat_params,
-            initial_covariance=cfg.lofi.initial_covariance,
-            dynamics_weights=cfg.lofi.dynamics_weight,
-            dynamics_covariance=cfg.lofi.dynamics_covariance,
-            emission_mean_function=apply_fn,
-            emission_cov_function=emission_cov_fn,
-            dynamics_covariance_inflation_factor=0.0
-    )
+    _, dim_in = data["dataset"]["train"][0].shape
 
-    lofi_params = lofi.LoFiParams(memory_size=cfg.lofi.memory, steady_state=False, inflation="hybrid")
-
-    agent = lofi.RebayesLoFiDiagonal(ssm_params, lofi_params)
-
-    ymean, ystd = data["ymean"], data["ystd"]
+    ### Lofi---load and train
+    agent, recfn = load_lofi_agent(cfg, flat_params, emission_mean_fn, emission_cov_fn)
     callback_part = partial(callback,
                             apply_fn=agent.params.emission_mean_function,
                             X_test=X_train, y_test=Y_train,
-                        )
-
+                            recfn=recfn
+                            )
     bel, outputs_lofi = agent.scan(X_train, Y_train, progress_bar=True, callback=callback_part)
     bel = jax.block_until_ready(bel)
     outputs_lofi = tree_to_cpu(outputs_lofi)
+
+    ### RSGD---load and train
+    apply_fn = partial(apply_fn_unflat, model=model)
