@@ -48,11 +48,11 @@ def callback(bel, pred_obs, t, X, y, bel_pred, apply_fn, lagn=20, store_fro=True
     X_test = jnp.take(X_test, slice_ix, axis=0, fill_value=0)
     y_test = jnp.take(y_test, slice_ix, axis=0, fill_value=0)
 
-    y_next = y.ravel()
-    phat_next = pred_obs.ravel()
-    yhat_next = phat_next.round()
-    # eval on all tasks test set
-    yhat_test = apply_fn(bel.mean, X_test).squeeze().round()
+    y_next = y.squeeze().argmax()
+    phat_next = pred_obs.squeeze()
+    yhat_next = phat_next.argmax()
+
+    yhat_test = apply_fn(bel.mean, X_test).squeeze().argmax()
 
     # Compute errors
     err_test = (y_test == yhat_test).mean()
@@ -256,7 +256,6 @@ if __name__ == "__main__":
     ### RSGD---load and train
     callback_rsgd = partial(callback_part, recfn=lambda x: x)
     apply_fn = partial(apply_fn_unflat, model=model)
-    lossfn = partial(lossfn_fifo, apply_fn=apply_fn)
     agent = load_rsgd_agent(cfg, tree_params, apply_fn, lossfn_fifo, dim_in, n_classes)
     bel, outputs_rsgd = agent.scan(X_train, Y_train, progress_bar=True, callback=callback_rsgd)
     bel = jax.block_until_ready(bel)
