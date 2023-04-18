@@ -7,6 +7,7 @@ We take an inflation factor of 0.0
 """
 
 import jax
+import optax
 import numpy as np
 import jax.numpy as jnp
 import flax.linen as nn
@@ -17,6 +18,7 @@ from jax.flatten_util import ravel_pytree
 from rebayes import base
 from rebayes.utils.utils import tree_to_cpu
 from rebayes.low_rank_filter import lofi
+from rebayes.sgd_filter import replay_sgd as rsgd
 from rebayes.utils.rotating_mnist_data import load_rotated_mnist
 
 
@@ -112,9 +114,8 @@ def lossfn_fifo(params, counter, X, y, apply_fn):
     yhat = jax.nn.softmax(yhat).squeeze()
     y = y.squeeze()
 
-    logits = jnp.log(yhat)
-    loss = -(logits * y * counter).sum() / counter.sum()
-    
+    logits = jnp.log(yhat) # B x K
+    loss = -jnp.einsum("bk,bk,b->", logits, y, counter) / counter.sum()
     return loss
 
 
@@ -205,23 +206,20 @@ def load_rsgd_agent(
     dim_in,
     dim_out,
 ):
-    lr, buffer = 5e-4, 10
     agent = rsgd.FifoSGD(lossfn, 
         apply_fn=apply_fn,
         init_params=mean_init,
-        tx=optax.adam(learning_rate=lr),
+        tx=optax.adam(learning_rate=cfg.rsgd.learning_rate),
         buffer_size=cfg.memory,
         dim_features=dim_in,
         dim_output=dim_out,
         n_inner=cfg.rsgd.n_inner
         )
-
+    
+    return agent
 
 
 if __name__ == "__main__":
-    ...
-
-def main():
     from cfg_regression import get_config
     target_digits = [2, 3]
     n_classes = len(target_digits)
@@ -235,6 +233,7 @@ def main():
 
     cfg = get_config()
 
+    _, dim_in = X_train.shape
     model, tree_params, flat_params, recfn = make_bnn_flax(dim_in, n_classes)
     apply_fn = partial(apply_fn_flat, model=model, recfn=recfn)
     def emission_mean_fn(w, x): return nn.softmax(apply_fn(w, x))
@@ -242,16 +241,23 @@ def main():
 
     _, dim_in = data["dataset"]["train"][0].shape
 
-    ### Lofi---load and train
-    agent, recfn = load_lofi_agent(cfg, flat_params, emission_mean_fn, emission_cov_fn)
     callback_part = partial(callback,
-                            apply_fn=agent.params.emission_mean_function,
+                            apply_fn=emission_mean_fn,
                             X_test=X_train, y_test=Y_train,
-                            recfn=recfn
                             )
-    bel, outputs_lofi = agent.scan(X_train, Y_train, progress_bar=True, callback=callback_part)
+
+    ### Lofi---load and train
+    agent = load_lofi_agent(cfg, flat_params, emission_mean_fn, emission_cov_fn)
+    callback_lofi = partial(callback_part, recfn=recfn)
+    bel, outputs_lofi = agent.scan(X_train, Y_train, progress_bar=True, callback=callback_lofi)
     bel = jax.block_until_ready(bel)
     outputs_lofi = tree_to_cpu(outputs_lofi)
 
     ### RSGD---load and train
+    callback_rsgd = partial(callback_part, recfn=lambda x: x)
     apply_fn = partial(apply_fn_unflat, model=model)
+    lossfn = partial(lossfn_fifo, apply_fn=apply_fn)
+    agent = load_rsgd_agent(cfg, tree_params, apply_fn, lossfn_fifo, dim_in, n_classes)
+    bel, outputs_rsgd = agent.scan(X_train, Y_train, progress_bar=True, callback=callback_rsgd)
+    bel = jax.block_until_ready(bel)
+    outputs_rsgd = tree_to_cpu(outputs_rsgd)
