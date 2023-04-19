@@ -13,12 +13,15 @@ from rebayes.low_rank_filter.lofi_core import (
     _jacrev_2d,
     _lofi_spherical_cov_inflate,
     _lofi_spherical_cov_predict,
+    _lofi_spherical_cov_svd_free_predict,
     _lofi_estimate_noise,
     _lofi_spherical_cov_condition_on,
+    _lofi_spherical_cov_svd_free_condition_on,
     _lofi_orth_condition_on,
     _lofi_diagonal_cov_inflate,
     _lofi_diagonal_cov_predict,
     _lofi_diagonal_cov_condition_on,
+    _lofi_diagonal_cov_svd_free_condition_on,
 )
 
 
@@ -53,6 +56,7 @@ class LoFiParams:
     memory_size: int
     steady_state: bool = False
     inflation: str = 'bayesian'
+    use_svd: bool = True
 
 
 class RebayesLoFi(Rebayes):
@@ -141,9 +145,12 @@ class RebayesLoFiSpherical(RebayesLoFi):
             _lofi_spherical_cov_inflate(m0, m, U, Lambda, eta, alpha, inflation)
 
         # Predict dynamics.
+        predict_fn = _lofi_spherical_cov_predict if self.lofi_params.use_svd \
+            else _lofi_spherical_cov_svd_free_predict
+            
         pp_mean_pred, m_pred, U_pred, Lambda_pred, eta_pred = \
-            _lofi_spherical_cov_predict(m0, m_infl, U_infl, Lambda_infl, gamma,
-                                        q, eta_infl, self.lofi_params.steady_state)
+            predict_fn(m0, m_infl, U_infl, Lambda_infl, gamma, q, eta_infl, 
+                       self.lofi_params.steady_state)
 
         bel_pred = bel.replace(
             pp_mean = pp_mean_pred,
@@ -192,12 +199,13 @@ class RebayesLoFiSpherical(RebayesLoFi):
             bel.mean, bel.basis, bel.svs, bel.eta, bel.nobs, bel.obs_noise_var
 
         # Condition on observation.
+        update_fn = _lofi_spherical_cov_condition_on if self.lofi_params.use_svd \
+            else _lofi_spherical_cov_svd_free_condition_on
+        
         m_cond, U_cond, Lambda_cond = \
-            _lofi_spherical_cov_condition_on(m, U, Lambda, eta,
-                                             self.params.emission_mean_function,
-                                             self.params.emission_cov_function,
-                                             x, y, self.params.adaptive_emission_cov,
-                                             obs_noise_var)
+            update_fn(m, U, Lambda, eta, self.params.emission_mean_function,
+                      self.params.emission_cov_function, x, y, 
+                      self.params.adaptive_emission_cov, obs_noise_var)
 
         # Estimate emission covariance.
         nobs_est, obs_noise_var_est = \
@@ -339,12 +347,13 @@ class RebayesLoFiDiagonal(RebayesLoFi):
             bel.mean, bel.basis, bel.svs, bel.Ups, bel.nobs, bel.obs_noise_var
 
         # Condition on observation.
+        update_fn = _lofi_diagonal_cov_condition_on if self.lofi_params.use_svd \
+            else _lofi_diagonal_cov_svd_free_condition_on
+        
         m_cond, U_cond, Lambda_cond, Ups_cond = \
-            _lofi_diagonal_cov_condition_on(m, U, Lambda, Ups,
-                                            self.params.emission_mean_function,
-                                            self.params.emission_cov_function,
-                                            x, y, self.params.adaptive_emission_cov,
-                                            obs_noise_var)
+            update_fn(m, U, Lambda, Ups, self.params.emission_mean_function,
+                      self.params.emission_cov_function, x, y, 
+                      self.params.adaptive_emission_cov, obs_noise_var)
 
         # Estimate emission covariance.
         nobs_est, obs_noise_var_est = \
