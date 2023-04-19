@@ -12,7 +12,7 @@ from copy import deepcopy
 from tqdm.auto import tqdm
 from itertools import product
 from functools import partial
-from cfg_regression import get_config
+from cfg_main import get_config
 
 from rebayes.utils.utils import tree_to_cpu
 

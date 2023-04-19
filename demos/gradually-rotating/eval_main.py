@@ -220,7 +220,7 @@ def load_rsgd_agent(
 
 
 if __name__ == "__main__":
-    from cfg_regression import get_config
+    from cfg_main import get_config
     target_digits = [2, 3]
     n_classes = len(target_digits)
     num_train = 6_000
