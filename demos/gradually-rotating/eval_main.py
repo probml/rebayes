@@ -19,7 +19,7 @@ from rebayes import base
 from rebayes.utils.utils import tree_to_cpu
 from rebayes.low_rank_filter import lofi
 from rebayes.sgd_filter import replay_sgd as rsgd
-from rebayes.utils.rotating_mnist_data import load_rotated_mnist
+from rebayes.datasets.rotating_mnist_data import load_rotated_mnist
 
 
 class MLP(nn.Module):
@@ -72,39 +72,6 @@ def callback(bel, pred_obs, t, X, y, bel_pred, apply_fn, lagn=20, store_fro=True
         "phat": phat_next,
         "params_magnitude": params_magnitude
     }
-    return res
-
-
-def load_data(
-    anglefn: Callable,
-    digits: list,
-    num_train: int = 5_000,
-    sort_by_angle: bool = True,
-):
-    data = load_rotated_mnist(
-        anglefn, target_digit=digits, sort_by_angle=sort_by_angle, num_train=num_train,
-    )
-    train, test = data
-    X_train, y_train, labels_train = train
-    X_test, y_test, labels_test = test
-
-    ymean, ystd = y_train.mean().item(), y_train.std().item()
-
-    if ystd > 0:
-        y_train = (y_train - ymean) / ystd
-        y_test = (y_test - ymean) / ystd
-
-    dataset = {
-        "train": (X_train, y_train, labels_train),
-        "test": (X_test, y_test, labels_test),
-    }
-
-    res = {
-        "dataset": dataset,
-        "ymean": ymean,
-        "ystd": ystd,
-    }
-
     return res
 
 
@@ -174,7 +141,6 @@ def categorise(labels):
     return ohed
 
 
-# def load_lofi_agent(cfg, emission_mean_fn, emission_cov_fn, dim_in, n_classes):
 def load_lofi_agent(
     cfg,
     mean_init,
@@ -197,7 +163,6 @@ def load_lofi_agent(
     return agent
 
 
-# TODO: Finish RSGD agent
 def load_rsgd_agent(
     cfg,
     mean_init,
@@ -221,11 +186,12 @@ def load_rsgd_agent(
 
 if __name__ == "__main__":
     from cfg_main import get_config
+    from rebayes.datasets import rotating_mnist_data as data
     target_digits = [2, 3]
     n_classes = len(target_digits)
     num_train = 6_000
 
-    data = load_data(damp_angle, target_digits, num_train, sort_by_angle=False)
+    data = data.load_and_transform(damp_angle, target_digits, num_train, sort_by_angle=False)
     X_train, signal_train, labels_train = data["dataset"]["train"]
     X_test, signal_test, labels_test = data["dataset"]["test"]
     Y_train = categorise(labels_train)

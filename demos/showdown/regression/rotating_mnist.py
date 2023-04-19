@@ -4,7 +4,7 @@ import flax.linen as nn
 import regression_train as benchmark
 from typing import Callable
 from functools import partial
-from rebayes.utils.rotating_mnist_data import load_rotated_mnist
+from rebayes.datasets.rotating_mnist_data import load_rotated_mnist
 from rebayes.low_rank_filter import lofi
 from rebayes import base
 from rebayes.sgd_filter import replay_sgd as rsgd

@@ -197,3 +197,39 @@ def load_rotated_mnist(
     test = (X_test, y_test, digits_test)
 
     return train, test
+
+
+def load_and_transform(
+    anglefn: Callable,
+    digits: list,
+    num_train: int = 5_000,
+    sort_by_angle: bool = True,
+):
+    """
+    Function to load and transform the rotated MNIST dataset.
+    """
+    data = load_rotated_mnist(
+        anglefn, target_digit=digits, sort_by_angle=sort_by_angle, num_train=num_train,
+    )
+    train, test = data
+    X_train, y_train, labels_train = train
+    X_test, y_test, labels_test = test
+
+    ymean, ystd = y_train.mean().item(), y_train.std().item()
+
+    if ystd > 0:
+        y_train = (y_train - ymean) / ystd
+        y_test = (y_test - ymean) / ystd
+
+    dataset = {
+        "train": (X_train, y_train, labels_train),
+        "test": (X_test, y_test, labels_test),
+    }
+
+    res = {
+        "dataset": dataset,
+        "ymean": ymean,
+        "ystd": ystd,
+    }
+
+    return res
