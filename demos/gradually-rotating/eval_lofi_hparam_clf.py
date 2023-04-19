@@ -1,6 +1,7 @@
 """
 We evaluate the performance of LoFi on the 
-rotating MNIST dataset with sinusoidal angle of rotation.
+rotating MNIST dataset for classification
+with sinusoidal angle of rotation.
 """
 
 import jax
