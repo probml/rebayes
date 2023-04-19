@@ -429,6 +429,71 @@ def _lofi_diagonal_cov_condition_on(
     return m_cond, U_cond, Lambda_cond, Ups_cond
 
 
+def _lofi_diagonal_cov_svd_free_condition_on(
+    m: Float[Array, "state_dim"],
+    U: Float[Array, "state_dim memory_size"],
+    Lambda: Float[Array, "memory_size"],
+    Ups: Float[Array, "state_dim"],
+    y_cond_mean: Callable,
+    y_cond_cov: Callable,
+    x: Float[Array, "input_dim"],
+    y: Float[Array, "obs_dim"],
+    adaptive_variance: bool = False,
+    obs_noise_var: float = 1.0,
+):
+    """Condition step of the SVD-free low-rank filter with diagonal covariance matrix.
+
+    Args:
+        m (D_hid,): Prior mean.
+        U (D_hid, D_mem,): Prior basis.
+        Lambda (D_mem,): Prior singular values.
+        Ups (D_hid): Prior precision. 
+        y_cond_mean (Callable): Conditional emission mean function.
+        y_cond_cov (Callable): Conditional emission covariance function.
+        x (D_in,): Control input.
+        y (D_obs,): Emission.
+        adaptive_variance (bool): Whether to use adaptive variance.
+        obs_noise_var (float): Observation noise variance.
+
+    Returns:
+        m_cond (D_hid,): Posterior mean.
+        U_cond (D_hid, D_mem,): Posterior basis.
+        Lambda_cond (D_mem,): Posterior singular values.
+        Ups_cond (D_hid,): Posterior precision.
+    """
+    P, L = U.shape
+    m_Y = lambda w: y_cond_mean(w, x)
+    Cov_Y = lambda w: y_cond_cov(w, x)
+    
+    yhat = jnp.atleast_1d(m_Y(m))
+    C = yhat.shape[0]
+    
+    if adaptive_variance:
+        R = jnp.eye(C) * obs_noise_var
+    else:
+        R = jnp.atleast_2d(Cov_Y(m))
+    R_chol = jnp.linalg.cholesky(R)
+    A = jnp.linalg.lstsq(R_chol, jnp.eye(C))[0].T
+    H = _jacrev_2d(m_Y, m)
+    AH = A.T @ H
+    
+    Lambda_plus = jnp.sqrt(jnp.einsum("ij,ij->i", AH/Ups.T, AH))
+    Lambda_tilde = jnp.hstack([Lambda, Lambda_plus])
+    U_tilde = jnp.hstack([U, AH.T/Lambda_plus])
+    
+    sorted_order = jnp.argsort(-jnp.abs(Lambda_tilde))
+    U_cond, U_extra = U_tilde[:, sorted_order[:L]], U_tilde[:, sorted_order[L:]]
+    Lambda_cond, Lambda_extra = Lambda_tilde[sorted_order[:L]], Lambda_tilde[sorted_order[L:]]
+    W_extra = Lambda_extra * U_extra
+    Ups_cond = Ups + jnp.einsum('ij,ij->i', W_extra, W_extra)[:, jnp.newaxis]
+    
+    G = jnp.linalg.pinv(jnp.diag(1/(Lambda_tilde**2)) + U_tilde.T @ (U_tilde/Ups))
+    K = (H.T @ A) @ A.T/Ups - ((U_tilde/Ups) @ G) @ ((U_tilde/Ups).T @ (H.T @ A) @ A.T)
+    m_cond = m + K @ (y - yhat)
+    
+    return m_cond, U_cond, Lambda_cond, Ups_cond
+
+
 # Orthogonal LOFI --------------------------------------------------------------
 
 def _lofi_orth_condition_on(
