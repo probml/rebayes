@@ -15,7 +15,7 @@ from cfg_regression import get_config
 
 from rebayes.utils.utils import tree_to_cpu
 
-target_digits = [2, 3, 4]
+target_digits = [0, 1, 2, 3, 4, 5]
 n_classes = len(target_digits)
 num_train = 6_000
 
