@@ -205,6 +205,53 @@ def _lofi_spherical_cov_predict(
     return m0_pred, m_pred, U_pred, Lambda_pred, eta_pred
 
 
+def _lofi_spherical_cov_svd_free_predict(
+    m0: Float[Array, "state_dim"],
+    m: Float[Array, "state_dim"],
+    U: Float[Array, "state_dim memory_size"],
+    Lambda: Float[Array, "memory_size"],
+    gamma: float,
+    q: float,
+    eta: float,
+    steady_state: bool = False
+):
+    """Predict step of the low-rank filter with spherical covariance matrix.
+
+    Args:
+        m0 (D_hid,): Prior predictive mean.
+        m (D_hid,): Prior mean.
+        U (D_hid, D_mem,): Prior basis.
+        Lambda (D_mem,): Prior singluar values.
+        gamma (float): Dynamics decay factor.
+        q (float): Dynamics noise factor.
+        eta (float): Prior precision.
+        alpha (float): Covariance inflation factor.
+        steady_state (bool): Whether to use steady-state dynamics.
+
+    Returns:
+        m0_pred (D_hid,): Predicted predictive mean.
+        m_pred (D_hid,): Predicted mean.
+        U_pred (D_hid, D_mem,): Predicted basis.
+        Lambda_pred (D_mem,): Predicted singular values.
+        eta_pred (float): Predicted precision.
+    """
+    # Mean prediction
+    m0_pred = gamma*m0
+    m_pred = gamma*m
+
+    # Covariance prediction
+    denom = gamma**2 + q*eta
+    eta_pred = eta/denom
+    C = jnp.linalg.pinv(
+        jnp.diag(1/Lambda**2) + (q/denom) * U.T @ U
+    )
+    W = (gamma/denom) * U @ jnp.linalg.cholesky(C)
+    Lambda_pred = jnp.sqrt(jnp.einsum("ji,ji->i", W, W))
+    U_pred = W / Lambda_pred
+
+    return m0_pred, m_pred, U_pred, Lambda_pred, eta_pred
+
+
 def _lofi_spherical_cov_condition_on(
     m: Float[Array, "state_dim"],
     U: Float[Array, "state_dim memory_size"],
@@ -262,6 +309,68 @@ def _lofi_spherical_cov_condition_on(
     Lambda_cond = lamb[:L]
 
     m_cond = m + K @ (y - yhat)
+
+    return m_cond, U_cond, Lambda_cond
+
+
+def _lofi_spherical_cov_svd_free_condition_on(
+    m: Float[Array, "state_dim"],
+    U: Float[Array, "state_dim memory_size"],
+    Lambda: Float[Array, "memory_size"],
+    eta: float,
+    y_cond_mean: Callable,
+    y_cond_cov: Callable,
+    x: Float[Array, "input_dim"],
+    y: Float[Array, "obs_dim"],
+    adaptive_variance: bool = False,
+    obs_noise_var: float = 1.0,
+):
+    """Condition step of the low-rank filter with spherical covariance matrix.
+
+    Args:
+        m (D_hid,): Prior mean.
+        U (D_hid, D_mem,): Prior basis.
+        Lambda (D_mem,): Prior singular values.
+        eta (float): Prior precision. 
+        y_cond_mean (Callable): Conditional emission mean function.
+        y_cond_cov (Callable): Conditional emission covariance function.
+        x (D_in,): Control input.
+        y (D_obs,): Emission.
+        adaptive_variance (bool): Whether to use adaptive variance.
+        obs_noise_var (float): Observation noise variance.
+
+    Returns:
+        m_cond (D_hid,): Posterior mean.
+        U_cond (D_hid, D_mem,): Posterior basis.
+        Lambda_cond (D_mem,): Posterior singular values.
+    """
+    P, L = U.shape
+    m_Y = lambda w: y_cond_mean(w, x)
+    Cov_Y = lambda w: y_cond_cov(w, x)
+    
+    yhat = jnp.atleast_1d(m_Y(m))
+    C = yhat.shape[0]
+    
+    if adaptive_variance:
+        R = jnp.eye(C) * obs_noise_var
+    else:
+        R = jnp.atleast_2d(Cov_Y(m))
+    R_chol = jnp.linalg.cholesky(R)
+    A = jnp.linalg.lstsq(R_chol, jnp.eye(C))[0].T
+    H = _jacrev_2d(m_Y, m)
+    AH = A.T @ H
+    
+    Lambda_plus = jnp.sqrt(jnp.einsum("ij,ij->i", AH, AH))
+    Lambda_tilde = jnp.hstack([Lambda, Lambda_plus])
+    U_tilde = jnp.hstack([U, AH.T/Lambda_plus])
+
+    G = jnp.linalg.pinv(jnp.diag(eta/(Lambda_tilde**2)) + U_tilde.T @ U_tilde)
+    K = (H.T @ A) @ A.T/eta - ((U_tilde/eta) @ G) @ ((U_tilde/eta).T @ (H.T @ A) @ A.T)
+    m_cond = m + K @ (y - yhat)
+    
+    sorted_order = jnp.argsort(-jnp.abs(Lambda_tilde))
+    U_cond = U_tilde[:, sorted_order[:L]]
+    Lambda_cond = Lambda_tilde[sorted_order[:L]]
 
     return m_cond, U_cond, Lambda_cond
 
@@ -481,15 +590,15 @@ def _lofi_diagonal_cov_svd_free_condition_on(
     Lambda_tilde = jnp.hstack([Lambda, Lambda_plus])
     U_tilde = jnp.hstack([U, AH.T/Lambda_plus])
     
+    G = jnp.linalg.pinv(jnp.diag(1/(Lambda_tilde**2)) + U_tilde.T @ (U_tilde/Ups))
+    K = (H.T @ A) @ A.T/Ups - ((U_tilde/Ups) @ G) @ ((U_tilde/Ups).T @ (H.T @ A) @ A.T)
+    m_cond = m + K @ (y - yhat)
+    
     sorted_order = jnp.argsort(-jnp.abs(Lambda_tilde))
     U_cond, U_extra = U_tilde[:, sorted_order[:L]], U_tilde[:, sorted_order[L:]]
     Lambda_cond, Lambda_extra = Lambda_tilde[sorted_order[:L]], Lambda_tilde[sorted_order[L:]]
     W_extra = Lambda_extra * U_extra
-    Ups_cond = Ups + jnp.einsum('ij,ij->i', W_extra, W_extra)[:, jnp.newaxis]
-    
-    G = jnp.linalg.pinv(jnp.diag(1/(Lambda_tilde**2)) + U_tilde.T @ (U_tilde/Ups))
-    K = (H.T @ A) @ A.T/Ups - ((U_tilde/Ups) @ G) @ ((U_tilde/Ups).T @ (H.T @ A) @ A.T)
-    m_cond = m + K @ (y - yhat)
+    Ups_cond = Ups + jnp.einsum("ij,ij->i", W_extra, W_extra)[:, jnp.newaxis]
     
     return m_cond, U_cond, Lambda_cond, Ups_cond
 
