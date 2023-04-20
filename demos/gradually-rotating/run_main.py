@@ -178,6 +178,7 @@ def load_rsgd_agent(
 
 # TODO: Move to a separate file
 if __name__ == "__main__":
+    raise NotImplementedError("This is not a script, it is a module")
     from cfg_main import get_config
     from rebayes.datasets import rotating_mnist_data as data
     target_digits = [2, 3]
