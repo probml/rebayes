@@ -11,7 +11,8 @@ from functools import partial
 from typing import Callable
 from bayes_opt import BayesianOptimization
 from jax.flatten_util import ravel_pytree
-from rebayes.utils import datasets, uci_uncertainty_data
+from rebayes.datasets import datasets
+from rebayes.datasets import uci_uncertainty_data
 
 from rebayes.low_rank_filter import lrvga, lofi
 from rebayes.sgd_filter import replay_sgd as rsgd
