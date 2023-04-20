@@ -116,17 +116,6 @@ def damp_angle(n_configs, minangle, maxangle):
     return angles
     
 
-def emission_cov_function(w, x, fn_mean):
-    """
-    Compute the covariance matrix of the emission distribution.
-    fn_mean: emission mean function
-    """
-    ps = fn_mean(w, x)
-    n_classes = len(ps)
-    I = jnp.eye(n_classes)
-    return jnp.diag(ps) - jnp.outer(ps, ps) + 1e-3 * I
-
-
 def categorise(labels):
     """
     Labels is taken to be a list of ordinal numbers
@@ -169,11 +158,15 @@ def load_rsgd_agent(
     lossfn,
     dim_in,
     dim_out,
+    tx=None
 ):
+    if tx is None:
+        tx = optax.adam(learning_rate=cfg.rsgd.learning_rate)
+
     agent = rsgd.FifoSGD(lossfn, 
         apply_fn=apply_fn,
         init_params=mean_init,
-        tx=optax.adam(learning_rate=cfg.rsgd.learning_rate),
+        tx=tx,
         buffer_size=cfg.memory,
         dim_features=dim_in,
         dim_output=dim_out,
@@ -183,6 +176,7 @@ def load_rsgd_agent(
     return agent
 
 
+# TODO: Move to a separate file
 if __name__ == "__main__":
     from cfg_main import get_config
     from rebayes.datasets import rotating_mnist_data as data

@@ -5,16 +5,29 @@ with sinusoidal angle of rotation.
 """
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 import flax.linen as nn
-import eval_main as ev
 from copy import deepcopy
 from tqdm.auto import tqdm
 from itertools import product
 from functools import partial
 from cfg_main import get_config
 
+import eval_main as ev
 from rebayes.utils.utils import tree_to_cpu
+
+
+def emission_cov_function(w, x, fn_mean):
+    """
+    Compute the covariance matrix of the emission distribution.
+    fn_mean: emission mean function
+    """
+    ps = fn_mean(w, x)
+    n_classes = len(ps)
+    I = jnp.eye(n_classes)
+    return jnp.diag(ps) - jnp.outer(ps, ps) + 1e-3 * I
+
 
 target_digits = [0, 1, 2, 3, 4, 5]
 n_classes = len(target_digits)
@@ -28,11 +41,12 @@ Y_test = ev.categorise(labels_test)
 
 cfg = get_config()
 
+# TODO: Refactor into LoFi classification
 _, dim_in = X_train.shape
 model, tree_params, flat_params, recfn = ev.make_bnn_flax(dim_in, n_classes)
 apply_fn = partial(ev.apply_fn_flat, model=model, recfn=recfn)
 def emission_mean_fn(w, x): return nn.softmax(apply_fn(w, x))
-emission_cov_fn = partial(ev.emission_cov_function, fn_mean=emission_mean_fn)
+emission_cov_fn = partial(emission_cov_function, fn_mean=emission_mean_fn)
 
 _, dim_in = data["dataset"]["train"][0].shape
 

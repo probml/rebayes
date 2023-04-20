@@ -203,13 +203,15 @@ def load_and_transform(
     anglefn: Callable,
     digits: list,
     num_train: int = 5_000,
+    frac_train: Union[float, None] = None,
     sort_by_angle: bool = True,
 ):
     """
     Function to load and transform the rotated MNIST dataset.
     """
     data = load_rotated_mnist(
-        anglefn, target_digit=digits, sort_by_angle=sort_by_angle, num_train=num_train,
+        anglefn, target_digit=digits, sort_by_angle=sort_by_angle,
+        num_train=num_train, frac_train=frac_train
     )
     train, test = data
     X_train, y_train, labels_train = train
