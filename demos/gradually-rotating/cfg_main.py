@@ -9,8 +9,8 @@ def get_config():
     # LoFi parameters
     cfg.lofi = ml_collections.ConfigDict()
     cfg.lofi.dynamics_weight = 1.0
-    cfg.lofi.dynamics_covariance = 0.0
-    cfg.lofi.initial_covariance = 0.1
+    cfg.lofi.dynamics_covariance = 1e-3
+    cfg.lofi.initial_covariance = 1.0
 
     # Replay-buffer SGD parameters
     cfg.rsgd = ml_collections.ConfigDict()
