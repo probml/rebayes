@@ -15,7 +15,7 @@ from rebayes.low_rank_filter.lofi_inference import LoFiParams
 from rebayes.base import RebayesParams
 from rebayes.utils.utils import get_mlp_flattened_params
 
-from rebayes.utils.datasets import (
+from rebayes.datasets.datasets import (
     load_rotated_mnist,
     load_classification_mnist,
     load_1d_synthetic_dataset,
