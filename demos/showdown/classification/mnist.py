@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 from functools import partial
+from time import time
+import tensorflow as tf
 
 import jax
 import optax
@@ -9,6 +11,7 @@ from rebayes.low_rank_filter.lofi import LoFiParams
 from demos.showdown.classification import classification_train as benchmark
 from demos.showdown.classification import hparam_tune_clf as hpt
 
+tf.profiler.experimental.server.start(6000)
 
 def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
     print(f'Training {agent_type} agent...')
@@ -21,7 +24,7 @@ def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
         pbounds = {
             'learning_rate': (1e-6, 1e-2),
         }
-        init_points, n_iter = 10, 15
+        init_points, n_iter = 1, 1
     else:
         pbounds={
             'log_init_cov': (-10, 0.0),
@@ -31,7 +34,7 @@ def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
         }
         if 'lofi' in agent_type:
             agent_type = 'lofi'
-        init_points, n_iter = 20, 25
+        init_points, n_iter = 10, 10
     
     ll_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_ll)
     optimizer, *_ = hpt.create_optimizer(
@@ -58,14 +61,20 @@ def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
     )
     
     miscl_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_miscl)
-    miscl_mean, miscl_std = benchmark.mnist_eval_agent(
-        dataset['train'], dataset['test'], model_dict['apply_fn'], callback=miscl_callback, agent=estimator,
-        n_iter=20
+    start_time = time()
+    miscl_mean, miscl_std = jax.block_until_ready(
+        benchmark.mnist_eval_agent(
+            dataset['train'], dataset['test'], model_dict['apply_fn'], 
+            callback=miscl_callback, agent=estimator, n_iter=2
+        )
     )
-
+    runtime = time() - start_time
+    print(f"Runtime: {runtime:.2f} seconds")
+    
     miscl_result = jax.block_until_ready({
         'mean': miscl_mean,
         'std': miscl_std,
+        'runtime': runtime,
     })
     print('\n')
     
@@ -78,34 +87,42 @@ if __name__ == "__main__":
     output_path = os.environ.get("REBAYES_OUTPUT")
     if output_path is None:
         dataset_name = "mnist" if not fashion else "f-mnist"
-        output_path = Path(Path.cwd(), "output", "final", "stationary")
+        output_path = Path(Path.cwd(), "output", "final", "svd-test")
         output_path.mkdir(parents=True, exist_ok=True)
     print(f"Output path: {output_path}")
     
     dataset = benchmark.load_mnist_dataset(fashion=fashion) # load data
     model_dict = benchmark.init_model(type='cnn') # initialize model
     
-    lofi_ranks = (1, 2, 5, 10, 20, 50)
+    lofi_ranks = (20,)
+    lofi_methods = ('diagonal',)
     lofi_agents = {
-        f'lofi-{rank}': {
-            'lofi_params': LoFiParams(memory_size=rank, diagonal_covariance=True),
-            'inflation': 'hybrid',
-        } for rank in lofi_ranks
+        f'lofi-{lofi_method}-{rank}': {
+            'lofi_params': LoFiParams(memory_size=rank, inflation="hybrid"),
+            'lofi_method': lofi_method
+        } for rank in lofi_ranks for lofi_method in lofi_methods
+    }
+    svd_free_lofi_agents = {
+        f'svd-free-lofi-{lofi_method}-{rank}': {
+            'lofi_params': LoFiParams(memory_size=rank, inflation="hybrid", use_svd=False),
+            'lofi_method': lofi_method
+        } for rank in lofi_ranks for lofi_method in lofi_methods
     }
     
-    sgd_ranks = (1, 10, 20)
-    sgd_agents = {
-        f'sgd-rb-{rank}': {
-            'loss_fn': optax.softmax_cross_entropy,
-            'buffer_size': rank,
-            'dim_output': 10,
-        } for rank in sgd_ranks
-    }
+    # sgd_ranks = (1, 10, 20)
+    # sgd_agents = {
+    #     f'sgd-rb-{rank}': {
+    #         'loss_fn': optax.softmax_cross_entropy,
+    #         'buffer_size': rank,
+    #         'dim_output': 10,
+    #     } for rank in sgd_ranks
+    # }
     
     agents = {
-        **sgd_agents,
-        'fdekf': None,
-        'vdekf': None,
+        # **sgd_agents,
+        # 'fdekf': None,
+        # 'vdekf': None,
+        **svd_free_lofi_agents,
         **lofi_agents,
     }
     
