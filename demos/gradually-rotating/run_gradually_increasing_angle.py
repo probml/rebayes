@@ -13,6 +13,7 @@ import run_main as ev
 from functools import partial
 from cfg_main import get_config
 from rebayes.utils.utils import tree_to_cpu
+from rebayes.utils.callbacks import cb_reg_sup
 from rebayes.datasets import rotating_mnist_data as data
 
 
@@ -23,41 +24,6 @@ def lossfn_rmse(params, counter, X, y, apply_fn):
     err = jnp.power(y - yhat, 2)
     loss = (err * counter).sum() / counter.sum()
     return loss
-
-
-def callback_regression(bel, pred_obs, t, X, y, bel_pred, apply_fn, ymean, ystd, **kwargs):
-    X_test, y_test = kwargs["X_test"], kwargs["y_test"]
-
-    slice_ix = jnp.arange(0, 20) + t
-
-    X_test = jnp.take(X_test, slice_ix, axis=0, fill_value=0)
-    y_test = jnp.take(y_test, slice_ix, axis=0, fill_value=0)
-
-    # eval on all tasks test set
-    yhat_test = apply_fn(bel.mean, X_test).squeeze()
-
-    # De-normalise target variables
-    y_test = y_test * ystd + ymean
-    yhat_test = yhat_test.ravel() * ystd + ymean
-
-    y_next = y.ravel() * ystd + ymean
-    yhat_next = pred_obs.ravel() * ystd + ymean
-
-
-    # Compute errors
-    err_test = jnp.power(y_test - yhat_test, 2).mean()
-    err = jnp.power(y_next - yhat_next, 2).mean()
-
-    err_test = jnp.sqrt(err_test)
-    err = jnp.sqrt(err)
-
-
-    res = {
-        # "error": err_test,
-        "10-step-pred": yhat_test,
-        "osa-error": err,
-    }
-    return res
 
 
 def damp_angle(n_configs, minangle, maxangle):
@@ -90,7 +56,7 @@ if __name__ == "__main__":
     def emission_cov_fn(w, x): return 0.02
 
     ymean, ystd = data["ymean"], data["ystd"]
-    callback = partial(callback_regression,
+    callback = partial(cb_reg_sup,
                             X_test=X_train, y_test=Y_train,
                             ymean=ymean, ystd=ystd,
                             )
