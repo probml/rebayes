@@ -79,6 +79,7 @@ class FifoSGD(Rebayes):
         self.dim_output = dim_output
         self.n_inner = n_inner
         self.loss_grad = jax.value_and_grad(self.lossfn, 0)
+    
 
     def init_bel(self):
         if self.apply_fn is None:
@@ -163,3 +164,35 @@ def lossfn_xentropy(params, counter, X, y, apply_fn):
     logits = jnp.log(yhat) # B x K
     loss = -jnp.einsum("bk,bk,b->", logits, y, counter) / counter.sum()
     return loss
+
+
+def init_regression_agent(
+    key,
+    model,
+    X_init,
+    tx,
+    buffer_size,
+    n_inner=1,
+    lossfn=lossfn_rmse
+):
+    """
+    Initialise regression agent with a given Flax model
+    to tackle a 1d-output regression problem.
+    """
+    apply_fn = model.apply
+    init_params = model.init(key, X_init)
+    out = model.apply(init_params, X_init)
+    dim_output = out.shape[-1]
+    dim_features = X_init.shape[-1]
+
+    agent = FifoSGD(
+        lossfn=lossfn,
+        apply_fn=apply_fn,
+        init_params=init_params,
+        tx=tx,
+        buffer_size=buffer_size,
+        dim_output=dim_output,
+        dim_features=dim_features,
+        n_inner=n_inner,
+    )
+    return agent
