@@ -14,7 +14,7 @@ from itertools import product
 from functools import partial
 from cfg_main import get_config
 
-import eval_main as ev
+import run_main as ev
 from rebayes.utils.utils import tree_to_cpu
 
 
