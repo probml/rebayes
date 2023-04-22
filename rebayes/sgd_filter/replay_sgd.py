@@ -136,3 +136,30 @@ class FifoSGD(Rebayes):
         params_sample = jax.tree_map(lambda x: einops.repeat(x, " ... -> b  ...", b=nsamples), bel)  # (b, ...)
         yhat_samples = jax.vmap(self.predict_obs, (0, None))(params_sample, x)
         return yhat_samples
+
+
+@partial(jax.jit, static_argnames=("apply_fn",))
+def lossfn_rmse(params, counter, X, y, apply_fn):
+    """
+    Lossfunction for regression problems.
+    """
+    yhat = apply_fn(params, X).ravel()
+    y = y.ravel()
+    err = jnp.power(y - yhat, 2)
+    loss = (err * counter).sum() / counter.sum()
+    return loss
+
+
+@partial(jax.jit, static_argnames=("apply_fn",))
+def lossfn_xentropy(params, counter, X, y, apply_fn):
+    """
+    Loss function for one-hot encoded classification
+    problems.
+    """
+    yhat = apply_fn(params, X)
+    yhat = jax.nn.softmax(yhat).squeeze()
+    y = y.squeeze()
+
+    logits = jnp.log(yhat) # B x K
+    loss = -jnp.einsum("bk,bk,b->", logits, y, counter) / counter.sum()
+    return loss
