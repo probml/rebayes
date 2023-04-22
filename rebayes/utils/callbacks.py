@@ -74,9 +74,9 @@ def cb_reg_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, ymean, ystd, steps=10
     err = jnp.sqrt(err)
 
     res = {
-        # "error": err_test,
-        f"n-step-pred": yhat_test,
-        "osa-error": err,
+        "n-step-pred": yhat_test,
+        "osa-error": err, # one-step ahead
+        "nsa-error": err_test, # n-step ahead
     }
 
     return res
