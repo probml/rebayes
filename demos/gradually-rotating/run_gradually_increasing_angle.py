@@ -7,23 +7,14 @@ sinusoid.
 import jax
 import optax
 import numpy as np
-import jax.numpy as jnp
 
 import run_main as ev
 from functools import partial
 from cfg_main import get_config
 from rebayes.utils.utils import tree_to_cpu
 from rebayes.utils.callbacks import cb_reg_sup
+from rebayes.sgd_filter import replay_sgd as rsgd
 from rebayes.datasets import rotating_mnist_data as data
-
-
-@partial(jax.jit, static_argnames=("apply_fn",))
-def lossfn_rmse(params, counter, X, y, apply_fn):
-    yhat = apply_fn(params, X).ravel()
-    y = y.ravel()
-    err = jnp.power(y - yhat, 2)
-    loss = (err * counter).sum() / counter.sum()
-    return loss
 
 
 def damp_angle(n_configs, minangle, maxangle):
@@ -75,7 +66,7 @@ if __name__ == "__main__":
     ### RSGD---load and train
     lr = 1e-2
     tx = optax.sgd(lr)
-    agent = ev.load_rsgd_agent(cfg, tree_params, apply_fn_tree, lossfn_rmse, dim_in, dim_out, tx=tx)
+    agent = ev.load_rsgd_agent(cfg, tree_params, apply_fn_tree, rsgd.lossfn_rmse, dim_in, dim_out, tx=tx)
     bel, output_rsgd = agent.scan(X_train, Y_train, progress_bar=True, callback=callback_rsgd)
     bel = jax.block_until_ready(bel)
     output_rsgd = tree_to_cpu(output_rsgd)
@@ -84,7 +75,7 @@ if __name__ == "__main__":
     ### RSGD (ADAM)---load and train
     lr = 5e-3
     tx = optax.adam(lr)
-    agent = ev.load_rsgd_agent(cfg, tree_params, apply_fn_tree, lossfn_rmse, dim_in, dim_out, tx=tx)
+    agent = ev.load_rsgd_agent(cfg, tree_params, apply_fn_tree, rsgd.lossfn_rmse, dim_in, dim_out, tx=tx)
     bel, output_rsgd_adam = agent.scan(X_train, Y_train, progress_bar=True, callback=callback_rsgd)
     bel = jax.block_until_ready(bel)
     output_rsgd_adam = tree_to_cpu(output_rsgd_adam)
