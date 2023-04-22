@@ -45,10 +45,6 @@ def make_bnn_flax(dim_in, dim_out, nhidden=50):
     return model, params, flat_params, recfn
 
 
-def apply_fn_flat(flat_params, x, model, recfn):
-    return model.apply(recfn(flat_params), x)
-
-
 def apply_fn_unflat(params, x, model):
     return model.apply(params, x)
 
