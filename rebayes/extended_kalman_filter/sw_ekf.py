@@ -23,6 +23,8 @@ from rebayes.extended_kalman_filter.ekf_core import (
     _swvakf_estimate_noise
 )
 
+_make_symmetrical = lambda x: (x + x.T) / 2
+
 
 @chex.dataclass
 class SWEKFBel:
@@ -135,7 +137,7 @@ class RebayesSWEKF(Rebayes):
         m, P, R = bel.mean, bel.cov, bel.emission_cov
         m_cond, P_cond = \
             _full_covariance_condition_on(m, P, self.h, None, u, y, 1, True, R)
-        print("m_cond", m_cond)
+        P_cond = _make_symmetrical(P_cond)
         
         # # Covariance Estimation
         bel = bel.apply_buffers(m_cond, P_cond, u, y)
