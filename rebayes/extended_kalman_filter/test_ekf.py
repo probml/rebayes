@@ -8,8 +8,7 @@ import chex
 from dynamax.linear_gaussian_ssm import LinearGaussianSSM
 
 from rebayes.utils.utils import get_mlp_flattened_params
-from rebayes.extended_kalman_filter.ekf import RebayesEKF
-from rebayes.base import RebayesParams
+from rebayes.extended_kalman_filter.ekf import EKFParams, RebayesEKF
 
 
 def allclose(u, v):
@@ -89,10 +88,10 @@ def make_linreg_rebayes_params(nfeatures):
     _, flat_params, _, apply_fn = get_mlp_flattened_params(model_dims)
     nparams = len(flat_params)
     
-    params = RebayesParams(
+    params = EKFParams(
         initial_mean=mu0,
         initial_covariance=1.0,
-        dynamics_weights = 1.0,
+        dynamics_weights_or_function = 1.0,
         dynamics_covariance = 0.0,
         emission_mean_function = lambda w, x: apply_fn(w, x),
         emission_cov_function = lambda w, x: obs_var
