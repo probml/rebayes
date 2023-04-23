@@ -12,9 +12,9 @@ def cb_clf_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, lagn=20, store_fro=Tr
     """
     X_test, y_test = kwargs["X_test"], kwargs["y_test"]
     recfn = kwargs["recfn"]
-    
+
     slice_ix = jnp.arange(0, lagn) + t
-    
+
     X_test = jnp.take(X_test, slice_ix, axis=0, fill_value=0)
     y_test = jnp.take(y_test, slice_ix, axis=0, fill_value=0)
 
@@ -27,14 +27,14 @@ def cb_clf_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, lagn=20, store_fro=Tr
     # Compute errors
     err_test = (y_test == yhat_test).mean()
     err = (y_next == yhat_next).mean()
-    
+
     if store_fro:
         mean_params = recfn(bel.mean)
         params_magnitude = jax.tree_map(lambda A: A["kernel"], mean_params, is_leaf=lambda k: "kernel" in k)
         params_magnitude = jax.tree_map(lambda A: jnp.linalg.norm(A, ord="fro"), params_magnitude)
     else:
         params_magnitude = None
-    
+
     res = {
         "n-step-pred": yhat_test,
         "nsa-error": err_test,
@@ -80,4 +80,3 @@ def cb_reg_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, ymean, ystd, steps=10
     }
 
     return res
-
