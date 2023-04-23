@@ -7,6 +7,7 @@ import chex
 
 
 _jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
+_exclude_first_timestep = lambda t, A, B: jnp.where(t > 1, A, B)
 
 
 def _full_covariance_condition_on(m, P, y_cond_mean, y_cond_cov, u, y, num_iter, adaptive_variance=False, obs_noise_var=0.0):
@@ -149,47 +150,169 @@ def _stationary_dynamics_diagonal_predict(m, P_diag, Q_diag):
     return mu_pred, Sigma_pred
 
 
-def _full_covariance_dynamics_predict(m, P, q, gamma, alpha):
+def _full_covariance_dynamics_predict(m, P, f, Q, alpha):
     """Predict the next state using a non-stationary dynamics model.
 
     Args:
         m (D_hid,): Prior mean.
         P (D_hid, D_hid): Prior covariance.
-        q (float): Dynamics covariance factor.
-        gamma (float): Dynamics decay.
+        f (Callable): Dynamics function.
+        Q (D_hid, D_hid): Dynamics covariance matrix.
         alpha (float): Covariance inflation factor.
 
     Returns:
-        mu_pred (D_hid,): Predicted mean.
-        Sigma_pred (D_hid,): Predicted covariance diagonal elements.
+        m_pred (D_hid,): Predicted mean.
+        P_pred (D_hid, D_hid): Predicted covariance diagonal elements.
     """
-    mu_pred = gamma * m
-    Sigma_pred = gamma**2 * P
-    Q = jnp.eye(mu_pred.shape[0]) * q
-    Sigma_pred += Q
-    Sigma_pred += alpha * Sigma_pred # Covariance inflation
-    return mu_pred, Sigma_pred
+    F = _jacrev_2d(f, m)
+    m_pred = f(m)
+    P_pred = (1 + alpha) * (F @ P @ F.T + Q)
+    
+    return m_pred, P_pred
 
 
-def _diagonal_dynamics_predict(m, P, q, gamma, alpha):
+def _diagonal_dynamics_predict(m, P, gamma, Q, alpha):
     """Predict the next state using a non-stationary dynamics model.
 
     Args:
         m (D_hid,): Prior mean.
-        P (D_hid, D_hid): Prior covariance.
-        q (float): Dynamics covariance factor.
+        P (D_hid,): Prior covariance.
         gamma (float): Dynamics decay.
+        Q (D_hid): Diagonal dynamics covariance vector.
         alpha (float): Covariance inflation factor.
 
     Returns:
-        mu_pred (D_hid,): Predicted mean.
-        Sigma_pred (D_hid,): Predicted covariance diagonal elements.
+        m_pred (D_hid,): Predicted mean.
+        P_pred (D_hid,): Predicted covariance diagonal elements.
     """
-    mu_pred = gamma * m
-    Sigma_pred = gamma**2 * P
-    Q = jnp.ones(mu_pred.shape[0]) * q
-    Sigma_pred += Q
-    Sigma_pred += alpha * Sigma_pred # Covariance inflation
-    return mu_pred, Sigma_pred
+    m_pred = gamma * m
+    P_pred = (1 + alpha) * (gamma**2 * P + Q)
+    
+    return m_pred, P_pred
 
 
+def _ekf_estimate_noise(m, y_cond_mean, u, y, nobs, obs_noise_var, adaptive_variance=False):
+    """Estimate observation noise based on empirical residual errors.
+
+    Args:
+        m (D_hid,): Prior mean.
+        y_cond_mean (Callable): Conditional emission mean function.
+        u (D_in,): Control input.
+        y (D_obs,): Emission.
+        nobs (int): Number of observations seen so far.
+        obs_noise_var (float): Current estimate of observation noise.
+        adaptive_variance (bool): Whether to use adaptive variance.
+
+    Returns:
+        nobs (int): Updated number of observations seen so far.
+        obs_noise_var (float): Updated estimate of observation noise.
+    """
+    if not adaptive_variance:
+        return 0, 0.0
+
+    m_Y = lambda w: y_cond_mean(w, u)
+    yhat = jnp.atleast_1d(m_Y(m))
+    
+    sqerr = ((yhat - y).T @ (yhat - y)).squeeze() / yhat.shape[0]
+    nobs += 1
+    obs_noise_var = jnp.max(jnp.array([1e-6, obs_noise_var + 1/nobs * (sqerr - obs_noise_var)]))
+
+    return nobs, obs_noise_var
+
+
+def _swvakf_compute_auxiliary_matrices(f, Q, h, m_prevs, P_prevs, u_buffer, y_buffer, L_eff):
+    """Compute auxiliary matrices for the Sliding-Window Adaptive Kalman filter.
+
+    Args:
+        f (Callable): Dynamics function.
+        Q (D_hid, D_hid,): Dynamics covariance matrix.
+        h (Callable): Emission function.
+        m_prevs (L, D_hid,): Filtered means buffer.
+        P_prevs (L, D_hid, D_hid,): Filtered covariances buffer.
+        u_buffer (L, D_in,): Control inputs buffer.
+        y_buffer (L, D_obs,): Emissions buffer.
+        L_eff (int): Effective lag size.
+
+    Returns:
+        A (D_hid, D_hid): Auxiliary matrix A.
+        B (D_obs, D_obs): Auxiliary matrix B.
+    """    
+    L, P, *_ = m_prevs.shape
+
+    def _step(carry, t):
+        m_smoothed_next, P_smoothed_next, A_prev, B_prev = carry
+        m_filtered, P_filtered = m_prevs[t], P_prevs[t]
+        u, y = u_buffer[t], y_buffer[t]
+        F = _jacrev_2d(f, m_filtered)
+        m_Y = lambda w: h(w, u)
+        H = _jacrev_2d(m_Y, m_filtered)
+
+        # Prediction step
+        m_pred = f(m_filtered)
+        P_pred = F @ P_filtered @ F.T + Q
+        G = jnp.linalg.lstsq(P_pred, F @ P_filtered)[0].T
+
+        # Smoothing step
+        m_smoothed = m_filtered + G @ (m_smoothed_next - m_pred)
+        P_smoothed = P_filtered + G @ (P_smoothed_next - P_pred) @ G.T
+        P_cross = G @ P_smoothed_next
+
+        A_inc = P_smoothed_next - (F @ P_cross) - (F @ P_cross).T + F @ P_smoothed @ F.T + \
+            jnp.outer(m_smoothed_next - F @ m_smoothed, m_smoothed_next - F @ m_smoothed)
+        A_next = jnp.where(L - t > L_eff, A_prev, A_prev + A_inc)
+        B_inc = jnp.outer(y - H @ m_smoothed, y - H @ m_smoothed) + H @ P_smoothed @ H.T
+        B_next = jnp.where(L - t > L_eff, B_prev, B_prev + B_inc)
+
+        return (m_smoothed, P_smoothed, A_next, B_next), None
+    
+    # Initial values
+    A0 = jnp.zeros((P, P))
+    m0, P0 = m_prevs[-1], P_prevs[-1]
+    u0, y0 = u_buffer[-1], y_buffer[-1]
+    m_Y = lambda w: h(w, u0)
+    H0 = _jacrev_2d(m_Y, m_prevs[-1])
+    B0 = jnp.outer(y0 - H0 @ m0, y0 - H0 @ m0) + H0 @ P0 @ H0.T
+    carry = (m_prevs[-1], P_prevs[-1], A0, B0)
+
+    # Run Kalman smoothing step
+    (*_, A, B), _ = lax.scan(_step, carry, jnp.arange(L-2, -1, -1))
+
+    return A, B
+
+
+def _swvakf_estimate_noise(Q, q_nu, q_psi, R, r_nu, r_psi, A, B, L_eff, rho, t):
+    """Estimate observation noise by Bayesian update on Inverse Wishart distributions.
+
+    Args:
+        Q (D_hid, D_hid,): Prior dynamics covariance matrix.
+        q_nu (float): Prior dynamics covariance matrix degrees of freedom.
+        q_psi (D_hid, D_hid,): Prior dynamics covariance matrix scale matrix.
+        R (D_obs, D_obs,): Prior emission covariance matrix.
+        r_nu (float): Prior emission covariance matrix degrees of freedom.
+        r_psi (D_obs, D_obs,): Prior emission covariance matrix scale matrix.
+        A (D_hid, D_hid,): Auxiliary matrix A.
+        B (D_obs, D_obs,): Auxiliary matrix B.
+        L_eff (int): Effective lag size.
+        rho (float): Decay factor.
+        t (int): Current timestep.
+
+    Returns:
+        Q_cond (D_hid, D_hid,): Posterior dynamics covariance matrix.
+        q_nu_cond (float): Posterior dynamics covariance matrix degrees of freedom.
+        q_psi_cond (D_hid, D_hid,): Posterior dynamics covariance matrix scale matrix.
+        R_cond (D_obs, D_obs,): Posterior emission covariance matrix.
+        r_nu_cond (float): Posterior emission covariance matrix degrees of freedom.
+        r_psi_cond (D_obs, D_obs,): Posterior emission covariance matrix scale matrix.
+    """    
+    q_nu_pred, q_psi_pred = rho * q_nu, rho * q_psi
+    r_nu_pred, r_psi_pred = rho * r_nu, rho * r_psi
+
+    q_nu_cond = _exclude_first_timestep(t, q_nu_pred + L_eff - 1, q_nu)
+    q_psi_cond = _exclude_first_timestep(t, q_psi_pred + A, q_psi)
+    r_nu_cond = _exclude_first_timestep(t, r_nu_pred + L_eff, r_nu)
+    r_psi_cond = _exclude_first_timestep(t, r_psi_pred + B, r_psi)
+
+    Q_cond = _exclude_first_timestep(t, q_psi_cond / q_nu_cond, Q)
+    R_cond = _exclude_first_timestep(t, r_psi_cond / r_nu_cond, R)
+
+    return Q_cond, q_nu_cond, q_psi_cond, R_cond, r_nu_cond, r_psi_cond
