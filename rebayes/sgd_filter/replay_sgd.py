@@ -24,22 +24,22 @@ class FifoTrainState(TrainState):
         ix_buffer = step % self.buffer_size
         buffer = buffer.at[ix_buffer].set(item)
         return buffer
- 
- 
+
+
     def apply_buffers(self, X, y):
         n_count = self.num_obs
         buffer_X = self._update_buffer(n_count, self.buffer_X, X)
         buffer_y = self._update_buffer(n_count, self.buffer_y, y)
         counter = self._update_buffer(n_count, self.counter, 1.0)
- 
+
         return self.replace(
             num_obs=n_count + 1,
             buffer_X=buffer_X,
             buffer_y=buffer_y,
             counter=counter,
         )
- 
- 
+
+
     @classmethod
     def create(cls, *, apply_fn, params, tx,
                buffer_size, dim_features, dim_output, **kwargs):
@@ -50,7 +50,7 @@ class FifoTrainState(TrainState):
             buffer_X = jnp.empty((buffer_size, *dim_features))
         buffer_y = jnp.empty((buffer_size, dim_output))
         counter = jnp.zeros(buffer_size)
- 
+
         return cls(
             step=0,
             num_obs=0,
@@ -72,7 +72,7 @@ class FifoSGD(Rebayes):
     """
     def __init__(self, lossfn, apply_fn=None, init_params=None, tx=None,
                  buffer_size=None, dim_features=None, dim_output=None, n_inner=1):
-        self.lossfn = lossfn   
+        self.lossfn = lossfn
         self.apply_fn = apply_fn
         self.params = init_params
         self.tx = tx
@@ -81,7 +81,7 @@ class FifoSGD(Rebayes):
         self.dim_output = dim_output
         self.n_inner = n_inner
         self.loss_grad = jax.value_and_grad(self.lossfn, 0)
-    
+
 
     def init_bel(self):
         if self.apply_fn is None:
@@ -102,7 +102,7 @@ class FifoSGD(Rebayes):
 
     def predict_state(self, bel):
         return bel
- 
+
     @partial(jax.jit, static_argnums=(0,))
     def _train_step(
         self,
@@ -115,7 +115,7 @@ class FifoSGD(Rebayes):
 
     @partial(jax.jit, static_argnums=(0,))
     def update_state(self, bel, Xt, yt):
-        bel = bel.apply_buffers(Xt, yt) 
+        bel = bel.apply_buffers(Xt, yt)
 
         def partial_step(_, bel):
             _, bel = self._train_step(bel)
@@ -124,7 +124,7 @@ class FifoSGD(Rebayes):
         # Do not count inner steps as part of the outer step
         _, bel = self._train_step(bel)
         return bel
-    
+
 
     @partial(jax.jit, static_argnums=(0,4))
     def pred_obs_mc(self, key, bel, x, shape=None):
@@ -147,7 +147,7 @@ class FifoSGDLaplaceDiag(FifoSGD):
                  fisher_offset=1.0):
         super().__init__(lossfn, apply_fn, init_params, tx, buffer_size, dim_features, dim_output, n_inner)
         self.fisher_offset = fisher_offset
-    
+
     def _get_empirical_fisher(self, bel):
         """
         Compute the diagonal empirical Fisher information matrix.
@@ -156,7 +156,7 @@ class FifoSGDLaplaceDiag(FifoSGD):
         _, grads = vlossgrad(bel.mean, bel.counter, bel.buffer_X, bel.buffer_y, self.apply_fn)
         # Empirical Fisher information matrix
         Fdiag = jax.tree_map(lambda x: -(x ** 2).sum(axis=0) - self.fisher_offset, grads)
-        
+
         return Fdiag
 
     @partial(jax.jit, static_argnums=(0,4))
