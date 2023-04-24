@@ -142,23 +142,47 @@ class FifoSGD(Rebayes):
 
 
 class FifoSGDLaplaceDiag(FifoSGD):
-    def __init__(self, lossfn, apply_fn=None, init_params=None, tx=None,
+    def __init__(self, lossfn, log_likelihood, apply_fn=None, init_params=None, tx=None,
                  buffer_size=None, dim_features=None, dim_output=None, n_inner=1,
-                 fisher_offset=1.0):
+                 prior_precision=1.0):
         super().__init__(lossfn, apply_fn, init_params, tx, buffer_size, dim_features, dim_output, n_inner)
-        self.fisher_offset = fisher_offset
+        self.prior_precision = prior_precision
+        self.log_likelihood = log_likelihood
 
-    def _get_empirical_fisher(self, bel):
+    def _get_empirical_fisher(self, bel, X, y):
         """
         Compute the diagonal empirical Fisher information matrix.
+
+        log_likelihood(params, X, y, apply_fn)
         """
-        vlossgrad = jax.vmap(self.loss_grad, (None, None, 0, 0, None))
-        _, grads = vlossgrad(bel.mean, bel.counter, bel.buffer_X, bel.buffer_y, self.apply_fn)
+        # Gradient of the log-likelihood
+        gll = jax.grad(self.log_likelihood, argnums=0)
+        # Vectorized gradient of the log-likelihood
+        vgll = jax.vmap(gll, (None, 0, 0, None))
+        grads = vgll(bel.params, X, y, bel.apply_fn)
+
         # Empirical Fisher information matrix
-        Fdiag = jax.tree_map(lambda x: -(x ** 2).sum(axis=0) - self.fisher_offset, grads)
-
+        Fdiag = jax.tree_map(lambda x: -(x ** 2).sum(axis=0) - self.prior_precision, grads)
         return Fdiag
+    
+    def _sample_posterior_params(self, key, bel, nsamples=50):
+        """
+        Sample parameters from the posterior distribution.
+        """
+        # Belief posterior predictive.
+        mean = self.predict_state(bel).mean
+        emp_fisher = self._get_empirical_fisher(bel, bel.buffer_X, bel.buffer_y)
+        cov = jax.tree_map(lambda x: -1 / x, emp_fisher)
 
+        mean_flat, unravel_fn = ravel_pytree(mean)
+        cov_flat, _ = ravel_pytree(cov)
+        nparams = len(mean_flat)
+
+        params_sample = jax.random.normal(key, (nparams, nsamples))
+        params_sample = params_sample * jnp.sqrt(cov_flat)[:, None] + mean_flat[:, None]
+        params_sample = jax.vmap(unravel_fn, in_axes=-1)(params_sample)
+        return params_sample
+        
     @partial(jax.jit, static_argnums=(0,4))
     def pred_obs_mc(self, key, bel, x, shape=None):
         """
@@ -166,21 +190,20 @@ class FifoSGDLaplaceDiag(FifoSGD):
         """
         shape = shape or (1,)
         nsamples = np.prod(shape)
-        # Belief posterior predictive.
-        mean = self.predict_state(bel).mean
-        emp_fisher = self._get_empirical_fisher(bel)
-        cov = jax.tree_map(lambda x: -1 / x, emp_fisher)
 
-        mean_flat, unravel_fn = ravel_pytree(mean)
-        cov_flat, _ = ravel_pytree(cov)
-        nparams = len(mean_flat)
         # Sample params
-        params_sample = jax.random.normal(key, (nparams, nsamples))
-        params_sample = params_sample * jnp.sqrt(cov_flat)[:, None] + mean_flat[:, None]
-
-        params_sample = jax.vmap(unravel_fn, in_axes=1, out_axes=0)(params_sample)
+        params_sample = self._sample_posterior_params(key, bel, nsamples=nsamples)
         yhat_samples = jax.vmap(bel.apply_fn, (0, None))(params_sample, x)
         return yhat_samples
+
+    @partial(jax.jit, static_argnames=("self", "n_samples"))
+    def nlpd_mc(self, key, bel, x, y, n_samples=30):
+        """
+        Compute the negative log predictive density.
+        """
+        # 1. Sample params
+        # 2. Compute compute nlpd
+        ...
 
 
 @partial(jax.jit, static_argnames=("apply_fn",))
@@ -212,13 +235,14 @@ def lossfn_xentropy(params, counter, X, y, apply_fn):
 
 def init_regression_agent(
     key,
+    log_likelihood,
     model,
     X_init,
     tx,
     buffer_size,
     n_inner=1,
     lossfn=lossfn_rmse,
-    fisher_offset=1.0,
+    prior_precision=1.0,
 ):
     """
     Initialise regression agent with a given Flax model
@@ -232,6 +256,7 @@ def init_regression_agent(
 
     agent = FifoSGDLaplaceDiag(
         lossfn=lossfn,
+        log_likelihood=log_likelihood,
         apply_fn=apply_fn,
         init_params=init_params,
         tx=tx,
@@ -239,6 +264,6 @@ def init_regression_agent(
         dim_output=dim_output,
         dim_features=dim_features,
         n_inner=n_inner,
-        fisher_offset=fisher_offset,
+        prior_precision=prior_precision,
     )
     return agent
