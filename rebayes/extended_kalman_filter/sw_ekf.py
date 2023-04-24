@@ -2,8 +2,9 @@ from functools import partial
 from typing import NamedTuple, Union
 
 import chex
-from jax import jit
+from jax import jit, vmap
 import jax.numpy as jnp
+import jax.random as jr
 from jaxtyping import Array, Float
 
 from rebayes.base import Rebayes
@@ -90,8 +91,8 @@ class RebayesSWEKF(Rebayes):
         P, *_ = self.m0.shape
         self.P0, self.Q0 = (_process_ekf_cov(cov, P, "fcekf") for cov in (self.P0, self.Q0))
         self.R0 = _process_ekf_cov(self.R0, self.dim_output, "fcekf")
-        assert self.L > 0 or not self.ada_dynamics_cov and not self.ada_emission_cov, \
-            "Window length must be positive if adaptive covariances are used."
+        # assert self.L > 0 or not self.ada_dynamics_cov and not self.ada_emission_cov, \
+        #     "Window length must be positive if adaptive covariances are used."
     
     def init_bel(self, Xinit=None, Yinit=None):
         P, *_ = self.m0.shape
@@ -176,3 +177,16 @@ class RebayesSWEKF(Rebayes):
             )
         
         return bel_cond
+
+    @partial(jit, static_argnums=(0,4))
+    def pred_obs_mc(self, key, bel, x, shape=None):
+        """
+        Sample observations from the posterior predictive distribution.
+        """
+        shape = shape or (1,)
+        # Belief posterior predictive.
+        bel = self.predict_state(bel)
+        params_sample = jr.multivariate_normal(key, bel.mean, bel.cov, shape)
+        yhat_samples = vmap(self.h, (0, None))(params_sample, x)
+        
+        return yhat_samples

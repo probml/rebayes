@@ -250,12 +250,14 @@ def _swvakf_compute_auxiliary_matrices(f, Q, h, m_prevs, P_prevs, u_buffer, y_bu
         # Prediction step
         m_pred = f(m_filtered)
         P_pred = F @ P_filtered @ F.T + Q
-        G = jnp.linalg.lstsq(P_pred, F @ P_filtered)[0].T
+        G = (jnp.linalg.pinv(P_pred) @ (F @ P_filtered)).T
+        # G = jnp.linalg.lstsq(P_pred, F @ P_filtered)[0].T
 
         # Smoothing step
         m_smoothed = m_filtered + G @ (m_smoothed_next - m_pred)
         P_smoothed = P_filtered + G @ (P_smoothed_next - P_pred) @ G.T
         P_cross = G @ P_smoothed_next
+        
 
         A_inc = P_smoothed_next - (F @ P_cross) - (F @ P_cross).T + F @ P_smoothed @ F.T + \
             jnp.outer(m_smoothed_next - F @ m_smoothed, m_smoothed_next - F @ m_smoothed)
