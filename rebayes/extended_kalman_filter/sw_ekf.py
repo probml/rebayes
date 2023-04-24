@@ -90,6 +90,8 @@ class RebayesSWEKF(Rebayes):
         P, *_ = self.m0.shape
         self.P0, self.Q0 = (_process_ekf_cov(cov, P, "fcekf") for cov in (self.P0, self.Q0))
         self.R0 = _process_ekf_cov(self.R0, self.dim_output, "fcekf")
+        assert self.L > 0 or not self.ada_dynamics_cov and not self.ada_emission_cov, \
+            "Window length must be positive if adaptive covariances are used."
     
     def init_bel(self, Xinit=None, Yinit=None):
         P, *_ = self.m0.shape
@@ -139,30 +141,38 @@ class RebayesSWEKF(Rebayes):
             _full_covariance_condition_on(m, P, self.h, None, u, y, 1, True, R)
         P_cond = _make_symmetrical(P_cond)
         
-        # # Covariance Estimation
-        bel = bel.apply_buffers(m_cond, P_cond, u, y)
-        Q, q_nu, q_psi, R, r_nu, r_psi = \
-            bel.dynamics_cov, bel.dynamics_cov_dof, bel.dynamics_cov_scale, \
-                bel.emission_cov, bel.emission_cov_dof, bel.emission_cov_scale
-        m_prevs, P_prevs, u_prevs, y_prevs = \
-            bel.mean_buffer, bel.cov_buffer, bel.input_buffer, bel.emission_buffer
-        L_eff = jnp.minimum(self.L+1, bel.counter)
-        A, B = _swvakf_compute_auxiliary_matrices(self.f, Q, self.h, m_prevs, 
-                                                  P_prevs, u_prevs, y_prevs, L_eff)
-        
-        Q_cond, q_nu_cond, q_psi_cond, R_cond, r_nu_cond, r_psi_cond = \
-            _swvakf_estimate_noise(Q, q_nu, q_psi, R, r_nu, r_psi, A, B, L_eff, 
-                                   self.rho, bel.counter)
-            
         bel_cond = bel.replace(
             mean = m_cond,
             cov = P_cond,
-            dynamics_cov = Q_cond,
-            dynamics_cov_scale = q_psi_cond,
-            dynamics_cov_dof = q_nu_cond,
-            emission_cov = R_cond,
-            emission_cov_scale = r_psi_cond,
-            emission_cov_dof = r_nu_cond,
         )
+        
+        # Covariance Estimation
+        if self.ada_dynamics_cov or self.ada_emission_cov:
+            bel_cond = bel_cond.apply_buffers(m_cond, P_cond, u, y)
+            Q, q_nu, q_psi, R, r_nu, r_psi = \
+                bel_cond.dynamics_cov, bel_cond.dynamics_cov_dof, bel_cond.dynamics_cov_scale, \
+                    bel_cond.emission_cov, bel_cond.emission_cov_dof, bel_cond.emission_cov_scale
+            m_prevs, P_prevs, u_prevs, y_prevs = \
+                bel_cond.mean_buffer, bel_cond.cov_buffer, bel_cond.input_buffer, bel_cond.emission_buffer
+            L_eff = jnp.minimum(self.L+1, bel_cond.counter)
+            A, B = _swvakf_compute_auxiliary_matrices(self.f, Q, self.h, m_prevs, 
+                                                    P_prevs, u_prevs, y_prevs, L_eff)
+            
+            Q_cond, q_nu_cond, q_psi_cond, R_cond, r_nu_cond, r_psi_cond = \
+                _swvakf_estimate_noise(Q, q_nu, q_psi, R, r_nu, r_psi, A, B, L_eff, 
+                                    self.rho, bel_cond.counter)
+            if not self.ada_dynamics_cov:
+                Q_cond = Q
+            if not self.ada_emission_cov:
+                R_cond = R
+            
+            bel_cond = bel_cond.replace(
+                dynamics_cov = Q_cond,
+                dynamics_cov_scale = q_psi_cond,
+                dynamics_cov_dof = q_nu_cond,
+                emission_cov = R_cond,
+                emission_cov_scale = r_psi_cond,
+                emission_cov_dof = r_nu_cond,
+            )
         
         return bel_cond
