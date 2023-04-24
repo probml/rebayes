@@ -173,6 +173,6 @@ class RebayesEKF(Rebayes):
         else:
             cov = bel.cov
         params_sample = jax.random.multivariate_normal(key, bel.mean, cov, shape)
-        yhat_samples = vmap(self.params.emission_mean_function, (0, None))(params_sample, x)
+        yhat_samples = vmap(self.h, (0, None))(params_sample, x)
         
         return yhat_samples
