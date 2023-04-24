@@ -5,6 +5,7 @@ import jax.numpy as jnp
 from typing import Tuple
 from functools import partial
 from rebayes.base import Rebayes
+from jax.flatten_util import ravel_pytree
 from jaxtyping import Float, Int, Array
 from flax.training.train_state import TrainState
 
@@ -69,7 +70,8 @@ class FifoSGD(Rebayes):
     """
     FIFO Replay-buffer SGD training procedure
     """
-    def __init__(self, lossfn, apply_fn=None, init_params=None, tx=None,  buffer_size=None, dim_features=None, dim_output=None, n_inner=1):
+    def __init__(self, lossfn, apply_fn=None, init_params=None, tx=None,
+                 buffer_size=None, dim_features=None, dim_output=None, n_inner=1):
         self.lossfn = lossfn   
         self.apply_fn = apply_fn
         self.params = init_params
@@ -139,6 +141,48 @@ class FifoSGD(Rebayes):
         return yhat_samples
 
 
+class FifoSGDLaplaceDiag(FifoSGD):
+    def __init__(self, lossfn, apply_fn=None, init_params=None, tx=None,
+                 buffer_size=None, dim_features=None, dim_output=None, n_inner=1,
+                 fisher_offset=1.0):
+        super().__init__(lossfn, apply_fn, init_params, tx, buffer_size, dim_features, dim_output, n_inner)
+        self.fisher_offset = fisher_offset
+    
+    def _get_empirical_fisher(self, bel):
+        """
+        Compute the diagonal empirical Fisher information matrix.
+        """
+        vlossgrad = jax.vmap(self.loss_grad, (None, None, 0, 0, None))
+        _, grads = vlossgrad(bel.mean, bel.counter, bel.buffer_X, bel.buffer_y, self.apply_fn)
+        # Empirical Fisher information matrix
+        Fdiag = jax.tree_map(lambda x: -(x ** 2).sum(axis=0) - self.fisher_offset, grads)
+        
+        return Fdiag
+
+    @partial(jax.jit, static_argnums=(0,4))
+    def pred_obs_mc(self, key, bel, x, shape=None):
+        """
+        Sample observations from the posterior predictive distribution.
+        """
+        shape = shape or (1,)
+        nsamples = np.prod(shape)
+        # Belief posterior predictive.
+        mean = self.predict_state(bel).mean
+        emp_fisher = self._get_empirical_fisher(bel)
+        cov = jax.tree_map(lambda x: -1 / x, emp_fisher)
+
+        mean_flat, unravel_fn = ravel_pytree(mean)
+        cov_flat, _ = ravel_pytree(cov)
+        nparams = len(mean_flat)
+        # Sample params
+        params_sample = jax.random.normal(key, (nparams, nsamples))
+        params_sample = params_sample * jnp.sqrt(cov_flat)[:, None] + mean_flat[:, None]
+
+        params_sample = jax.vmap(unravel_fn, in_axes=1, out_axes=0)(params_sample)
+        yhat_samples = jax.vmap(bel.apply_fn, (0, None))(params_sample, x)
+        return yhat_samples
+
+
 @partial(jax.jit, static_argnames=("apply_fn",))
 def lossfn_rmse(params, counter, X, y, apply_fn):
     """
@@ -173,7 +217,8 @@ def init_regression_agent(
     tx,
     buffer_size,
     n_inner=1,
-    lossfn=lossfn_rmse
+    lossfn=lossfn_rmse,
+    fisher_offset=1.0,
 ):
     """
     Initialise regression agent with a given Flax model
@@ -185,7 +230,7 @@ def init_regression_agent(
     dim_output = out.shape[-1]
     dim_features = X_init.shape[-1]
 
-    agent = FifoSGD(
+    agent = FifoSGDLaplaceDiag(
         lossfn=lossfn,
         apply_fn=apply_fn,
         init_params=init_params,
@@ -194,5 +239,6 @@ def init_regression_agent(
         dim_output=dim_output,
         dim_features=dim_features,
         n_inner=n_inner,
+        fisher_offset=fisher_offset,
     )
     return agent
