@@ -146,15 +146,13 @@ class RebayesSWEKF(Rebayes):
                 bel.emission_cov, bel.emission_cov_dof, bel.emission_cov_scale
         m_prevs, P_prevs, u_prevs, y_prevs = \
             bel.mean_buffer, bel.cov_buffer, bel.input_buffer, bel.emission_buffer
-        L_eff = jnp.minimum(self.L+1, bel.counter+1)
+        L_eff = jnp.minimum(self.L+1, bel.counter)
         A, B = _swvakf_compute_auxiliary_matrices(self.f, Q, self.h, m_prevs, 
                                                   P_prevs, u_prevs, y_prevs, L_eff)
-        print("A", A)
-        print("B", B)
+        
         Q_cond, q_nu_cond, q_psi_cond, R_cond, r_nu_cond, r_psi_cond = \
             _swvakf_estimate_noise(Q, q_nu, q_psi, R, r_nu, r_psi, A, B, L_eff, 
                                    self.rho, bel.counter)
-        print('\n')
             
         bel_cond = bel.replace(
             mean = m_cond,
