@@ -80,3 +80,20 @@ def cb_reg_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, ymean, ystd, steps=10
     }
 
     return res
+
+
+def cb_reg_mc(bel, pred_obs, t, X, y, bel_pred, apply_fn, **kwargs):
+    agent = kwargs["agent"]
+    key = jax.random.fold_in(kwargs["key"], t)
+
+    nlpd = agent.nlpd_mc(key, bel, X, y).sum()
+
+    res = cb_reg_sup(
+        bel, pred_obs, t, X, y, bel_pred, apply_fn, **kwargs
+    )
+
+    res = {
+        **res,
+        "nlpd": nlpd,
+    }
+    return res
