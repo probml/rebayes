@@ -408,3 +408,21 @@ class RebayesLoFiDiagonal(RebayesLoFi):
         params_sample = sample_dlr(key, bel.basis, bel.Ups.ravel(), shape) + bel.mean
         yhat_samples = jax.vmap(self.params.emission_mean_function, (0, None))(params_sample, x)
         return yhat_samples
+  
+    @partial(jax.jit, static_argnames=("self", "n_samples"))
+    def nlpd_mc(self, key, bel, x, y, llfn, n_samples=30):
+        """
+        Compute the negative log predictive density (nlpd) as
+        a Monte Carlo estimate.
+        llfn: log likelihood function
+            Takes mean, x, y
+        """
+        shape = (n_samples,)
+        bel = self.predict_state(bel)
+        params_sample = sample_dlr(key, bel.basis, bel.Ups.ravel(), shape) + bel.mean
+        # Compute vectorised nlpd
+        vnlpd = jax.vmap(llfn, (0, None, None))
+        vnlpd = jax.vmap(vnlpd, (None, 0, 0))
+        nlpd_vals = -vnlpd(params_sample, x, y)
+
+        return nlpd_vals.mean(axis=-1)
