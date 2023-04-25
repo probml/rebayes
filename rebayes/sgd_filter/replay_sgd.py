@@ -206,10 +206,10 @@ class FifoSGDLaplaceDiag(FifoSGD):
         y = jnp.atleast_2d(y)
         # 1. Sample params
         params_sample = self._sample_posterior_params(key, bel, nsamples=n_samples)
-        # 2. Compute compute vectorised nlpd (vnlpd)
+        # 2. Compute vectorised nlpd (vnlpd)
         vnlpd = jax.vmap(self.log_likelihood, (0, None, None, None))
         vnlpd = jax.vmap(vnlpd, (None, 0, 0, None))
-        nlpd_vals = vnlpd(params_sample, x, y, bel.apply_fn)
+        nlpd_vals = -vnlpd(params_sample, x, y, bel.apply_fn)
 
         return nlpd_vals.mean(axis=-1)
 
