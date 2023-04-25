@@ -199,12 +199,19 @@ class FifoSGDLaplaceDiag(FifoSGD):
     @partial(jax.jit, static_argnames=("self", "n_samples"))
     def nlpd_mc(self, key, bel, x, y, n_samples=30):
         """
-        Compute the negative log predictive density.
+        Compute the negative log predictive density (nlpd) as a
+        Monte Carlo (MC) estimate.
         """
+        x = jnp.atleast_2d(x)
+        y = jnp.atleast_2d(y)
         # 1. Sample params
-        # 2. Compute compute nlpd
-        ...
+        params_sample = self._sample_posterior_params(key, bel, nsamples=n_samples)
+        # 2. Compute vectorised nlpd (vnlpd)
+        vnlpd = jax.vmap(self.log_likelihood, (0, None, None, None))
+        vnlpd = jax.vmap(vnlpd, (None, 0, 0, None))
+        nlpd_vals = -vnlpd(params_sample, x, y, bel.apply_fn)
 
+        return nlpd_vals.mean(axis=-1)
 
 @partial(jax.jit, static_argnames=("apply_fn",))
 def lossfn_rmse(params, counter, X, y, apply_fn):
