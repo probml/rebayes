@@ -2,6 +2,7 @@ from typing import Sequence
 from functools import partial
 from pathlib import Path
 import pickle
+from time import time
 
 import matplotlib.pyplot as plt
 import tensorflow_datasets as tfds
@@ -254,6 +255,13 @@ def mnist_evaluate_miscl(flat_params, apply_fn, X_test, y_test):
     return 1.0 - acc
 
 
+def mnist_evaluate_nll_and_miscl(flat_params, apply_fn, X_test, y_test):
+    nll = mnist_evaluate_nll(flat_params, apply_fn, X_test, y_test)
+    miscl = mnist_evaluate_miscl(flat_params, apply_fn, X_test, y_test)
+    
+    return nll, miscl
+
+
 # Split-MNIST
 def smnist_evaluate_log_likelihood(flat_params, apply_fn, X_test, y_test):
     nll = evaluate_function(flat_params, apply_fn, X_test, y_test, optax.sigmoid_binary_cross_entropy)
@@ -288,17 +296,20 @@ def mnist_eval_agent(
         return result, result
 
     carry = jnp.zeros((n_steps,))
+    start_time = time()
     _, res = lax.scan(_step, carry, jnp.arange(n_iter))
-    mean, std = res.mean(axis=0), res.std(axis=0)
+    mean, std = jax.block_until_ready(res.mean(axis=0)), jax.block_until_ready(res.std(axis=0))
+    runtime = time() - start_time
 
-    return mean, std
+    return mean, std, runtime
 
 
 def nonstationary_mnist_callback(bel, pred_obs, t, x, y, bel_pred, i, **kwargs):
     accuracy_fn = lambda logits, label: jnp.mean(logits.argmax(axis=-1) == label)
+    nll_fn = lambda logits, label: optax.softmax_cross_entropy(logits, label).mean()
     evaluate_accuracy = partial(
         evaluate_function,
-        loss_fn=accuracy_fn
+        loss_fn=nll_fn
     )
     X_test, y_test, apply_fn = kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
     ntest_per_batch = kwargs["ntest_per_batch"]
@@ -327,7 +338,7 @@ def nonstationary_mnist_eval_agent(
     bel=None,
     n_iter=10,
 ):
-    overall_accs, current_accs, first_task_accs = [], [], []
+    overall_accs, current_accs, task1_accs = [], [], []
     for i in trange(n_iter, desc='Evaluating agent...'):
         # Load dataset with random permutation and random shuffle
         dataset = load_dataset_fn(key=i)
@@ -354,7 +365,7 @@ def nonstationary_mnist_eval_agent(
         
         overall_accs.append(jnp.array([res['overall'] for res in accs]))
         current_accs.append(jnp.array([res['current'] for res in accs]))
-        first_task_accs.append(jnp.array([res['first_task'] for res in accs]))
+        task1_accs.append(jnp.array([res['task1'] for res in accs]))
     
     overall_accs, current_accs, task1_accs = \
         jnp.array(overall_accs).reshape((n_iter, -1)), \

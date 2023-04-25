@@ -31,7 +31,8 @@ def bbf_lofi(
     flat_params,
     callback,
     apply_fn,
-    lofi_params,
+    memory_size,
+    inflation = "hybrid",
     lofi_method = "diagonal",
     callback_at_end=True,
 ):
@@ -47,7 +48,7 @@ def bbf_lofi(
     alpha = jnp.exp(log_alpha).item()
 
     test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
-    params_rebayes = base.RebayesParams(
+    params = lofi.LoFiParams(
         initial_mean=flat_params,
         initial_covariance=initial_covariance,
         dynamics_weights=dynamics_weights,
@@ -55,6 +56,8 @@ def bbf_lofi(
         emission_mean_function=emission_mean_fn,
         emission_cov_function=emission_cov_fn,
         dynamics_covariance_inflation_factor=alpha,
+        memory_size=memory_size,
+        inflation=inflation,
     )
 
     if lofi_method == "diagonal":
@@ -64,7 +67,7 @@ def bbf_lofi(
     else:
         raise ValueError("method must be either 'diagonal' or 'spherical'")
         
-    estimator = lofi_estimator(params_rebayes, lofi_params)
+    estimator = lofi_estimator(params)
 
     if callback_at_end:
         bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
@@ -107,17 +110,17 @@ def bbf_ekf(
     alpha = jnp.exp(log_alpha).item()
 
     test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
-    params_rebayes = base.RebayesParams(
+    params = ekf.EKFParams(
         initial_mean=flat_params,
         initial_covariance=initial_covariance,
-        dynamics_weights=dynamics_weights,
+        dynamics_weights_or_function=dynamics_weights,
         dynamics_covariance=dynamics_covariance,
         emission_mean_function=emission_mean_fn,
         emission_cov_function=emission_cov_fn,
         dynamics_covariance_inflation_factor=alpha,
     )
 
-    estimator = ekf.RebayesEKF(params_rebayes, method=method)
+    estimator = ekf.RebayesEKF(params, method=method)
 
     if callback_at_end:
         bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
@@ -227,7 +230,7 @@ def create_optimizer(
             callback=callback,
             apply_fn=apply_fn,
             callback_at_end=callback_at_end,
-            **kwargs # Must include lofi_params and inflation if method is lofi
+            **kwargs
         )
         if "ekf" in method:
             bbf_partial = partial(bbf_partial, method=method)
@@ -266,10 +269,13 @@ def get_best_params(optimizer, method):
 
         hparams = {
             "initial_covariance": initial_covariance,
-            "dynamics_weights": dynamics_weights,
             "dynamics_covariance": dynamics_covariance,
             "dynamics_covariance_inflation_factor": alpha,
         }
+        if "lofi" in method:
+            hparams["dynamics_weights"] = dynamics_weights
+        else:
+            hparams["dynamics_weights_or_function"] = dynamics_weights
     else:
         hparams = {
             "learning_rate": max_params["learning_rate"],
@@ -304,21 +310,24 @@ def build_estimator(init_mean, apply_fn, hparams, emission_mean_fn, emission_cov
     """
     _ is a dummy parameter for compatibility with lofi 
     """
-    if "sgd" not in method:
-        params = base.RebayesParams(
+    if "ekf" in method:
+        params = ekf.EKFParams(
             initial_mean=init_mean,
             emission_mean_function=emission_mean_fn,
             emission_cov_function=emission_cov_fn,
             **hparams,
         )
-
-        if "ekf" in method:
-            estimator = ekf.RebayesEKF(params, method=method)
-        elif "lofi" in method:
-            estimator = build_lofi_estimator(params, init_mean, apply_fn, hparams, 
-                                             emission_mean_fn, emission_cov_fn, **kwargs)
-        bel = None
-    else:
+        estimator = ekf.RebayesEKF(params, method=method)
+    elif "lofi" in method:
+        params = lofi.LoFiParams(
+            initial_mean=init_mean,
+            emission_mean_function=emission_mean_fn,
+            emission_cov_function=emission_cov_fn,
+            **hparams,
+            **kwargs,
+        )
+        estimator = lofi.RebayesLoFiDiagonal(params)
+    elif "sgd" in method:
         tx = optax.sgd(learning_rate=hparams["learning_rate"])
         
         @partial(jit, static_argnames=("applyfn",))
@@ -339,5 +348,7 @@ def build_estimator(init_mean, apply_fn, hparams, emission_mean_fn, emission_cov
             dim_output=kwargs["dim_output"],
             n_inner=1,
         )
+    else:
+        raise ValueError("method must be either 'ekf', 'lofi' or 'sgd'")
         
     return estimator

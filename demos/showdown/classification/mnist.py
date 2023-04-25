@@ -2,16 +2,12 @@ import os
 from pathlib import Path
 from functools import partial
 from time import time
-import tensorflow as tf
 
 import jax
 import optax
 
-from rebayes.low_rank_filter.lofi import LoFiParams
 from demos.showdown.classification import classification_train as benchmark
 from demos.showdown.classification import hparam_tune_clf as hpt
-
-tf.profiler.experimental.server.start(6000)
 
 def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
     print(f'Training {agent_type} agent...')
@@ -24,7 +20,7 @@ def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
         pbounds = {
             'learning_rate': (1e-6, 1e-2),
         }
-        init_points, n_iter = 1, 1
+        init_points, n_iter = 10, 15
     else:
         pbounds={
             'log_init_cov': (-10, 0.0),
@@ -34,11 +30,11 @@ def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
         }
         if 'lofi' in agent_type:
             agent_type = 'lofi'
-        init_points, n_iter = 10, 10
+        init_points, n_iter = 10, 15
     
     ll_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_ll)
     optimizer, *_ = hpt.create_optimizer(
-        model, pbounds, 314, train, dataset['val'], emission_mean_function,
+        model, pbounds, 0, train, dataset['val'], emission_mean_function,
         emission_cov_function, callback=ll_callback, method=agent_type, verbose=1, 
         callback_at_end=False, **kwargs
     )
@@ -60,25 +56,24 @@ def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
         **kwargs,
     )
     
-    miscl_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_miscl)
-    start_time = time()
-    miscl_mean, miscl_std = jax.block_until_ready(
+    # TODO: Add misclassification plot
+    # miscl_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_miscl)
+    nll_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_nll)
+    
+    nll_mean, nll_std, runtime = jax.block_until_ready(
         benchmark.mnist_eval_agent(
             dataset['train'], dataset['test'], model_dict['apply_fn'], 
-            callback=miscl_callback, agent=estimator, n_iter=2
+            callback=nll_callback, agent=estimator, n_iter=10
         )
     )
-    runtime = time() - start_time
-    print(f"Runtime: {runtime:.2f} seconds")
     
-    miscl_result = jax.block_until_ready({
-        'mean': miscl_mean,
-        'std': miscl_std,
+    nll_result = jax.block_until_ready({
+        'mean': nll_mean,
+        'std': nll_std,
         'runtime': runtime,
     })
-    print('\n')
     
-    return miscl_result
+    return nll_result
 
 
 if __name__ == "__main__":
@@ -87,56 +82,48 @@ if __name__ == "__main__":
     output_path = os.environ.get("REBAYES_OUTPUT")
     if output_path is None:
         dataset_name = "mnist" if not fashion else "f-mnist"
-        output_path = Path(Path.cwd(), "output", "final", "svd-test")
+        output_path = Path(Path.cwd(), "output", "final", "nll_comparison")
         output_path.mkdir(parents=True, exist_ok=True)
     print(f"Output path: {output_path}")
     
     dataset = benchmark.load_mnist_dataset(fashion=fashion) # load data
-    model_dict = benchmark.init_model(type='cnn') # initialize model
+    model_dict = benchmark.init_model(type='mlp', features=(500, 500, 10)) # initialize model
     
     lofi_ranks = (20,)
-    lofi_methods = ('diagonal',)
     lofi_agents = {
-        f'lofi-{lofi_method}-{rank}': {
-            'lofi_params': LoFiParams(memory_size=rank, inflation="hybrid"),
-            'lofi_method': lofi_method
-        } for rank in lofi_ranks for lofi_method in lofi_methods
-    }
-    svd_free_lofi_agents = {
-        f'svd-free-lofi-{lofi_method}-{rank}': {
-            'lofi_params': LoFiParams(memory_size=rank, inflation="hybrid", use_svd=False),
-            'lofi_method': lofi_method
-        } for rank in lofi_ranks for lofi_method in lofi_methods
+        f'lofi-{rank}': {
+            'memory_size': rank,
+            'inflation': "hybrid",
+        } for rank in lofi_ranks
     }
     
-    # sgd_ranks = (1, 10, 20)
-    # sgd_agents = {
-    #     f'sgd-rb-{rank}': {
-    #         'loss_fn': optax.softmax_cross_entropy,
-    #         'buffer_size': rank,
-    #         'dim_output': 10,
-    #     } for rank in sgd_ranks
-    # }
+    sgd_ranks = (1, 20,)
+    sgd_agents = {
+        f'sgd-rb-{rank}': {
+            'loss_fn': optax.softmax_cross_entropy,
+            'buffer_size': rank,
+            'dim_output': 10,
+        } for rank in sgd_ranks
+    }
     
     agents = {
-        # **sgd_agents,
-        # 'fdekf': None,
-        # 'vdekf': None,
-        **svd_free_lofi_agents,
         **lofi_agents,
+        'fdekf': None,
+        'vdekf': None,
+        **sgd_agents,
     }
     
-    miscl_results = {}
+    nll_results, miscl_results = {}, {}
     for agent, kwargs in agents.items():
         if kwargs is None:
-            miscl = train_agent(model_dict, dataset, agent_type=agent)
+            nll = train_agent(model_dict, dataset, agent_type=agent)
         else:
-            miscl = train_agent(model_dict, dataset, agent_type=agent, **kwargs)
-        benchmark.store_results(miscl, f'{agent}_miscl', output_path)
-        miscl_results[agent] = miscl
+            nll = train_agent(model_dict, dataset, agent_type=agent, **kwargs)
+        benchmark.store_results(nll, f'{agent}_nll', output_path)
+        nll_results[agent] = nll
         
     # Store results and plot
-    benchmark.store_results(miscl_results, 'mnist_miscl', output_path)
+    benchmark.store_results(nll_results, 'mnist_nll', output_path)
     
-    miscl_title = "Test-set average misclassification rate"
-    benchmark.plot_results(miscl_results, "mnist_miscl", output_path, ylim=(0.0, 0.8), title=miscl_title)
+    miscl_title = "Test-set average negative log likelihood"
+    benchmark.plot_results(nll_results, "mnist_nll", output_path, ylim=(0.5, 2.5), title=miscl_title)
