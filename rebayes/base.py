@@ -110,6 +110,20 @@ class Rebayes(ABC):
     ) -> Union[Float[Array, "output_dim output_dim"], Any]: 
         """Return Cov(y(t) | X(t), D(1:t-1))"""
         return None
+    
+    @partial(jit, static_argnums=(0,))
+    def evaluate_log_prob(
+        self,
+        bel: Belief,
+        X: Float[Array, "input_dim"],
+        y: Float[Array, "obs_dim"]
+    ) -> float:
+        """Return log p(y(t) | X(t), D(1:t-1))"""
+        pred_obs_mean, pred_obs_cov = self.predict_obs(bel, X), self.predict_obs_cov(bel, X)
+        emission_dist = self.params.emission_dist(pred_obs_mean, pred_obs_cov)
+        log_prob = emission_dist.log_prob(y)
+        
+        return log_prob
 
     @partial(jit, static_argnums=(0,))
     def update_state(
