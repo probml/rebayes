@@ -1,4 +1,4 @@
-from typing import Callable, NamedTuple, Union
+from typing import NamedTuple, Union
 
 import chex
 from functools import partial
@@ -6,8 +6,18 @@ import jax
 from jax import jit, vmap
 from jax import numpy as jnp
 from jaxtyping import Array, Float
+import tensorflow_probability.substrates.jax as tfp
 
-from rebayes.base import Rebayes
+from rebayes.base import (
+    CovMat,
+    EmissionDistFn,
+    FnStateAndInputToEmission,
+    FnStateAndInputToEmission2,
+    FnStateToEmission,
+    FnStateToEmission2,
+    FnStateToState,
+    Rebayes,
+)
 from rebayes.extended_kalman_filter.ekf_core import (
     _jacrev_2d,
     _ekf_estimate_noise,
@@ -19,12 +29,8 @@ from rebayes.extended_kalman_filter.ekf_core import (
 )
 
 
-FnStateToState = Callable[ [Float[Array, "state_dim"]], Float[Array, "state_dim"]]
-FnStateToEmission = Callable[ [Float[Array, "state_dim"]], Float[Array, "emission_dim"]]
-FnStateAndInputToEmission = Callable[ [Float[Array, "state_dim"], Float[Array, "input_dim"] ], Float[Array, "emission_dim"]]
-FnStateToEmission2 = Callable[[Float[Array, "state_dim"]], Float[Array, "emission_dim emission_dim"]]
-FnStateAndInputToEmission2 = Callable[[Float[Array, "state_dim"], Float[Array, "input_dim"]], Float[Array, "emission_dim emission_dim"]]
-CovMat = Union[float, Float[Array, "dim"], Float[Array, "dim dim"]]
+tfd = tfp.distributions
+MVN = tfd.MultivariateNormalTriL
 
 
 PREDICT_FNS = {
@@ -69,6 +75,8 @@ class EKFParams(NamedTuple):
     dynamics_covariance: CovMat
     emission_mean_function: Union[FnStateToEmission, FnStateAndInputToEmission]
     emission_cov_function: Union[FnStateToEmission2, FnStateAndInputToEmission2]
+    emission_dist: EmissionDistFn = \
+        lambda mean, cov: MVN(loc=mean, scale_tril=jnp.linalg.cholesky(cov))
     adaptive_emission_cov: bool = False
     dynamics_covariance_inflation_factor: float = 0.0
 
@@ -79,7 +87,7 @@ class RebayesEKF(Rebayes):
         params: EKFParams,
         method: str,
     ):  
-        self.m0, self.P0, self.d, self.Q0, self.h, self.R, self.ada_var, self.alpha = params
+        self.m0, self.P0, self.d, self.Q0, self.h, self.R, self.emission_dist, self.ada_var, self.alpha = params
         self.method = method
         if method == "fcekf":
             if isinstance(self.d, float):
@@ -143,6 +151,7 @@ class RebayesEKF(Rebayes):
         P_obs = V_epi + R
         
         return P_obs
+    
 
     @partial(jit, static_argnums=(0,))
     def update_state(self, bel, u, y):

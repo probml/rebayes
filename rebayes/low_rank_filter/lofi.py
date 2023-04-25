@@ -6,9 +6,16 @@ import chex
 from jax import jit
 import jax.numpy as jnp
 from jaxtyping import Float, Array
+import tensorflow_probability.substrates.jax as tfp
 
 from rebayes.utils.sampling import sample_dlr
-from rebayes.base import RebayesParams, Rebayes, CovMat
+from rebayes.base import (
+    CovMat,
+    EmissionDistFn,
+    FnStateAndInputToEmission,
+    FnStateAndInputToEmission2,
+    Rebayes,
+)
 from rebayes.low_rank_filter.lofi_core import (
     _jacrev_2d,
     _lofi_spherical_cov_inflate,
@@ -26,6 +33,10 @@ from rebayes.low_rank_filter.lofi_core import (
 
 
 # Common Classes ---------------------------------------------------------------
+
+tfd = tfp.distributions
+MVN = tfd.MultivariateNormalTriL
+
 
 INFLATION_METHODS = [
     'bayesian',
@@ -49,11 +60,31 @@ class LoFiBel:
     obs_noise_var: float = 1.0
 
 
+# @chex.dataclass
+# class LoFiParams:
+#     """Lightweight container for LOFI parameters.
+#     """
+#     memory_size: int
+#     steady_state: bool = False
+#     inflation: str = 'bayesian'
+#     use_svd: bool = True
+
+
 @chex.dataclass
 class LoFiParams:
     """Lightweight container for LOFI parameters.
     """
-    memory_size: int
+    initial_mean: Float[Array, "state_dim"]
+    initial_covariance: CovMat
+    dynamics_weights: CovMat
+    dynamics_covariance: CovMat
+    emission_mean_function: FnStateAndInputToEmission
+    emission_cov_function: FnStateAndInputToEmission2
+    emission_dist: EmissionDistFn = \
+        lambda mean, cov: MVN(loc=mean, scale_tril=jnp.linalg.cholesky(cov))
+    adaptive_emission_cov: bool=False
+    dynamics_covariance_inflation_factor: float=0.0
+    memory_size: int = 10
     steady_state: bool = False
     inflation: str = 'bayesian'
     use_svd: bool = True
@@ -62,27 +93,24 @@ class LoFiParams:
 class RebayesLoFi(Rebayes):
     def __init__(
         self,
-        model_params: RebayesParams,
-        lofi_params: LoFiParams,
+        params: LoFiParams,
     ):
-        super().__init__(model_params)
+        super().__init__(params)
 
         # Check inflation type
-        if lofi_params.inflation not in INFLATION_METHODS:
-            raise ValueError(f"Unknown inflation method: {lofi_params.inflation}.")
-
-        self.lofi_params = lofi_params
+        if params.inflation not in INFLATION_METHODS:
+            raise ValueError(f"Unknown inflation method: {params.inflation}.")
 
     def init_bel(self):
         pp_mean = self.params.initial_mean # Predictive prior mean
         init_mean = self.params.initial_mean # Initial mean
-        memory_size = self.lofi_params.memory_size
+        memory_size = self.params.memory_size
         init_basis = jnp.zeros((len(init_mean), memory_size)) # Initial basis
         init_svs = jnp.zeros(memory_size) # Initial singular values
         init_eta = 1 / self.params.initial_covariance # Initial precision
         gamma = self.params.dynamics_weights # Dynamics weights
         q = self.params.dynamics_covariance # Dynamics covariance
-        if self.lofi_params.steady_state: # Steady-state constraint
+        if self.params.steady_state: # Steady-state constraint
             q = self.steady_state_constraint(init_eta, gamma)
         init_Ups = jnp.ones((len(init_mean), 1)) * init_eta
 
@@ -125,10 +153,9 @@ class RebayesLoFi(Rebayes):
 class RebayesLoFiSpherical(RebayesLoFi):
     def __init__(
         self,
-        model_params: RebayesParams,
-        lofi_params: LoFiParams,
+        params: LoFiParams,
     ):
-        super().__init__(model_params, lofi_params)
+        super().__init__(params)
 
     @partial(jit, static_argnums=(0,))
     def predict_state(
@@ -138,19 +165,19 @@ class RebayesLoFiSpherical(RebayesLoFi):
         m0, m, U, Lambda, eta, gamma, q = \
             bel.pp_mean, bel.mean, bel.basis, bel.svs, bel.eta, bel.gamma, bel.q
         alpha = self.params.dynamics_covariance_inflation_factor
-        inflation = self.lofi_params.inflation
+        inflation = self.params.inflation
 
         # Inflate posterior covariance.
         m_infl, U_infl, Lambda_infl, eta_infl = \
             _lofi_spherical_cov_inflate(m0, m, U, Lambda, eta, alpha, inflation)
 
         # Predict dynamics.
-        predict_fn = _lofi_spherical_cov_predict if self.lofi_params.use_svd \
+        predict_fn = _lofi_spherical_cov_predict if self.params.use_svd \
             else _lofi_spherical_cov_svd_free_predict
             
         pp_mean_pred, m_pred, U_pred, Lambda_pred, eta_pred = \
             predict_fn(m0, m_infl, U_infl, Lambda_infl, gamma, q, eta_infl, 
-                       self.lofi_params.steady_state)
+                       self.params.steady_state)
 
         bel_pred = bel.replace(
             pp_mean = pp_mean_pred,
@@ -199,7 +226,7 @@ class RebayesLoFiSpherical(RebayesLoFi):
             bel.mean, bel.basis, bel.svs, bel.eta, bel.nobs, bel.obs_noise_var
 
         # Condition on observation.
-        update_fn = _lofi_spherical_cov_condition_on if self.lofi_params.use_svd \
+        update_fn = _lofi_spherical_cov_condition_on if self.params.use_svd \
             else _lofi_spherical_cov_svd_free_condition_on
         
         m_cond, U_cond, Lambda_cond = \
@@ -228,10 +255,9 @@ class RebayesLoFiSpherical(RebayesLoFi):
 class RebayesLoFiOrthogonal(RebayesLoFiSpherical):
     def __init__(
         self,
-        model_params: RebayesParams,
-        lofi_params: LoFiParams,
+        params: LoFiParams,
     ):
-        super().__init__(model_params, lofi_params)
+        super().__init__(params)
 
     @partial(jit, static_argnums=(0,))
     def update_state(
@@ -273,10 +299,9 @@ class RebayesLoFiOrthogonal(RebayesLoFiSpherical):
 class RebayesLoFiDiagonal(RebayesLoFi):
     def __init__(
         self,
-        model_params: RebayesParams,
-        lofi_params: LoFiParams,
+        params: LoFiParams,
     ):
-        super().__init__(model_params, lofi_params)
+        super().__init__(params)
 
     @partial(jit, static_argnums=(0,))
     def predict_state(
@@ -286,7 +311,7 @@ class RebayesLoFiDiagonal(RebayesLoFi):
         m0, m, U, Lambda, eta, gamma, q, Ups = \
             bel.pp_mean, bel.mean, bel.basis, bel.svs, bel.eta, bel.gamma, bel.q, bel.Ups
         alpha = self.params.dynamics_covariance_inflation_factor
-        inflation = self.lofi_params.inflation
+        inflation = self.params.inflation
 
         # Inflate posterior covariance.
         m_infl, U_infl, Lambda_infl, Ups_infl = \
@@ -347,7 +372,7 @@ class RebayesLoFiDiagonal(RebayesLoFi):
             bel.mean, bel.basis, bel.svs, bel.Ups, bel.nobs, bel.obs_noise_var
 
         # Condition on observation.
-        update_fn = _lofi_diagonal_cov_condition_on if self.lofi_params.use_svd \
+        update_fn = _lofi_diagonal_cov_condition_on if self.params.use_svd \
             else _lofi_diagonal_cov_svd_free_condition_on
         
         m_cond, U_cond, Lambda_cond, Ups_cond = \
