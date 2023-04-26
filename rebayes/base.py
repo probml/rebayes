@@ -39,6 +39,7 @@ class Belief:
     # This must be a chex dataclass so that it works with lax.scan as a return type for carry
 
 
+# TODO: Deprecate
 @chex.dataclass
 class RebayesParams:
 #class RebayesParams(NamedTuple):
