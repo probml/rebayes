@@ -1,7 +1,6 @@
 from functools import partial
 
 import jax
-import numpy as np
 import jax.numpy as jnp
 from rebayes import base
 from jax.flatten_util import ravel_pytree
@@ -136,7 +135,7 @@ def bbf_ekf(
 
 
 def bbf_rsgd(
-    learning_rate,
+    log_learning_rate,
     # Specify before running
     train,
     test,
@@ -154,7 +153,7 @@ def bbf_rsgd(
     X_train, y_train = train
     X_test, y_test = test
 
-    tx = optax.sgd(learning_rate=learning_rate)
+    tx = optax.sgd(learning_rate=jnp.exp(log_learning_rate).item())
 
     test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
     
@@ -262,10 +261,10 @@ def get_best_params(optimizer, method):
     max_params = optimizer.max["params"].copy()
 
     if "sgd" not in method:
-        initial_covariance = np.exp(max_params["log_init_cov"])
-        dynamics_weights = 1 - np.exp(max_params["log_dynamics_weights"])
-        dynamics_covariance = np.exp(max_params["log_dynamics_cov"])
-        alpha = np.exp(max_params["log_alpha"])
+        initial_covariance = jnp.exp(max_params["log_init_cov"]).item()
+        dynamics_weights = 1 - jnp.exp(max_params["log_dynamics_weights"]).item()
+        dynamics_covariance = jnp.exp(max_params["log_dynamics_cov"]).item()
+        alpha = jnp.exp(max_params["log_alpha"]).item()
 
         hparams = {
             "initial_covariance": initial_covariance,
@@ -277,8 +276,10 @@ def get_best_params(optimizer, method):
         else:
             hparams["dynamics_weights_or_function"] = dynamics_weights
     else:
+        learning_rate = jnp.exp(max_params["log_learning_rate"]).item()
+        
         hparams = {
-            "learning_rate": max_params["learning_rate"],
+            "learning_rate": learning_rate,
         }
 
     return hparams
