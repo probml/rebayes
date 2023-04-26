@@ -25,9 +25,9 @@ def load_mnist_dataset(fashion=False):
     for ds in [train_ds, val_ds, test_ds]:
         ds['image'] = jnp.float32(ds['image']) / 255.
     
-    X_train, y_train = jnp.array(train_ds['image']), jnp.array(train_ds['label'])
-    X_val, y_val = jnp.array(val_ds['image']), jnp.array(val_ds['label'])
-    X_test, y_test = jnp.array(test_ds['image']), jnp.array(test_ds['label'])
+    X_train, y_train = (jnp.array(train_ds[key]) for key in ['image', 'label'])
+    X_val, y_val = (jnp.array(val_ds[key]) for key in ['image', 'label'])
+    X_test, y_test = (jnp.array(test_ds[key]) for key in ['image', 'label'])
     
     dataset = process_dataset(X_train, y_train, X_val, y_val, X_test, y_test, shuffle=True)
         
@@ -46,8 +46,8 @@ def load_avalanche_mnist_dataset(avalanche_dataset, n_experiences, ntrain_per_di
     Xval_sets, Yval_sets = [batch[:nval_per_batch] for batch in Xte_batches], [batch[:nval_per_batch] for batch in Yte_batches]
     Xte_sets, Yte_sets = [batch[nval_per_batch:] for batch in Xte_batches], [batch[nval_per_batch:] for batch in Yte_batches]
     
-    Xval, Yval = jnp.concatenate(Xval_sets), jnp.concatenate(Yval_sets)
-    Xte, Yte = jnp.concatenate(Xte_sets), jnp.concatenate(Yte_sets)
+    Xval, Yval = (jnp.concatenate(sets) for sets in [Xval_sets, Yval_sets])
+    Xte, Yte = (jnp.concatenate(sets) for sets in [Xte_sets, Yte_sets])
     
     dataset = process_dataset(Xtr, Ytr, Xval, Yval, Xte, Yte)
     
