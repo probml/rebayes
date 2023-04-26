@@ -8,6 +8,7 @@ import jax.numpy as jnp
 from jaxtyping import Float, Array
 import tensorflow_probability.substrates.jax as tfp
 
+from jax.flatten_util import ravel_pytree
 from rebayes.utils.sampling import sample_dlr
 from rebayes.base import (
     CovMat,
@@ -58,16 +59,6 @@ class LoFiBel:
     Ups: CovMat = None
     nobs: int = 0
     obs_noise_var: float = 1.0
-
-
-# @chex.dataclass
-# class LoFiParams:
-#     """Lightweight container for LOFI parameters.
-#     """
-#     memory_size: int
-#     steady_state: bool = False
-#     inflation: str = 'bayesian'
-#     use_svd: bool = True
 
 
 @chex.dataclass
@@ -174,9 +165,9 @@ class RebayesLoFiSpherical(RebayesLoFi):
         # Predict dynamics.
         predict_fn = _lofi_spherical_cov_predict if self.params.use_svd \
             else _lofi_spherical_cov_svd_free_predict
-            
+
         pp_mean_pred, m_pred, U_pred, Lambda_pred, eta_pred = \
-            predict_fn(m0, m_infl, U_infl, Lambda_infl, gamma, q, eta_infl, 
+            predict_fn(m0, m_infl, U_infl, Lambda_infl, gamma, q, eta_infl,
                        self.params.steady_state)
 
         bel_pred = bel.replace(
@@ -228,10 +219,10 @@ class RebayesLoFiSpherical(RebayesLoFi):
         # Condition on observation.
         update_fn = _lofi_spherical_cov_condition_on if self.params.use_svd \
             else _lofi_spherical_cov_svd_free_condition_on
-        
+
         m_cond, U_cond, Lambda_cond = \
             update_fn(m, U, Lambda, eta, self.params.emission_mean_function,
-                      self.params.emission_cov_function, x, y, 
+                      self.params.emission_cov_function, x, y,
                       self.params.adaptive_emission_cov, obs_noise_var)
 
         # Estimate emission covariance.
@@ -374,10 +365,10 @@ class RebayesLoFiDiagonal(RebayesLoFi):
         # Condition on observation.
         update_fn = _lofi_diagonal_cov_condition_on if self.params.use_svd \
             else _lofi_diagonal_cov_svd_free_condition_on
-        
+
         m_cond, U_cond, Lambda_cond, Ups_cond = \
             update_fn(m, U, Lambda, Ups, self.params.emission_mean_function,
-                      self.params.emission_cov_function, x, y, 
+                      self.params.emission_cov_function, x, y,
                       self.params.adaptive_emission_cov, obs_noise_var)
 
         # Estimate emission covariance.
@@ -408,21 +399,70 @@ class RebayesLoFiDiagonal(RebayesLoFi):
         params_sample = sample_dlr(key, bel.basis, bel.Ups.ravel(), shape) + bel.mean
         yhat_samples = jax.vmap(self.params.emission_mean_function, (0, None))(params_sample, x)
         return yhat_samples
-  
+
     @partial(jax.jit, static_argnames=("self", "n_samples"))
-    def nlpd_mc(self, key, bel, x, y, llfn, n_samples=30):
+    def nlpd_mc(self, key, bel, x, y, n_samples=30):
         """
         Compute the negative log predictive density (nlpd) as
         a Monte Carlo estimate.
         llfn: log likelihood function
             Takes mean, x, y
         """
+        x = jnp.atleast_2d(x)
+        y = jnp.atleast_2d(y).T
         shape = (n_samples,)
         bel = self.predict_state(bel)
-        params_sample = sample_dlr(key, bel.basis, bel.Ups.ravel(), shape) + bel.mean
+        # params_sample = sample_dlr(key, bel.basis, bel.Ups.ravel(), shape) + bel.mean
+        params_sample = tfd.MultivariateNormalDiagPlusLowRank(
+            loc=bel.mean,
+            scale_diag=bel.Ups.ravel(),
+            scale_perturb_factor=bel.basis,
+        ).sample(seed=key, sample_shape=shape)
+
+        scale = jnp.sqrt(self.params.emission_cov_function(0.0, 0.0))
+        def llfn(params, x, y):
+            mean = self.params.emission_mean_function(params, x)
+            log_likelihood = self.params.emission_dist(mean, scale).log_prob(y)
+            return log_likelihood
+
         # Compute vectorised nlpd
         vnlpd = jax.vmap(llfn, (0, None, None))
         vnlpd = jax.vmap(vnlpd, (None, 0, 0))
-        nlpd_vals = -vnlpd(params_sample, x, y)
+        nlpd_vals = -vnlpd(params_sample, x, y).squeeze()
 
         return nlpd_vals.mean(axis=-1)
+
+
+def init_regression_agent(
+        key,
+        model,
+        X_init,
+        initial_covariance,
+        dynamics_weights,
+        dynamics_covariance,
+        emission_cov,
+        memory_size
+):
+    _, dim_in = X_init.shape
+    params = model.init(key, jnp.ones((1, dim_in)))
+    flat_params, recfn = ravel_pytree(params)
+
+    def apply_fn(flat_params, x):
+        return model.apply(recfn(flat_params), x)
+
+    lofi_params = LoFiParams(
+        initial_mean=flat_params,
+        initial_covariance=initial_covariance,
+        dynamics_weights=dynamics_weights,
+        dynamics_covariance=dynamics_covariance,
+        emission_mean_function=apply_fn,
+        emission_cov_function=lambda m, x: emission_cov,
+        adaptive_emission_cov=False,
+        dynamics_covariance_inflation_factor=0.0,
+        memory_size=memory_size,
+        steady_state=False,
+        emission_dist=tfd.Normal
+    )
+
+    agent = RebayesLoFiDiagonal(lofi_params)
+    return agent, recfn
