@@ -141,6 +141,7 @@ class FifoSGD(Rebayes):
         return yhat_samples
 
 
+# TODO: replace log_likelihood with TFP distribution
 class FifoSGDLaplaceDiag(FifoSGD):
     def __init__(self, lossfn, log_likelihood, apply_fn=None, init_params=None, tx=None,
                  buffer_size=None, dim_features=None, dim_output=None, n_inner=1,
@@ -242,7 +243,7 @@ def lossfn_xentropy(params, counter, X, y, apply_fn):
 
 def init_regression_agent(
     key,
-    log_likelihood,
+    log_likelihood, # use emission_dist
     model,
     X_init,
     tx,
