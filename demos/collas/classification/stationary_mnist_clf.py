@@ -38,7 +38,7 @@ def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
     ll_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_ll)
     optimizer, *_ = hpt.create_optimizer(
         model, pbounds, 0, train, dataset['val'], emission_mean_function,
-        emission_cov_function, callback=ll_callback, method=agent_type, verbose=1, 
+        emission_cov_function, callback=ll_callback, method=agent_type, verbose=1,
         callback_at_end=False, **kwargs
     )
     
@@ -59,8 +59,6 @@ def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
         **kwargs,
     )
     
-    # miscl_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_miscl)
-    # nll_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_nll)
     eval_callback = partial(benchmark.eval_callback, evaluate_fn=benchmark.mnist_evaluate_nll_and_miscl)
     
     result, runtime = jax.block_until_ready(
@@ -95,15 +93,17 @@ if __name__ == "__main__":
     dataset = data_utils.load_mnist_dataset(fashion=fashion) # load data
     model_dict = benchmark.init_model(type='mlp', features=(500, 500, 10)) # initialize model
     
-    lofi_ranks = (10, 20,)
+    lofi_ranks = (5, 10,)
+    lofi_methods = ("spherical", "diagonal")
     lofi_agents = {
-        f'lofi-{rank}': {
+        f'lofi-{rank}-{method}': {
             'memory_size': rank,
             'inflation': "hybrid",
-        } for rank in lofi_ranks
+            'lofi_method': method,
+        } for rank in lofi_ranks for method in lofi_methods
     }
     
-    sgd_ranks = (1, 10, 20,)
+    sgd_ranks = (1, 5, 10, )
     sgd_agents = {
         f'sgd-rb-{rank}': {
             'loss_fn': optax.softmax_cross_entropy,
@@ -129,9 +129,6 @@ if __name__ == "__main__":
         benchmark.store_results(miscl, f'{agent}_miscl', output_path)
         nll_results[agent] = nll
         miscl_results[agent] = miscl
-        
-    # # Store results and plot
-    # benchmark.store_results(nll_results, 'mnist_nll', output_path)
     
     nll_title = "Test-set average negative log likelihood"
     benchmark.plot_results(nll_results, "mnist_nll", output_path, ylim=(0.5, 2.5), title=nll_title)
