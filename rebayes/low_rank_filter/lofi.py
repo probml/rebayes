@@ -409,15 +409,16 @@ class RebayesLoFiDiagonal(RebayesLoFi):
             Takes mean, x, y
         """
         x = jnp.atleast_2d(x)
-        y = jnp.atleast_2d(y).T
+        y = jnp.atleast_2d(y)
         shape = (n_samples,)
         bel = self.predict_state(bel)
         params_sample = sample_dlr(key, bel.basis, bel.Ups.ravel(), shape) + bel.mean
         scale = jnp.sqrt(self.params.emission_cov_function(0.0, 0.0))
         def llfn(params, x, y):
-            mean = self.params.emission_mean_function(params, x)
+            y = y.ravel()
+            mean = self.params.emission_mean_function(params, x).ravel()
             log_likelihood = self.params.emission_dist(mean, scale).log_prob(y)
-            return log_likelihood
+            return log_likelihood.sum()
 
         # Compute vectorised nlpd
         vnlpd = jax.vmap(llfn, (0, None, None))
