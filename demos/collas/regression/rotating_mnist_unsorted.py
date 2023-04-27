@@ -1,25 +1,18 @@
 import jax
 import optax
 import distrax
-
 import numpy as np
 import flax.linen as nn
-import jax.numpy as jnp
-import matplotlib.pyplot as plt
+import tensorflow_probability.substrates.jax as tfp
 
 from typing import Callable
 from functools import partial
-from jax.flatten_util import ravel_pytree
-from flax.training.train_state import TrainState
-
 from rebayes.low_rank_filter import lofi
 from rebayes.utils import callbacks
 from rebayes.utils.utils import tree_to_cpu
 from rebayes.sgd_filter import sgd
 from rebayes.sgd_filter import replay_sgd as rsgd
 from rebayes.datasets import rotating_mnist_data as rmnist
-
-import tensorflow_probability.substrates.jax as tfp
 tfd = tfp.distributions
 
 
