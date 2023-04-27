@@ -119,6 +119,8 @@ if __name__ == "__main__":
         output_lofi = tree_to_cpu(output_lofi)
 
         metric = output_lofi["nlpd_test"][-1]
+        isna = np.isnan(metric)
+        metric = 1e10 if isna else metric
         return -metric
 
     def bbf_rsgd(log_lr, tx_fn):
@@ -135,6 +137,8 @@ if __name__ == "__main__":
         _, output_rsgd = agent_rsgd.scan(X_train, Y_train, progress_bar=False, callback=callback_rsgd)
         output_rsgd = tree_to_cpu(output_rsgd)
         metric = output_rsgd["nlpd_test"][-1]
+        isna = np.isnan(metric)
+        metric = 1e10 if isna else metric
         return -metric
 
     random_state = 2718
