@@ -26,8 +26,8 @@ def sample_dlr_single(key, W, diag):
     x = jax.random.normal(key_x, (D,)) * jnp.sqrt(diag_inv)
     eps = jax.random.normal(key_eps, (d,))
     
-    x_plus = (ID - jnp.einsum("ij,kj->ik", L, W))
-    x_plus = jnp.einsum("ij,j->i", x_plus, x) + jnp.einsum("ij,j->i", L, eps)
+    x_plus = jnp.einsum("ij,kj,k->i", L, W, x)
+    x_plus = x - x_plus + jnp.einsum("ij,j->i", L, eps)
     return x_plus
 
 
