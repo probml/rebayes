@@ -51,13 +51,12 @@ def cb_reg_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, ymean, ystd, steps=10
     """
     X_test, y_test = kwargs["X_test"], kwargs["y_test"]
 
-    slice_ix = jnp.arange(0, steps) + t
-
-    X_test = jnp.take(X_test, slice_ix, axis=0, fill_value=0)
-    y_test = jnp.take(y_test, slice_ix, axis=0, fill_value=0)
+    slice_ix = jnp.arange(0, steps) + t - steps // 2
+    X_test_window = jnp.take(X_test, slice_ix, axis=0, fill_value=0)
+    y_test_window = jnp.take(y_test, slice_ix, axis=0, fill_value=0)
 
     # eval on all tasks test set
-    yhat_test = apply_fn(bel.mean, X_test).squeeze()
+    yhat_test = apply_fn(bel_pred.mean, X_test).squeeze()
 
     # De-normalise target variables
     y_test = y_test * ystd + ymean
@@ -67,16 +66,20 @@ def cb_reg_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, ymean, ystd, steps=10
     yhat_next = pred_obs.ravel() * ystd + ymean
 
     # Compute errors
-    err_test = jnp.power(y_test - yhat_test, 2).mean()
+    err_test = jnp.power(y_test - yhat_test, 2)
+    err_test_window = err_test[slice_ix].mean()
+    err_test = err_test.mean()
     err = jnp.power(y_next - yhat_next, 2).mean()
 
-    err_test = jnp.sqrt(err_test)
     err = jnp.sqrt(err)
+    err_test = jnp.sqrt(err_test)
+    err_test_window = jnp.sqrt(err_test_window)
 
     res = {
         "n-step-pred": yhat_test,
-        "osa-error": err, # one-step ahead
-        "nsa-error": err_test, # n-step ahead
+        "osa-metric": err, # one-step ahead
+        "test-metric": err_test, # full dataset
+        "window-metric": err_test_window, # window
     }
 
     return res
@@ -84,9 +87,11 @@ def cb_reg_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, ymean, ystd, steps=10
 
 def cb_reg_mc(bel, pred_obs, t, X, y, bel_pred, apply_fn, **kwargs):
     agent = kwargs["agent"]
+    X_test, y_test = kwargs["X_test"], kwargs["y_test"]
     key = jax.random.fold_in(kwargs["key"], t)
 
     nlpd = agent.nlpd_mc(key, bel, X, y).sum()
+    nlpd_test = agent.nlpd_mc(key, bel, X_test, y_test[:, None]).sum()
 
     res = cb_reg_sup(
         bel, pred_obs, t, X, y, bel_pred, apply_fn, **kwargs
@@ -95,5 +100,6 @@ def cb_reg_mc(bel, pred_obs, t, X, y, bel_pred, apply_fn, **kwargs):
     res = {
         **res,
         "nlpd": nlpd,
+        "nlpd_test": nlpd_test,
     }
     return res
