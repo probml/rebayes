@@ -412,13 +412,7 @@ class RebayesLoFiDiagonal(RebayesLoFi):
         y = jnp.atleast_2d(y).T
         shape = (n_samples,)
         bel = self.predict_state(bel)
-        # params_sample = sample_dlr(key, bel.basis, bel.Ups.ravel(), shape) + bel.mean
-        params_sample = tfd.MultivariateNormalDiagPlusLowRank(
-            loc=bel.mean,
-            scale_diag=bel.Ups.ravel(),
-            scale_perturb_factor=bel.basis,
-        ).sample(seed=key, sample_shape=shape)
-
+        params_sample = sample_dlr(key, bel.basis, bel.Ups.ravel(), shape) + bel.mean
         scale = jnp.sqrt(self.params.emission_cov_function(0.0, 0.0))
         def llfn(params, x, y):
             mean = self.params.emission_mean_function(params, x)
