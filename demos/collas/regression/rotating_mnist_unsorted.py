@@ -41,16 +41,10 @@ class MLP(nn.Module):
 
 
 def damp_angle(n_configs, minangle, maxangle):
-    t = np.linspace(0, 1.5, n_configs)
-    # angles = np.exp(t) * np.sin(35 * t)
-    # angles = np.sin(35 * t) * (angles + 1) / 2 * (maxangle - minangle) + minangle + np.random.randn(n_configs) * 2
-        
-    # angles = np.random.randn(n_configs) * 50 + (maxangle + minangle) / 2
     angles = np.random.uniform(minangle, maxangle, size=n_configs)
     return angles
 
 
-# @partial(jax.jit, static_argnames=("apply_fn",))
 def log_likelihood(params, X, y, apply_fn, scale):
     y = y.ravel()
     mean = apply_fn(params, X).ravel()
@@ -58,13 +52,10 @@ def log_likelihood(params, X, y, apply_fn, scale):
     return ll.sum()
     
 
-# @partial(jax.jit, static_argnames=("apply_fn",))
 def lossfn(params, counter, X, y, apply_fn, scale):
     """
     Lossfunction for regression problems.
     """
-    params_flat, _ = ravel_pytree(params)
-    
     yhat = apply_fn(params, X).ravel()
     y = y.ravel()
     
@@ -135,6 +126,3 @@ if __name__ == "__main__":
 
     bel_lofi, output_lofi = agent_lofi.scan(X_train, Y_train, progress_bar=True, callback=callback_lofi)
     output_lofi = tree_to_cpu(output_lofi)
-
-
-    print("Done!")
