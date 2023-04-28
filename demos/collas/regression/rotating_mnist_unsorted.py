@@ -33,8 +33,15 @@ class MLP(nn.Module):
         return x
 
 
-def damp_angle(n_configs, minangle, maxangle):
+def uniform_angles(n_configs, minangle, maxangle):
     angles = np.random.uniform(minangle, maxangle, size=n_configs)
+    return angles
+
+
+def increase_damp_angle(n_configs, minangle, maxangle):
+    t = np.linspace(0, 1.5, n_configs)
+    angles = np.exp(t) * np.sin(35 * t)
+    angles = (angles + 1) / 2 * (maxangle - minangle) + minangle + np.random.randn(n_configs) * 2
     return angles
 
 
@@ -58,32 +65,42 @@ def lossfn(params, counter, X, y, apply_fn, scale):
     return -log_likelihood.sum()
 
 
-def load_data():
+def load_data(data_transform):
     num_train = None
     frac_train = 1.0
     target_digit = 2
 
     np.random.seed(314)
     data = rmnist.load_and_transform(
-        damp_angle, target_digit, num_train, frac_train, sort_by_angle=False
+        data_transform, target_digit, num_train, frac_train, sort_by_angle=False
     )
 
     return data
 
 
 if __name__ == "__main__":
+    import sys
     model = MLP()
     key = jax.random.PRNGKey(314)
 
-    data = load_data()
+    _, problem_type = sys.argv
+    match problem_type:
+        case "uniform":
+            loadfn = uniform_angles
+        case "increase":
+            loadfn = increase_damp_angle
+        case _:
+            raise ValueError(f"Unknown problem type {problem_type}")
+
+    data = load_data(loadfn)
     ymean, ystd = data["ymean"], data["ystd"]
     X_train, Y_train, labels_train = data["dataset"]["train"]
     X_test, Y_test, labels_test = data["dataset"]["test"]
 
     initial_covariance = 1 / 2000
     emission_cov = 0.01
-    dynamics_weights = 1.0
-    dynamics_covariance = 1e-7
+    # dynamics_weights = 1.0
+    # dynamics_covariance = 1e-7
     memory_size = 10
     scale = np.sqrt(emission_cov)
 
@@ -104,7 +121,7 @@ if __name__ == "__main__":
                     key=key,
     )
 
-    def bbf_lofi(log_1m_dynamics_weights, log_dynamics_covariance):
+    def bbf_lofi(log_1m_dynamics_weights, log_dynamics_covariance, memory_size):
         dynamics_weights = 1 - np.exp(log_1m_dynamics_weights)
         dynamics_covariance = np.exp(log_dynamics_covariance)
         agent_lofi, rfn = lofi.init_regression_agent(
@@ -123,7 +140,7 @@ if __name__ == "__main__":
         metric = 1e10 if isna else metric
         return -metric
 
-    def bbf_rsgd(log_lr, tx_fn):
+    def bbf_rsgd(log_lr, tx_fn, memory_size):
         lr = np.exp(log_lr)
         tx = tx_fn(lr)
 
@@ -152,26 +169,37 @@ if __name__ == "__main__":
         "log_dynamics_covariance": (-15, -6.5),
     }
 
-    optimiser_rsgd_adam = BayesianOptimization(
-        f=partial(bbf_rsgd, tx_fn=optax.adam),
-        pbounds=bounds_rsgd,
-        allow_duplicate_points=True,
-        random_state=random_state,
-    )
+    memory_rsgd_list = [1, 5, 10]
+    adam_optimisers = {}
+    for memory_size in memory_rsgd_list:
+        optimiser_rsgd_adam = BayesianOptimization(
+            f=partial(bbf_rsgd, tx_fn=optax.adam, memory_size=memory_size),
+            pbounds=bounds_rsgd,
+            allow_duplicate_points=True,
+            random_state=random_state,
+        )
+        adam_optimisers[memory_size] = optimiser_rsgd_adam
 
-    optimiser_rsgd = BayesianOptimization(
-        f=partial(bbf_rsgd, tx_fn=optax.sgd),
-        pbounds=bounds_rsgd,
-        allow_duplicate_points=True,
-        random_state=random_state,
-    )
+    rsgd_optimisers = {}
+    for memory_size in memory_rsgd_list:
+        optimiser_rsgd = BayesianOptimization(
+            f=partial(bbf_rsgd, tx_fn=optax.sgd, memory_size=memory_size),
+            pbounds=bounds_rsgd,
+            allow_duplicate_points=True,
+            random_state=random_state,
+        )
+        rsgd_optimisers[memory_size] = optimiser_rsgd
 
-    optimiser_lofi = BayesianOptimization(
-        f=bbf_lofi,
-        pbounds=bounds_lofi,
-        allow_duplicate_points=True,
-        random_state=random_state,
-    )
+    memory_lofi = [5, 10]
+    lofi_optimisers = {}
+    for memory_size in memory_lofi:
+        optimiser_lofi = BayesianOptimization(
+            f=partial(bbf_lofi, memory_size=memory_size),
+            pbounds=bounds_lofi,
+            allow_duplicate_points=True,
+            random_state=random_state,
+        )
+        lofi_optimisers[memory_size] = optimiser_lofi
 
     optimizer_eval_kwargs = {
         "init_points": 10,
@@ -179,10 +207,14 @@ if __name__ == "__main__":
     }
 
     print("Training RSGD")
-    optimiser_rsgd.maximize(**optimizer_eval_kwargs)
+    for memory_size, optimiser_rsgd in rsgd_optimisers.items():
+        print(f"Memory size: {memory_size}")
+        optimiser_rsgd.maximize(**optimizer_eval_kwargs)
     print("Training RSGD adam")
-    optimiser_rsgd_adam.maximize(**optimizer_eval_kwargs)
+    for memory_size, optimiser_rsgd_adam in adam_optimisers.items():
+        print(f"Memory size: {memory_size}")
+        optimiser_rsgd_adam.maximize(**optimizer_eval_kwargs)
     print("Training LoFi")
-    optimiser_lofi.maximize(**optimizer_eval_kwargs)
-    print("Training RSGD")
-    optimiser_rsgd.maximize(**optimizer_eval_kwargs)
+    for memory_size, optimiser_lofi in lofi_optimisers.items():
+        print(f"Memory size: {memory_size}")
+        optimiser_lofi.maximize(**optimizer_eval_kwargs)
