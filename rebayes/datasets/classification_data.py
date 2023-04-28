@@ -1,5 +1,7 @@
 from functools import partial
 
+from avalanche.benchmarks.classic.cfashion_mnist import SplitFMNIST
+from avalanche.benchmarks.classic.cmnist import SplitMNIST
 import jax
 from jax import vmap
 import jax.numpy as jnp
@@ -38,26 +40,6 @@ def load_mnist_dataset(fashion=False, n_train=None, n_val=None, n_test=None):
     return dataset
 
 
-def load_avalanche_mnist_dataset(avalanche_dataset, n_experiences, ntrain_per_dist, ntrain_per_batch, nval_per_batch, ntest_per_batch, seed=0, key=0):
-    if isinstance(key, int):
-        key = jr.PRNGKey(key)
-    dataset = avalanche_dataset(n_experiences=n_experiences, seed=seed)
-    Xtr, Ytr, Xte, Yte = make_avalanche_data(dataset, ntrain_per_dist, ntrain_per_batch, nval_per_batch + ntest_per_batch, key)
-    Xtr, Xte = Xtr.reshape(-1, 1, 28, 28, 1), Xte.reshape(-1, 1, 28, 28, 1)
-    Ytr, Yte = Ytr.ravel(), Yte.ravel()
-    
-    Xte_batches, Yte_batches = jnp.split(Xte, n_experiences), jnp.split(Yte, n_experiences)
-    Xval_sets, Yval_sets = [batch[:nval_per_batch] for batch in Xte_batches], [batch[:nval_per_batch] for batch in Yte_batches]
-    Xte_sets, Yte_sets = [batch[nval_per_batch:] for batch in Xte_batches], [batch[nval_per_batch:] for batch in Yte_batches]
-    
-    Xval, Yval = (jnp.concatenate(sets) for sets in [Xval_sets, Yval_sets])
-    Xte, Yte = (jnp.concatenate(sets) for sets in [Xte_sets, Yte_sets])
-    
-    dataset = process_dataset(Xtr, Ytr, Xval, Yval, Xte, Yte)
-    
-    return dataset
-
-
 def load_permuted_mnist_dataset(n_tasks, ntrain_per_task, nval_per_task, ntest_per_task, key=0, fashion=False):
     if isinstance(key, int):
         key = jr.PRNGKey(key)
@@ -92,21 +74,65 @@ def load_permuted_mnist_dataset(n_tasks, ntrain_per_task, nval_per_task, ntest_p
     return result
 
 
-def process_dataset(Xtr, Ytr, Xval, Yval, Xte, Yte, shuffle=False, key=0):
+def load_split_mnist_dataset(ntrain_per_task, nval_per_task, ntest_per_task, key=0, fashion=False):
+    if isinstance(key, int):
+        key = jr.PRNGKey(key)
+    
+    smnist_kwargs = {
+        "class_ids_from_zero_in_each_exp": True,
+        "fixed_class_order": range(10),
+    }
+    if fashion:
+        dataloader = SplitFMNIST
+    else:
+        dataloader = SplitMNIST
+    dataset = load_avalanche_mnist_dataset(dataloader, 5, ntrain_per_task, 
+                                           ntrain_per_task, nval_per_task, 
+                                           ntest_per_task, key=key, oh_train=False,
+                                           **smnist_kwargs)
+    
+    return dataset
+        
+
+
+def load_avalanche_mnist_dataset(avalanche_dataset, n_experiences, ntrain_per_dist, 
+                                 ntrain_per_batch, nval_per_batch, ntest_per_batch, 
+                                 seed=0, key=0, oh_train=True, **kwargs):
+    if isinstance(key, int):
+        key = jr.PRNGKey(key)
+    dataset = avalanche_dataset(n_experiences=n_experiences, seed=seed, **kwargs)
+    Xtr, Ytr, Xte, Yte = make_avalanche_data(dataset, ntrain_per_dist, ntrain_per_batch, nval_per_batch + ntest_per_batch, key)
+    Xtr, Xte = Xtr.reshape(-1, 1, 28, 28, 1), Xte.reshape(-1, 1, 28, 28, 1)
+    Ytr, Yte = Ytr.ravel(), Yte.ravel()
+    
+    Xte_batches, Yte_batches = jnp.split(Xte, n_experiences), jnp.split(Yte, n_experiences)
+    Xval_sets, Yval_sets = [batch[:nval_per_batch] for batch in Xte_batches], [batch[:nval_per_batch] for batch in Yte_batches]
+    Xte_sets, Yte_sets = [batch[nval_per_batch:] for batch in Xte_batches], [batch[nval_per_batch:] for batch in Yte_batches]
+    
+    Xval, Yval = (jnp.concatenate(sets) for sets in [Xval_sets, Yval_sets])
+    Xte, Yte = (jnp.concatenate(sets) for sets in [Xte_sets, Yte_sets])
+    
+    dataset = process_dataset(Xtr, Ytr, Xval, Yval, Xte, Yte, oh_train=oh_train)
+    
+    return dataset
+
+
+def process_dataset(Xtr, Ytr, Xval, Yval, Xte, Yte, shuffle=False, oh_train=True, key=0):
     if isinstance(key, int):
         key = jr.PRNGKey(key)
         
     # Reshape data
     Xtr = Xtr.reshape(-1, 1, 28, 28, 1)
-    Ytr_ohe = jax.nn.one_hot(Ytr, 10) # one-hot encode labels
+    if oh_train:
+        Ytr = jax.nn.one_hot(Ytr, 10) # one-hot encode labels
     
     # Shuffle data
     if shuffle:
         idx = jr.permutation(key, jnp.arange(len(Xtr)))
-        Xtr, Ytr_ohe = Xtr[idx], Ytr_ohe[idx]
+        Xtr, Ytr = Xtr[idx], Ytr[idx]
     
     dataset = {
-        'train': (Xtr, Ytr_ohe),
+        'train': (Xtr, Ytr),
         'val': (Xval, Yval),
         'test': (Xte, Yte)
     }
