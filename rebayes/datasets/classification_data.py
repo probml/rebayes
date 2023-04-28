@@ -9,7 +9,7 @@ import tensorflow_datasets as tfds
 from rebayes.utils.avalanche import make_avalanche_data
 
 
-def load_mnist_dataset(fashion=False):
+def load_mnist_dataset(fashion=False, n_train=None, n_val=None, n_test=None):
     """Load MNIST train and test datasets into memory."""
     dataset='mnist'
     if fashion:
@@ -25,9 +25,13 @@ def load_mnist_dataset(fashion=False):
     for ds in [train_ds, val_ds, test_ds]:
         ds['image'] = jnp.float32(ds['image']) / 255.
     
-    X_train, y_train = (jnp.array(train_ds[key]) for key in ['image', 'label'])
-    X_val, y_val = (jnp.array(val_ds[key]) for key in ['image', 'label'])
-    X_test, y_test = (jnp.array(test_ds[key]) for key in ['image', 'label'])
+    n_train = min(n_train, len(train_ds['image'])) if n_train else len(train_ds['image'])
+    n_val = min(n_val, len(val_ds['image'])) if n_val else len(val_ds['image'])
+    n_test = min(n_test, len(test_ds['image'])) if n_test else len(test_ds['image'])
+    
+    X_train, y_train = (jnp.array(train_ds[key][:n_train]) for key in ['image', 'label'])
+    X_val, y_val = (jnp.array(val_ds[key][:n_val]) for key in ['image', 'label'])
+    X_test, y_test = (jnp.array(test_ds[key][:n_test]) for key in ['image', 'label'])
     
     dataset = process_dataset(X_train, y_train, X_val, y_val, X_test, y_test, shuffle=True)
         

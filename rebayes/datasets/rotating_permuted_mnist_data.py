@@ -30,13 +30,15 @@ def generate_rotating_mnist_dataset(X, min_angle=0, max_angle=180, key=0):
 
 
 def generate_rotating_permuted_mnist_regression_dataset(
-    n_tasks, ntrain_per_task, nval_per_task, ntest_per_task, min_angle=0, max_angle=180, key=0, fashion=True
+    n_tasks, ntrain_per_task, nval_per_task, ntest_per_task, min_angle=0, 
+    max_angle=180, key=0, fashion=True, mnist_dataset = None
 ):
-    pmnist_dataset = clf_data.load_permuted_mnist_dataset(n_tasks, ntrain_per_task, 
-                                                          nval_per_task, ntest_per_task, 
-                                                          key, fashion)
+    if mnist_dataset is None:
+        mnist_dataset = clf_data.load_permuted_mnist_dataset(n_tasks, ntrain_per_task, 
+                                                             nval_per_task, ntest_per_task, 
+                                                             key, fashion)
     dataset = {
-        k: generate_rotating_mnist_dataset(pmnist_dataset[k][0], min_angle, max_angle, i)
+        k: generate_rotating_mnist_dataset(mnist_dataset[k][0], min_angle, max_angle, i)
         for i, k in enumerate(('train', 'val', 'test'))
     }
     
