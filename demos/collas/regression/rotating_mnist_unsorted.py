@@ -178,6 +178,8 @@ if __name__ == "__main__":
         "n_iter": 15,
     }
 
+    print("Training RSGD")
+    optimiser_rsgd.maximize(**optimizer_eval_kwargs)
     print("Training RSGD adam")
     optimiser_rsgd_adam.maximize(**optimizer_eval_kwargs)
     print("Training LoFi")
