@@ -21,6 +21,8 @@ import jax_dataloader.core as jdl
 # NN Models
 
 class CNN(nn.Module):
+    output_dim: int = 10
+    
     @nn.compact
     def __call__(self, x):
         x = nn.Conv(features=32, kernel_size=(3, 3))(x)
@@ -32,7 +34,7 @@ class CNN(nn.Module):
         x = x.reshape((x.shape[0], -1))  # flatten
         x = nn.Dense(features=128)(x)
         x = nn.relu(x)
-        x = nn.Dense(features=10)(x)
+        x = nn.Dense(features=self.output_dim)(x)
         return x
 
 
@@ -48,12 +50,15 @@ class MLP(nn.Module):
         return x
     
 
-def init_model(key=0, type='cnn', features=(400, 400, 10)):
+def init_model(key=0, type='cnn', features=(400, 400, 10), classification=True):
     if isinstance(key, int):
         key = jr.PRNGKey(key)
     
     if type == 'cnn':
-        model = CNN()
+        if classification:
+            model = CNN()
+        else:
+            model = CNN(output_dim=1)
     elif type == 'mlp':
         model = MLP(features)
     else:
@@ -63,18 +68,23 @@ def init_model(key=0, type='cnn', features=(400, 400, 10)):
     flat_params, unflatten_fn = ravel_pytree(params)
     apply_fn = lambda w, x: model.apply({'params': unflatten_fn(w)}, x).ravel()
     
-    emission_mean_function=lambda w, x: jax.nn.softmax(apply_fn(w, x))
-    def emission_cov_function(w, x):
-        ps = emission_mean_function(w, x)
-        return jnp.diag(ps) - jnp.outer(ps, ps) + 1e-3 * jnp.eye(len(ps)) # Add diagonal to avoid singularity
-    
+    emission_mean_function = apply_fn
     model_dict = {
         'model': model,
         'flat_params': flat_params,
         'apply_fn': apply_fn,
-        'emission_mean_function': emission_mean_function,
-        'emission_cov_function': emission_cov_function,
     }
+    if classification:
+        emission_mean_function=lambda w, x: jax.nn.softmax(apply_fn(w, x))
+        def emission_cov_function(w, x):
+            ps = emission_mean_function(w, x)
+            return jnp.diag(ps) - jnp.outer(ps, ps) + 1e-3 * jnp.eye(len(ps)) # Add diagonal to avoid singularity
+        model_dict['emission_mean_function'] = emission_mean_function
+        model_dict['emission_cov_function'] = emission_cov_function
+    else:
+        # Regression
+        emission_mean_function = apply_fn
+        model_dict['emission_mean_function'] = emission_mean_function
     
     return model_dict
 
@@ -205,12 +215,13 @@ def mnist_eval_agent(
     return output, runtime
 
 
-def nonstationary_mnist_callback(bel, pred_obs, t, x, y, bel_pred, i, **kwargs):
-    accuracy_fn = lambda logits, label: jnp.mean(logits.argmax(axis=-1) == label)
-    nll_fn = lambda logits, label: optax.softmax_cross_entropy(logits, label).mean()
-    evaluate_accuracy = partial(
+def nonstationary_mnist_callback(bel, pred_obs, t, x, y, bel_pred, i, loss_fn=None, **kwargs):
+    if loss_fn is None:
+        # loss_fn = lambda logits, label: jnp.mean(logits.argmax(axis=-1) == label)
+        loss_fn = lambda logits, label: optax.softmax_cross_entropy(logits, label).mean()
+    evaluate_fn = partial(
         evaluate_function,
-        loss_fn=nll_fn
+        loss_fn=loss_fn,
     )
     X_test, y_test, apply_fn = kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
     ntest_per_batch = kwargs["ntest_per_batch"]
@@ -219,14 +230,15 @@ def nonstationary_mnist_callback(bel, pred_obs, t, x, y, bel_pred, i, **kwargs):
     curr_X_test, curr_y_test = X_test[prev_test_batch:curr_test_batch], y_test[prev_test_batch:curr_test_batch]
     cum_X_test, cum_y_test = X_test[:curr_test_batch], y_test[:curr_test_batch]
     
-    overall_accuracy = evaluate_accuracy(bel.mean, apply_fn, cum_X_test, cum_y_test)
-    current_accuracy = evaluate_accuracy(bel.mean, apply_fn, curr_X_test, curr_y_test)
-    task1_accuracy = evaluate_accuracy(bel.mean, apply_fn, X_test[:ntest_per_batch], y_test[:ntest_per_batch])
+    overall_result = evaluate_fn(bel.mean, apply_fn, cum_X_test, cum_y_test)
+    current_result = evaluate_fn(bel.mean, apply_fn, curr_X_test, curr_y_test)
+    task1_result = evaluate_fn(bel.mean, apply_fn, X_test[:ntest_per_batch], y_test[:ntest_per_batch])
     result = {
-        'overall': overall_accuracy,
-        'current': current_accuracy,
-        'task1': task1_accuracy,
+        'overall': overall_result,
+        'current': current_result,
+        'task1': task1_result,
     }
+    
     return result
 
 
@@ -238,6 +250,7 @@ def nonstationary_mnist_eval_agent(
     agent,  
     bel=None,
     n_iter=10,
+    loss_fn=None,
 ):
     overall_accs, current_accs, task1_accs = [], [], []
     for i in trange(n_iter, desc='Evaluating agent...'):
@@ -258,7 +271,7 @@ def nonstationary_mnist_eval_agent(
         
         _, accs = agent.scan_dataloader(
             train_loader, 
-            callback=nonstationary_mnist_callback,
+            callback=partial(nonstationary_mnist_callback, loss_fn=loss_fn),
             bel=bel,
             callback_at_end=False,
             **test_kwargs

@@ -36,8 +36,9 @@ def train_agent(
     
     if 'sgd' in agent_type:
         pbounds = {
-            'learning_rate': (1e-8, 1e-1),
+            'learning_rate': (1e-6, 1e-2),
         }
+        init_points, n_iter = 10, 15
     else:
         pbounds={
             'log_init_cov': (-10, 0),
@@ -47,20 +48,21 @@ def train_agent(
         }
         if 'lofi' in agent_type:
             agent_type = 'lofi'
-    
+        init_points, n_iter = 10, 15
+        
     ll_callback = partial(
         benchmark.osa_eval_callback, 
         evaluate_fn=lambda y_pred, y: -optax.softmax_cross_entropy(y_pred, y).mean(),
     )
     optimizer, *_ = hpt.create_optimizer(
-        model, pbounds, 314, dataset['train'], dataset['val'], emission_mean_function,
-        emission_cov_function, callback=ll_callback, method=agent_type, verbose=2, 
+        model, pbounds, 0, dataset['train'], dataset['val'], emission_mean_function,
+        emission_cov_function, callback=ll_callback, method=agent_type, verbose=1, 
         callback_at_end=False, **kwargs
     )
     
     optimizer.maximize(
-        init_points=20,
-        n_iter=25,
+        init_points=init_points,
+        n_iter=n_iter,
     )
     best_hparams = hpt.get_best_params(optimizer, method=agent_type)
     print(f"Best target: {optimizer.max['target']}")
@@ -94,12 +96,12 @@ def train_agent(
 if __name__ == "__main__":
     output_path = os.environ.get("REBAYES_OUTPUT")
     if output_path is None:
-        output_path = Path(Path.cwd(), "output", "final", "nonstationary")
+        output_path = Path(Path.cwd(), "output", "final", "nonstationary", "permuted_mnist")
         output_path.mkdir(parents=True, exist_ok=True)
     print(f"Output path: {output_path}")
     
     data_kwargs = {
-        'n_tasks': 5,
+        'n_tasks': 10,
         'ntrain_per_task': 300,
         'nval_per_task': 1_000,
         'ntest_per_task': 1_000,
@@ -116,11 +118,11 @@ if __name__ == "__main__":
     features = [100, 100, 10]
     model_dict = benchmark.init_model(type='mlp', features=features)
     
-    lofi_ranks = (1, 2, 5, 10, 20, 50)
+    lofi_ranks = (20,)
     lofi_agents = {
         f'lofi-{rank}': {
-            'lofi_params': LoFiParams(memory_size=rank, diagonal_covariance=True),
-            'inflation': 'hybrid',
+            'memory_size': rank,
+            'inflation': "hybrid",
         } for rank in lofi_ranks
     }
     
@@ -134,16 +136,16 @@ if __name__ == "__main__":
     }
     
     agents = {
-        **sgd_agents,
+        **lofi_agents,
         'fdekf': None,
         'vdekf': None,
-        **lofi_agents,
+        **sgd_agents,
     }
     
-    miscl_results = {}
+    nll_results, miscl_results = {}, {}
     for agent, kwargs in agents.items():
         if kwargs is None:
-            miscl = train_agent(
+            nll = train_agent(
                 data_kwargs["ntrain_per_task"],
                 data_kwargs["ntest_per_task"],
                 model_dict, 
@@ -152,7 +154,7 @@ if __name__ == "__main__":
                 agent_type=agent
             )
         else:
-            miscl = train_agent(
+            nll = train_agent(
                 data_kwargs["ntrain_per_task"],
                 data_kwargs["ntest_per_task"],
                 model_dict, 
@@ -161,11 +163,11 @@ if __name__ == "__main__":
                 agent_type=agent,
                 **kwargs
             )
-        benchmark.store_results(miscl, f'{agent}_mnist_miscl', output_path)
-        miscl_results[agent] = miscl
+        benchmark.store_results(nll, f'{agent}_mnist_nll', output_path)
+        nll_results[agent] = nll
         
     # Store results and plot
-    benchmark.store_results(miscl_results, 'mnist_miscl', output_path)
+    benchmark.store_results(nll_results, 'mnist_nll', output_path)
     
-    miscl_title = "Test-set average misclassification rate"
-    benchmark.plot_results(miscl_results, "mnist_miscl", output_path, ylim=(0.0, 0.8), title=miscl_title)
+    # nll_title = "Test-set average negative log likelihood"
+    # benchmark.plot_results(nll_results, "mnist_nll", output_path, ylim=(0.5, 2.5), title=nll_title)

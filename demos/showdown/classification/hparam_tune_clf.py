@@ -146,21 +146,29 @@ def bbf_rsgd(
     buffer_size,
     dim_output,
     callback_at_end=True,
+    optimizer="sgd",
 ):
     """
     Black-box function for Bayesian optimization.
     """
     X_train, y_train = train
     X_test, y_test = test
-
-    tx = optax.sgd(learning_rate=jnp.exp(log_learning_rate).item())
+    
+    if optimizer == "sgd":
+        opt = optax.sgd
+    elif optimizer == "adam":
+        opt = optax.adam
+    else:
+        raise ValueError("optimizer must be either 'sgd' or 'adam'")
+    
+    tx = opt(learning_rate=jnp.exp(log_learning_rate).item())
 
     test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
     
     @partial(jit, static_argnames=("applyfn",))
     def lossfn_fifo(params, counter, X, y, applyfn):
         logits = vmap(applyfn, (None, 0))(params, X).ravel()
-        nll = loss_fn(logits=logits, labels=y.ravel())
+        nll = loss_fn(logits, y.ravel())
         nll = nll.sum()
         loss = (nll * counter).sum() / counter.sum()
         return loss
@@ -285,29 +293,8 @@ def get_best_params(optimizer, method):
     return hparams
 
 
-def build_lofi_estimator(
-    params_rebayes,
-    init_mean,
-    apply_fn, 
-    hparams, 
-    emission_mean_fn, 
-    emission_cov_fn,
-    lofi_params,
-    lofi_method = "diagonal",
-):
-    if lofi_method == "diagonal":
-        lofi_estimator = lofi.RebayesLoFiDiagonal
-    elif lofi_method == "spherical":
-        lofi_estimator = lofi.RebayesLoFiSpherical
-    else:
-        raise ValueError("method must be either 'diagonal' or 'spherical'")
-        
-    estimator = lofi_estimator(params_rebayes, lofi_params)
-    
-    return estimator
-
-
-def build_estimator(init_mean, apply_fn, hparams, emission_mean_fn, emission_cov_fn, method, **kwargs):
+def build_estimator(init_mean, apply_fn, hparams, emission_mean_fn, 
+                    emission_cov_fn, method, **kwargs):
     """
     _ is a dummy parameter for compatibility with lofi 
     """
@@ -320,6 +307,16 @@ def build_estimator(init_mean, apply_fn, hparams, emission_mean_fn, emission_cov
         )
         estimator = ekf.RebayesEKF(params, method=method)
     elif "lofi" in method:
+        if "lofi_method" in kwargs:
+            if kwargs["lofi_method"] == "diagonal":
+                estimator = lofi.RebayesLoFiDiagonal
+            elif kwargs["lofi_method"] == "spherical":
+                estimator = lofi.RebayesLoFiSpherical
+            else:
+                raise ValueError("method must be either 'diagonal' or 'spherical'")
+        else:
+            estimator = lofi.RebayesLoFiDiagonal
+        kwargs.pop("lofi_method")
         params = lofi.LoFiParams(
             initial_mean=init_mean,
             emission_mean_function=emission_mean_fn,
@@ -327,15 +324,24 @@ def build_estimator(init_mean, apply_fn, hparams, emission_mean_fn, emission_cov
             **hparams,
             **kwargs,
         )
-        estimator = lofi.RebayesLoFiDiagonal(params)
+        estimator = estimator(params)
     elif "sgd" in method:
-        tx = optax.sgd(learning_rate=hparams["learning_rate"])
+        if "optimizer" in kwargs:
+            if kwargs["optimizer"] == "sgd":
+                opt = optax.sgd
+            elif kwargs["optimizer"] == "adam":
+                opt = optax.adam
+            else:
+                raise ValueError("optimizer must be either 'sgd' or 'adam'")
+        else:
+            opt = optax.sgd
+        tx = opt(learning_rate=hparams["learning_rate"])
         
         @partial(jit, static_argnames=("applyfn",))
         def lossfn_fifo(params, counter, X, y, applyfn):
             logits = vmap(applyfn, (None, 0))(params, X)
-            nll = kwargs["loss_fn"](logits=logits, labels=y)
-            nll = nll.sum(axis=-1)
+            nll = kwargs["loss_fn"](logits, y)
+            nll = nll.sum()
             loss = (nll * counter).sum() / counter.sum()
             return loss
         

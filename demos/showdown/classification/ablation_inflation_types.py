@@ -3,7 +3,7 @@ from pathlib import Path
 
 from rebayes.low_rank_filter.lofi import LoFiParams
 from demos.showdown.classification import classification_train as benchmark
-from demos.showdown.classification.mnist import train_agent
+from demos.collas.classification.stationary_mnist_clf import train_agent
 
 
 INFLATION_TYPES = ("bayesian", "hybrid", "simple")

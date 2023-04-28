@@ -93,7 +93,13 @@ if __name__ == "__main__":
     dataset = data_utils.load_mnist_dataset(fashion=fashion) # load data
     model_dict = benchmark.init_model(type='mlp', features=(500, 500, 10)) # initialize model
     
-    lofi_ranks = (5, 10,)
+    lofi_ranks = (
+        1,
+        # 5,
+        # 10,
+        20,
+        50,
+    )
     lofi_methods = ("spherical", "diagonal")
     lofi_agents = {
         f'lofi-{rank}-{method}': {
@@ -103,20 +109,25 @@ if __name__ == "__main__":
         } for rank in lofi_ranks for method in lofi_methods
     }
     
+    sgd_optimizer = (
+        "sgd", 
+        "adam",
+    )
     sgd_ranks = (1, 5, 10, )
     sgd_agents = {
-        f'sgd-rb-{rank}': {
+        f'sgd-rb-{rank}-{optimizer}': {
             'loss_fn': optax.softmax_cross_entropy,
             'buffer_size': rank,
             'dim_output': 10,
-        } for rank in sgd_ranks
+            "optimizer": optimizer,
+        } for rank in sgd_ranks for optimizer in sgd_optimizer
     }
     
     agents = {
         **lofi_agents,
-        'fdekf': None,
-        'vdekf': None,
-        **sgd_agents,
+        # 'fdekf': None,
+        # 'vdekf': None,
+        # **sgd_agents,
     }
     
     nll_results, miscl_results = {}, {}
