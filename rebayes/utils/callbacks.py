@@ -52,8 +52,6 @@ def cb_reg_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, ymean, ystd, steps=10
     X_test, y_test = kwargs["X_test"], kwargs["y_test"]
 
     slice_ix = jnp.arange(0, steps) + t - steps // 2
-    X_test_window = jnp.take(X_test, slice_ix, axis=0, fill_value=0)
-    y_test_window = jnp.take(y_test, slice_ix, axis=0, fill_value=0)
 
     # eval on all tasks test set
     yhat_test = apply_fn(bel_pred.mean, X_test).squeeze()
@@ -85,13 +83,16 @@ def cb_reg_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, ymean, ystd, steps=10
     return res
 
 
-def cb_reg_mc(bel, pred_obs, t, X, y, bel_pred, apply_fn, **kwargs):
+def cb_reg_mc(bel, pred_obs, t, X, y, bel_pred, apply_fn, steps=10, **kwargs):
     agent = kwargs["agent"]
     X_test, y_test = kwargs["X_test"], kwargs["y_test"]
     key = jax.random.fold_in(kwargs["key"], t)
 
+    slice_ix = jnp.arange(0, steps) + t - steps // 2
     nlpd = agent.nlpd_mc(key, bel, X, y).sum()
-    nlpd_test = agent.nlpd_mc(key, bel, X_test, y_test[:, None]).sum()
+    nlpd_test = agent.nlpd_mc(key, bel, X_test, y_test[:, None])
+    nlpd_window = nlpd_test[slice_ix].sum()
+    nlpd_test = nlpd_test.sum()
 
     res = cb_reg_sup(
         bel, pred_obs, t, X, y, bel_pred, apply_fn, **kwargs
@@ -101,5 +102,7 @@ def cb_reg_mc(bel, pred_obs, t, X, y, bel_pred, apply_fn, **kwargs):
         **res,
         "nlpd": nlpd,
         "nlpd_test": nlpd_test,
+        "nlpd_window": nlpd_window,
     }
+
     return res
