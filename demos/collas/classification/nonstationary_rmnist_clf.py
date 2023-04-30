@@ -116,8 +116,14 @@ def train_agent(model_dict, dataset, agent_type='fdekf', gr_val=True, **kwargs):
 
 
 if __name__ == "__main__":    
-    for fashion in (True, False):
-        for gr_val in (True, False):
+    for fashion in (
+            True, 
+            False,
+        ):
+        for gr_val in (
+                True, 
+                False,
+            ):
             output_path = os.environ.get("REBAYES_OUTPUT")
             if output_path is None:
                 dataset_name = "mnist" if not fashion else "fmnist"

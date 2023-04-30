@@ -2,13 +2,17 @@ import os
 from pathlib import Path
 from functools import partial
 
+from flax.training.train_state import TrainState
 import jax
+from jax import jit, vmap
+import jax.numpy as jnp
+import jax.random as jr
 import optax
 
 from demos.showdown.classification import classification_train as benchmark
 from demos.showdown.classification import hparam_tune_clf as hpt
 from rebayes.datasets import classification_data as data_utils
-
+from rebayes.sgd_filter import sgd
 
 
 # def generate_warmup_data(data_dict, ntrain_per_task, nval_per_task, val_after=50):
@@ -39,7 +43,7 @@ def train_agent(
         pbounds = {
             'log_learning_rate': (-10, 0.0),
         }
-        init_points, n_iter = 10, 15
+        init_points, n_iter = 5, 5
     else:
         pbounds={
             'log_init_cov': (-10, 0),
@@ -86,7 +90,7 @@ def train_agent(
             ntest_per_task,
             model_dict['apply_fn'],
             estimator,
-            n_iter=10,
+            n_iter=20,
         )
     )
     nll_result, miscl_result = (
@@ -104,6 +108,43 @@ def train_agent(
     return nll_result, miscl_result
 
 
+def evaluate_offline_sgd(model_dict, dataset, num_epochs=10_000, batch_size=32, key=0):
+    print('Training Baseline Offline SGD agent...')
+    if isinstance(key, int):
+        key = jr.PRNGKey(key)
+    
+    Xtr, Ytr = dataset['train']
+    Xte, Yte = dataset['test']
+    
+    sgd_state = TrainState.create(
+        apply_fn=model_dict['apply_fn'],
+        params=model_dict['flat_params'],
+        tx=optax.sgd(learning_rate=1e-4)
+    )
+
+    @partial(jit, static_argnums=(3,))
+    def sgd_loss_fn(params, X_batch, y_batch, apply_fn):
+        logits = vmap(apply_fn, (None, 0))(params, X_batch).ravel()
+        nll = jnp.mean(optax.softmax_cross_entropy(logits, y_batch.ravel()))
+
+        return nll
+    
+    sgd_state, losses = sgd.train_full(
+        key, num_epochs, batch_size, sgd_state, 
+        Xtr, Ytr, sgd_loss_fn, Xte, jax.nn.one_hot(Yte, 10)
+    )
+    nll_loss_fn = lambda logits, label: optax.softmax_cross_entropy_with_integer_labels(logits, label).mean()
+    miscl_loss_fn = lambda logits, label: jnp.mean(logits.argmax(axis=-1) != label)
+    nll_evaluate_fn = partial(benchmark.evaluate_function, loss_fn=nll_loss_fn)
+    miscl_evaluate_fn = partial(benchmark.evaluate_function, loss_fn=miscl_loss_fn)
+    
+    nll_result = nll_evaluate_fn(sgd_state.params, model_dict['apply_fn'], Xte, Yte)
+    miscl_result = miscl_evaluate_fn(sgd_state.params, model_dict['apply_fn'], Xte, Yte)
+    print(f"Offline SGD NLL: {nll_result}, Misclassification: {miscl_result}")
+    
+    return nll_result, miscl_result
+    
+
 if __name__ == "__main__":
     output_path = os.environ.get("REBAYES_OUTPUT")
     if output_path is None:
@@ -120,22 +161,22 @@ if __name__ == "__main__":
     dataset = data_utils.load_permuted_mnist_dataset(**data_kwargs, fashion=True) # load data
     dataset_load_fn = partial(data_utils.load_permuted_mnist_dataset, **data_kwargs, fashion=True)
     
-    # warmup_train, warmup_val = generate_warmup_data(
-    #     dataset, data_kwargs["ntrain_per_task"], data_kwargs["nval_per_task"], val_after=50
-    # )
-    # dataset['warmup_train'] = warmup_train
-    # dataset['warmup_val'] = warmup_val
-    
     features = [500, 500, 10]
     model_dict = benchmark.init_model(type='mlp', features=features)
     
+    # Evaluate offline SGD baseline
+    offline_sgd_nll, offline_sgd_miscl = evaluate_offline_sgd(model_dict, dataset)
+    benchmark.store_results(offline_sgd_nll, "offline_sgd_nll", output_path)
+    benchmark.store_results(offline_sgd_miscl, "offline_sgd_miscl", output_path)
+    
+    # Evaluate online methods
     lofi_ranks = (
-        1,
+        # 1,
         # 5,
         10,
     )
     lofi_methods = (
-        "spherical", 
+        # "spherical", 
         "diagonal",
     )
     lofi_agents = {
@@ -166,9 +207,9 @@ if __name__ == "__main__":
     
     agents = {
         **sgd_agents,
-        # **lofi_agents,
-        # 'fdekf': None,
-        # 'vdekf': None,
+        **lofi_agents,
+        'fdekf': None,
+        'vdekf': None,
     }
     
     nll_results, miscl_results = {}, {}
