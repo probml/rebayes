@@ -1,13 +1,17 @@
 """
 Prepcocessing and data augmentation for the datasets.
 """
+from multiprocessing import Pool
 import os
+from typing import Callable, Tuple, Union
+
+from augly import image
+import augmax
+from augmax.geometric import GeometricTransformation, LazyCoordinates
 import torchvision
 import numpy as np
 import jax.numpy as jnp
-from typing import Union, Callable
-from multiprocessing import Pool
-from augly import image
+import jax.random as jr
 
 
 class DataAugmentationFactory:
@@ -81,6 +85,38 @@ class DataAugmentationFactory:
         pool.join()
 
         return dataset_proc.reshape(num_elements, -1)
+    
+    
+class Rotate(GeometricTransformation):
+    """Rotates the image by a random arbitrary angle.
+
+    Args:
+        angle_range (float, float): Tuple of `(min_angle, max_angle)` to sample from.
+            If only a single number is given, angles will be sampled from `(-angle_range, angle_range)`.
+        p (float): Probability of applying the transformation
+    """
+    def __init__(self,
+            angle_range: Union[Tuple[float, float], float]=(-30, 30),
+            p: float = 1.0):
+        super().__init__()
+        if not hasattr(angle_range, '__iter__'):
+            angle_range = (-angle_range, angle_range)
+        self.theta_min, self.theta_max = map(jnp.radians, angle_range)
+        self.probability = p
+
+    def transform_coordinates(self, rng: jnp.ndarray, coordinates: LazyCoordinates, invert=False):
+        do_apply = jr.bernoulli(rng, self.probability)
+        theta = do_apply * jr.uniform(rng, minval=self.theta_min, maxval=self.theta_max)
+
+        if invert:
+            theta = -theta
+
+        transform = jnp.array([
+            [ jnp.cos(theta), jnp.sin(theta), 0],
+            [-jnp.sin(theta), jnp.cos(theta), 0],
+            [0, 0, 1]
+        ])
+        coordinates.push_transform(transform)
 
 
 def load_mnist(root="/tmp/data", download=True):
@@ -110,6 +146,17 @@ def rotate_mnist(X, angle):
     X_shift = np.pad(X_shift, (size_pad, size_pad + size_pad_mod))
 
     return X_shift
+
+
+def rotate_mnist_jax(X, angle):
+    X_rot = X.reshape(28, 28)
+    rotate_transform = augmax.Chain(
+        Rotate((angle, angle,))
+    )
+    X_rot = rotate_transform(jr.PRNGKey(0), X_rot).reshape(X.shape)
+    
+    return X_rot
+
 
 def generate_rotated_images(images, n_processes, minangle=0, maxangle=180, anglefn=None):
     n_configs = len(images)

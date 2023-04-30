@@ -1,7 +1,7 @@
 import jax
+from jax import vmap
 import jax.numpy as jnp
 import jax.random as jr
-import numpy as np
 
 from rebayes.datasets import classification_data as clf_data
 from rebayes.datasets import rotating_mnist_data as rmnist_data
@@ -14,19 +14,19 @@ def generate_random_angles(n_tasks, min_angle=0, max_angle=180, key=0):
     return angles
 
 
+def rotate_mnist_dataset(X, angles):
+    X_rotated = vmap(rmnist_data.rotate_mnist_jax)(X, angles)
+    
+    return X_rotated
+
+
 def generate_rotating_mnist_dataset(X, min_angle=0, max_angle=180, key=0):
     if isinstance(key, int):
         key = jr.PRNGKey(key)
-    X_rotated, y_angles = [], []
     random_angles = generate_random_angles(len(X), min_angle, max_angle, key)
-    for i, x in enumerate(X):
-        x, angle = np.array(x).reshape((28, 28)), random_angles[i].item()
-        x_rotated = rmnist_data.rotate_mnist(x, angle).reshape((1, 28, 28, 1))
-        X_rotated.append(jnp.array(x_rotated))
-        y_angles.append(angle)
-    X_rotated, y_angles = (jnp.array(data) for data in (X_rotated, y_angles))
+    X_rotated = rotate_mnist_dataset(X, random_angles)
     
-    return X_rotated, y_angles
+    return X_rotated, random_angles
 
 
 def generate_rotating_permuted_mnist_regression_dataset(

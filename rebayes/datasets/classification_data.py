@@ -2,6 +2,7 @@ from functools import partial
 
 from avalanche.benchmarks.classic.cfashion_mnist import SplitFMNIST
 from avalanche.benchmarks.classic.cmnist import SplitMNIST
+import numpy as np
 import jax
 from jax import vmap
 import jax.numpy as jnp
@@ -25,7 +26,7 @@ def load_mnist_dataset(fashion=False, n_train=None, n_val=None, n_test=None):
     
     # Normalize pixel values
     for ds in [train_ds, val_ds, test_ds]:
-        ds['image'] = jnp.float32(ds['image']) / 255.
+        ds['image'] = np.float32(ds['image']) / 255.
     
     n_train = min(n_train, len(train_ds['image'])) if n_train else len(train_ds['image'])
     n_val = min(n_val, len(val_ds['image'])) if n_val else len(val_ds['image'])
@@ -131,10 +132,12 @@ def process_dataset(Xtr, Ytr, Xval, Yval, Xte, Yte, shuffle=False, oh_train=True
         idx = jr.permutation(key, jnp.arange(len(Xtr)))
         Xtr, Ytr = Xtr[idx], Ytr[idx]
     
+    Xtr, Ytr, Xval, Yval, Xte, Yte = (jnp.array(data) for data in [Xtr, Ytr, Xval, Yval, Xte, Yte])
+    
     dataset = {
-        'train': (Xtr, Ytr),
-        'val': (Xval, Yval),
-        'test': (Xte, Yte)
+        'train':[jnp.array(d) for d in (Xtr, Ytr)],
+        'val': [jnp.array(d) for d in (Xval, Yval)],
+        'test': [jnp.array(d) for d in (Xte, Yte)],
     }
     
     return dataset
