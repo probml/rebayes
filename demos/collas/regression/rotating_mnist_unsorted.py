@@ -135,7 +135,7 @@ if __name__ == "__main__":
         _, output_lofi = agent_lofi.scan(X_train, Y_train, progress_bar=False, callback=callback_lofi)
         output_lofi = tree_to_cpu(output_lofi)
 
-        metric = output_lofi["nlpd_test"][-1]
+        metric = output_lofi["nlpd"][-10:].mean()
         isna = np.isnan(metric)
         metric = 1e10 if isna else metric
         return -metric
@@ -153,7 +153,7 @@ if __name__ == "__main__":
         callback_rsgd = partial(callback, apply_fn=agent_rsgd.apply_fn, agent=agent_rsgd)
         _, output_rsgd = agent_rsgd.scan(X_train, Y_train, progress_bar=False, callback=callback_rsgd)
         output_rsgd = tree_to_cpu(output_rsgd)
-        metric = output_rsgd["nlpd_test"][-1]
+        metric = output_rsgd["nlpd"][-10:].mean()
         isna = np.isnan(metric)
         metric = 1e10 if isna else metric
         return -metric
@@ -190,7 +190,7 @@ if __name__ == "__main__":
         )
         rsgd_optimisers[memory_size] = optimiser_rsgd
 
-    memory_lofi = [5, 10]
+    memory_lofi = [5, 10, 20, 50]
     lofi_optimisers = {}
     for memory_size in memory_lofi:
         optimiser_lofi = BayesianOptimization(
