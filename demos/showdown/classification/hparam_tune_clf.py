@@ -34,6 +34,7 @@ def bbf_lofi(
     inflation = "hybrid",
     lofi_method = "diagonal",
     callback_at_end=True,
+    **kwargs,
 ):
     """
     Black-box function for Bayesian optimization.
@@ -46,7 +47,7 @@ def bbf_lofi(
     initial_covariance = jnp.exp(log_init_cov).item()
     alpha = jnp.exp(log_alpha).item()
 
-    test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
+    test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn, **kwargs}
     params = lofi.LoFiParams(
         initial_mean=flat_params,
         initial_covariance=initial_covariance,
@@ -96,6 +97,7 @@ def bbf_ekf(
     apply_fn,
     method="fdekf",
     callback_at_end=True,
+    **kwargs,
 ):
     """
     Black-box function for Bayesian optimization.
@@ -108,7 +110,7 @@ def bbf_ekf(
     initial_covariance = jnp.exp(log_init_cov).item()
     alpha = jnp.exp(log_alpha).item()
 
-    test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
+    test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn, **kwargs}
     params = ekf.EKFParams(
         initial_mean=flat_params,
         initial_covariance=initial_covariance,
@@ -147,6 +149,7 @@ def bbf_rsgd(
     dim_output,
     callback_at_end=True,
     optimizer="sgd",
+    **kwargs,
 ):
     """
     Black-box function for Bayesian optimization.
@@ -163,7 +166,7 @@ def bbf_rsgd(
     
     tx = opt(learning_rate=jnp.exp(log_learning_rate).item())
 
-    test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
+    test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn, **kwargs}
     
     @partial(jit, static_argnames=("applyfn",))
     def lossfn_fifo(params, counter, X, y, applyfn):

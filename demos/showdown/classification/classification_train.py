@@ -16,6 +16,11 @@ from jax_tqdm import scan_tqdm
 from tqdm import trange
 import jax_dataloader.core as jdl
 
+from rebayes.datasets.rotating_permuted_mnist_data import (
+    generate_rotating_mnist_dataset,
+    rotate_mnist_dataset
+)
+
 
 # ------------------------------------------------------------------------------
 # NN Models
@@ -75,10 +80,17 @@ def init_model(key=0, type='cnn', features=(400, 400, 10), classification=True):
         'apply_fn': apply_fn,
     }
     if classification:
-        emission_mean_function=lambda w, x: jax.nn.softmax(apply_fn(w, x))
-        def emission_cov_function(w, x):
-            ps = emission_mean_function(w, x)
-            return jnp.diag(ps) - jnp.outer(ps, ps) + 1e-3 * jnp.eye(len(ps)) # Add diagonal to avoid singularity
+        if features[-1] == 1:
+            # Binary classification
+            sigmoid_fn = lambda w, x: jnp.clip(jax.nn.sigmoid(apply_fn(w, x)), 1e-4, 1-1e-4).ravel()
+            emission_mean_function = lambda w, x: sigmoid_fn(w, x)
+            emission_cov_function = lambda w, x: sigmoid_fn(w, x) * (1 - sigmoid_fn(w, x))
+        else:
+            # Multiclass classification
+            emission_mean_function=lambda w, x: jax.nn.softmax(apply_fn(w, x))
+            def emission_cov_function(w, x):
+                ps = emission_mean_function(w, x)
+                return jnp.diag(ps) - jnp.outer(ps, ps) + 1e-3 * jnp.eye(len(ps)) # Add diagonal to avoid singularity
         model_dict['emission_mean_function'] = emission_mean_function
         model_dict['emission_cov_function'] = emission_cov_function
     else:
@@ -122,6 +134,18 @@ def osa_eval_callback(bel, y_pred, t, X, y, bel_pred, evaluate_fn, nan_val=-1e8,
     return eval
 
 
+def osa_nlpd_mc_callback(bel, y_pred, t, X, y, bel_pred, **kwargs):
+    agent, key = kwargs["agent"], kwargs["key"]
+    
+    nlpd = agent.nlpd_mc(key, bel, X, y)
+    
+    result = {
+        "nlpd": nlpd,
+    }
+    
+    return result
+
+
 def per_batch_callback(i, bel_pre_update, bel, batch, evaluate_fn, **kwargs):
     X_test, y_test, apply_fn = kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
     ntest_per_batch = kwargs["ntest_per_batch"]
@@ -140,6 +164,34 @@ def per_batch_callback(i, bel_pre_update, bel, batch, evaluate_fn, **kwargs):
     }
     
     return result
+
+
+def window_callback_loss(bel, y_pred, t, X, y, bel_pred, loss_fn, nan_val=-1e8, window_size=50, **kwargs):
+    X_test, y_test, apply_fn = kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
+    test_idx = jnp.arange(window_size) + t - window_size // 2
+    X_test, y_test = X_test[test_idx], y_test[test_idx]
+        
+    eval = -evaluate_function(bel.mean, apply_fn, X_test, y_test, loss_fn)
+    if isinstance(eval, dict):
+        eval = {k: jnp.where(jnp.isnan(v), nan_val, v) for k, v in eval.items()}
+    else:
+        eval = jnp.where(jnp.isnan(eval), nan_val, eval)
+    
+    return eval
+
+
+def window_callback_eval(bel, y_pred, t, X, y, bel_pred, evaluate_fn, nan_val=-1e8, window_size=50, **kwargs):
+    X_test, y_test, apply_fn = kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
+    test_idx = jnp.arange(window_size) + t - window_size // 2
+    X_test, y_test = X_test[test_idx], y_test[test_idx]
+        
+    eval = evaluate_fn(bel.mean, apply_fn, X_test, y_test)
+    if isinstance(eval, dict):
+        eval = {k: jnp.where(jnp.isnan(v), nan_val, v) for k, v in eval.items()}
+    else:
+        eval = jnp.where(jnp.isnan(eval), nan_val, eval)
+    
+    return eval
 
 
 # MNIST
@@ -215,14 +267,51 @@ def mnist_eval_agent(
     return output, runtime
 
 
-def nonstationary_mnist_callback(bel, pred_obs, t, x, y, bel_pred, i, loss_fn=None, **kwargs):
-    if loss_fn is None:
-        # loss_fn = lambda logits, label: jnp.mean(logits.argmax(axis=-1) == label)
-        loss_fn = lambda logits, label: optax.softmax_cross_entropy(logits, label).mean()
-    evaluate_fn = partial(
+def rotating_mnist_eval_agent(
+    train, test, apply_fn, callback, agent, bel_init=None, n_iter=20, n_steps=500,
+    min_angle=0, max_angle=360
+):      
+    X_train, y_train = train
+    X_test, y_test = test
+    test_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
+    gradually_rotating_angles = jnp.linspace(min_angle, max_angle, n_steps)
+    
+    @scan_tqdm(n_iter)
+    def _step(_, i):
+        key = jr.PRNGKey(i)
+        indx = jr.choice(key, len(X_train), (n_steps,))
+        X_curr, y_curr = X_train[indx], y_train[indx]
+        # Rotate the images
+        X_curr = rotate_mnist_dataset(X_curr, gradually_rotating_angles)
+        _, result = agent.scan(X_curr, y_curr, callback=callback, **test_kwargs, bel=bel_init)
+        
+        return None, result
+
+    carry = None
+    start_time = time()
+    _, output = lax.scan(_step, carry, jnp.arange(n_iter))
+    # mean, std = jax.block_until_ready(res.mean(axis=0)), jax.block_until_ready(res.std(axis=0))
+    runtime = time() - start_time
+
+    return output, runtime
+
+
+def nonstationary_mnist_callback(bel, pred_obs, t, x, y, bel_pred, i, 
+                                 nll_loss_fn=None, miscl_loss_fn=None, **kwargs):
+    if nll_loss_fn is None:
+        nll_loss_fn = lambda logits, label: optax.softmax_cross_entropy_with_integer_labels(logits, label).mean()
+    if miscl_loss_fn is None:
+        miscl_loss_fn = lambda logits, label: jnp.mean(logits.argmax(axis=-1) != label)
+    
+    nll_evaluate_fn = partial(
         evaluate_function,
-        loss_fn=loss_fn,
+        loss_fn=nll_loss_fn,
     )
+    miscl_evaluate_fn = partial(
+        evaluate_function,
+        loss_fn=miscl_loss_fn,
+    )
+    
     X_test, y_test, apply_fn = kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
     ntest_per_batch = kwargs["ntest_per_batch"]
     
@@ -230,13 +319,27 @@ def nonstationary_mnist_callback(bel, pred_obs, t, x, y, bel_pred, i, loss_fn=No
     curr_X_test, curr_y_test = X_test[prev_test_batch:curr_test_batch], y_test[prev_test_batch:curr_test_batch]
     cum_X_test, cum_y_test = X_test[:curr_test_batch], y_test[:curr_test_batch]
     
-    overall_result = evaluate_fn(bel.mean, apply_fn, cum_X_test, cum_y_test)
-    current_result = evaluate_fn(bel.mean, apply_fn, curr_X_test, curr_y_test)
-    task1_result = evaluate_fn(bel.mean, apply_fn, X_test[:ntest_per_batch], y_test[:ntest_per_batch])
+    overall_nll_result = nll_evaluate_fn(bel.mean, apply_fn, cum_X_test, cum_y_test)
+    current_nll_result = nll_evaluate_fn(bel.mean, apply_fn, curr_X_test, curr_y_test)
+    task1_nll_result = nll_evaluate_fn(bel.mean, apply_fn, X_test[:ntest_per_batch], y_test[:ntest_per_batch])
+    nll_result = {
+        'overall': overall_nll_result,
+        'current': current_nll_result,
+        'task1': task1_nll_result,
+    }
+    
+    overall_miscl_result = miscl_evaluate_fn(bel.mean, apply_fn, cum_X_test, cum_y_test)
+    current_miscl_result = miscl_evaluate_fn(bel.mean, apply_fn, curr_X_test, curr_y_test)
+    task1_miscl_result = miscl_evaluate_fn(bel.mean, apply_fn, X_test[:ntest_per_batch], y_test[:ntest_per_batch])
+    miscl_result = {
+        'overall': overall_miscl_result,
+        'current': current_miscl_result,
+        'task1': task1_miscl_result,
+    }
+    
     result = {
-        'overall': overall_result,
-        'current': current_result,
-        'task1': task1_result,
+        "nll": nll_result,
+        "miscl": miscl_result
     }
     
     return result
@@ -250,9 +353,13 @@ def nonstationary_mnist_eval_agent(
     agent,  
     bel=None,
     n_iter=10,
-    loss_fn=None,
+    nll_loss_fn=None, 
+    miscl_loss_fn=None
 ):
-    overall_accs, current_accs, task1_accs = [], [], []
+    result = {
+        "nll": {"overall": jnp.array([]), "current": jnp.array([]), "task1": jnp.array([])},
+        "miscl": {"overall": jnp.array([]), "current": jnp.array([]), "task1": jnp.array([])},
+    }
     for i in trange(n_iter, desc='Evaluating agent...'):
         # Load dataset with random permutation and random shuffle
         dataset = load_dataset_fn(key=i)
@@ -269,31 +376,18 @@ def nonstationary_mnist_eval_agent(
             'apply_fn': apply_fn,
         }
         
-        _, accs = agent.scan_dataloader(
+        _, curr_result = agent.scan_dataloader(
             train_loader, 
-            callback=partial(nonstationary_mnist_callback, loss_fn=loss_fn),
+            callback=partial(nonstationary_mnist_callback, nll_loss_fn=nll_loss_fn, miscl_loss_fn=miscl_loss_fn),
             bel=bel,
             callback_at_end=False,
             **test_kwargs
         )
-        
-        overall_accs.append(jnp.array([res['overall'] for res in accs]))
-        current_accs.append(jnp.array([res['current'] for res in accs]))
-        task1_accs.append(jnp.array([res['task1'] for res in accs]))
-    
-    overall_accs, current_accs, task1_accs = \
-        jnp.array(overall_accs).reshape((n_iter, -1)), \
-            jnp.array(current_accs).reshape((n_iter, -1)), \
-                jnp.array(task1_accs).reshape((n_iter, -1))
-
-    result = {
-        'overall': overall_accs.mean(axis=0),
-        'overall-std': overall_accs.std(axis=0),
-        'current': current_accs.mean(axis=0),
-        'current-std': current_accs.std(axis=0),
-        'first_task': task1_accs.mean(axis=0),
-        'first_task-std': task1_accs.std(axis=0),
-    }
+        curr_result = jax.tree_map(lambda *xs: jnp.concatenate(xs), *curr_result)
+        if result is None:
+            result = curr_result
+        else:
+            result = jax.tree_map(lambda x, y: jnp.array([*x, y]), result, curr_result)
     
     return result
 
