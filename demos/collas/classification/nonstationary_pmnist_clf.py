@@ -126,12 +126,12 @@ if __name__ == "__main__":
     # dataset['warmup_train'] = warmup_train
     # dataset['warmup_val'] = warmup_val
     
-    features = [100, 100, 10]
+    features = [500, 500, 10]
     model_dict = benchmark.init_model(type='mlp', features=features)
     
     lofi_ranks = (
         1,
-        5,
+        # 5,
         10,
     )
     lofi_methods = (
@@ -148,11 +148,11 @@ if __name__ == "__main__":
     
     sgd_optimizer = (
         "sgd",
-        # "adam",
+        "adam",
     )
     sgd_ranks = (
         1,
-        5,
+        # 5,
         10,
     )
     sgd_agents = {

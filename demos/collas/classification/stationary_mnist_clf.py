@@ -23,7 +23,7 @@ def train_agent(model_dict, dataset, agent_type='fdekf', **kwargs):
         pbounds = {
             'log_learning_rate': (-10, 0.0),
         }
-        init_points, n_iter = 20, 25
+        init_points, n_iter = 1, 1
     else:
         pbounds={
             'log_init_cov': (-10, 0.0),
@@ -97,8 +97,8 @@ if __name__ == "__main__":
         1,
         # 5,
         # 10,
-        20,
-        50,
+        # 20,
+        # 50,
     )
     lofi_methods = ("spherical", "diagonal")
     lofi_agents = {
@@ -113,7 +113,11 @@ if __name__ == "__main__":
         "sgd", 
         "adam",
     )
-    sgd_ranks = (1, 5, 10, )
+    sgd_ranks = (
+        1, 
+        # 5, 
+        # 10, 
+    )
     sgd_agents = {
         f'sgd-rb-{rank}-{optimizer}': {
             'loss_fn': optax.softmax_cross_entropy,
@@ -124,10 +128,10 @@ if __name__ == "__main__":
     }
     
     agents = {
-        **lofi_agents,
+        # **lofi_agents,
         # 'fdekf': None,
         # 'vdekf': None,
-        # **sgd_agents,
+        **sgd_agents,
     }
     
     nll_results, miscl_results = {}, {}
