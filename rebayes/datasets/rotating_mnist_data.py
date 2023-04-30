@@ -5,7 +5,6 @@ from multiprocessing import Pool
 import os
 from typing import Callable, Tuple, Union
 
-from augly import image
 import augmax
 from augmax.geometric import GeometricTransformation, LazyCoordinates
 import torchvision
@@ -134,21 +133,6 @@ def load_mnist(root="/tmp/data", download=True):
 
 
 def rotate_mnist(X, angle):
-    """
-    Rotate an image by a given angle.
-    We take the image to be a square of size 28x28.
-    TODO: generalize to any size
-    """
-    X_shift = image.aug_np_wrapper(X, image.rotate, degrees=angle)
-    size_im = X_shift.shape[0]
-    size_pad = (28 - size_im) // 2
-    size_pad_mod = (28 - size_im) % 2
-    X_shift = np.pad(X_shift, (size_pad, size_pad + size_pad_mod))
-
-    return X_shift
-
-
-def rotate_mnist_jax(X, angle):
     X_rot = X.reshape(28, 28)
     rotate_transform = augmax.Chain(
         Rotate((angle, angle,))
