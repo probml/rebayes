@@ -89,8 +89,8 @@ def cb_reg_mc(bel, pred_obs, t, X, y, bel_pred, apply_fn, steps=10, **kwargs):
     key = jax.random.fold_in(kwargs["key"], t)
 
     slice_ix = jnp.arange(0, steps) + t - steps // 2
-    nlpd = agent.nlpd_mc(key, bel, X, y).sum()
-    nlpd_test = agent.nlpd_mc(key, bel, X_test, y_test[:, None])
+    nlpd = agent.nlpd_mc(key, bel_pred, X, y).sum()
+    nlpd_test = agent.nlpd_mc(key, bel_pred, X_test, y_test[:, None])
     nlpd_window = nlpd_test[slice_ix].sum()
     nlpd_test = nlpd_test.sum()
 
