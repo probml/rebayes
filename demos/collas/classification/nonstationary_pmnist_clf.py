@@ -15,17 +15,6 @@ from rebayes.datasets import classification_data as data_utils
 from rebayes.sgd_filter import sgd
 
 
-# def generate_warmup_data(data_dict, ntrain_per_task, nval_per_task, val_after=50):
-#     (Xtr, Ytr), (Xval, Yval), _ = data_dict.values()
-#     Xtr_warmup, Ytr_warmup = Xtr[:val_after*ntrain_per_task], Ytr[:val_after*ntrain_per_task]
-#     warmup_train = (Xtr_warmup, Ytr_warmup)
-
-#     Xval_warmup, Yval_warmup = Xval[:val_after*nval_per_task], Yval[:val_after*nval_per_task]
-#     warmup_val = (Xval_warmup, Yval_warmup)
-    
-#     return warmup_train, warmup_val
-
-
 def train_agent(
     ntrain_per_task,
     ntest_per_task,
@@ -108,19 +97,13 @@ def train_agent(
     return nll_result, miscl_result
 
 
-def evaluate_offline_sgd(model_dict, dataset, num_epochs=10_000, batch_size=32, key=0):
+def evaluate_offline_sgd(model_dict, dataset, num_epochs=10_000, batch_size=2, key=0, **kwargs):
     print('Training Baseline Offline SGD agent...')
     if isinstance(key, int):
         key = jr.PRNGKey(key)
     
     Xtr, Ytr = dataset['train']
     Xte, Yte = dataset['test']
-    
-    sgd_state = TrainState.create(
-        apply_fn=model_dict['apply_fn'],
-        params=model_dict['flat_params'],
-        tx=optax.sgd(learning_rate=1e-4)
-    )
 
     @partial(jit, static_argnums=(3,))
     def sgd_loss_fn(params, X_batch, y_batch, apply_fn):
@@ -129,31 +112,52 @@ def evaluate_offline_sgd(model_dict, dataset, num_epochs=10_000, batch_size=32, 
 
         return nll
     
-    sgd_state, losses = sgd.train_full(
-        key, num_epochs, batch_size, sgd_state, 
-        Xtr, Ytr, sgd_loss_fn, Xte, jax.nn.one_hot(Yte, 10)
-    )
-    nll_loss_fn = lambda logits, label: optax.softmax_cross_entropy_with_integer_labels(logits, label).mean()
+    nll_loss_fn = lambda logits, label: \
+        optax.softmax_cross_entropy_with_integer_labels(logits, label).mean()
     miscl_loss_fn = lambda logits, label: jnp.mean(logits.argmax(axis=-1) != label)
     nll_evaluate_fn = partial(benchmark.evaluate_function, loss_fn=nll_loss_fn)
     miscl_evaluate_fn = partial(benchmark.evaluate_function, loss_fn=miscl_loss_fn)
     
-    nll_result = nll_evaluate_fn(sgd_state.params, model_dict['apply_fn'], Xte, Yte)
-    miscl_result = miscl_evaluate_fn(sgd_state.params, model_dict['apply_fn'], Xte, Yte)
-    print(f"Offline SGD NLL: {nll_result}, Misclassification: {miscl_result}")
+    nll_result, miscl_result = {}, {}
+    
+    n_tasks, n_train_per_task, _, n_test_per_task = kwargs.values()
+    for task_idx in range(n_tasks):
+        tr_range = jnp.arange(task_idx * n_train_per_task, (task_idx + 1) * n_train_per_task)
+        Xtr_curr, Ytr_curr = Xtr[tr_range], Ytr[tr_range]
+        
+        te_range = jnp.arange(task_idx * n_test_per_task, (task_idx + 1) * n_test_per_task)
+        Xte_curr, Yte_curr = Xte[te_range], Yte[te_range]
+
+        sgd_state = TrainState.create(
+            apply_fn=model_dict['apply_fn'],
+            params=model_dict['flat_params'],
+            tx=optax.sgd(learning_rate=1e-2)
+        )
+        
+        print(f'Training on task {task_idx+1}...')
+        sgd_state, _ = sgd.train_full(
+            key, num_epochs, batch_size, sgd_state, 
+            Xtr_curr, Ytr_curr, sgd_loss_fn, Xte_curr, jax.nn.one_hot(Yte_curr, 10)
+        )
+        nll = nll_evaluate_fn(sgd_state.params, model_dict['apply_fn'], Xte_curr, Yte_curr)
+        miscl = miscl_evaluate_fn(sgd_state.params, model_dict['apply_fn'], Xte_curr, Yte_curr)
+        print(f'NLL: {nll}, Misclassification: {miscl}\n')
+
+        nll_result[task_idx] = nll
+        miscl_result[task_idx] = miscl
     
     return nll_result, miscl_result
-    
+
 
 if __name__ == "__main__":
     output_path = os.environ.get("REBAYES_OUTPUT")
     if output_path is None:
-        output_path = Path(Path.cwd(), "output", "nonstationary", "permuted_mnist")
+        output_path = Path(Path.cwd(), "output", "nonstationary", "permuted_mnist", "five_tasks")
         output_path.mkdir(parents=True, exist_ok=True)
     print(f"Output path: {output_path}")
     
     data_kwargs = {
-        'n_tasks': 10,
+        'n_tasks': 5,
         'ntrain_per_task': 300,
         'nval_per_task': 1,
         'ntest_per_task': 1_000,
@@ -165,7 +169,7 @@ if __name__ == "__main__":
     model_dict = benchmark.init_model(type='mlp', features=features)
     
     # Evaluate offline SGD baseline
-    offline_sgd_nll, offline_sgd_miscl = evaluate_offline_sgd(model_dict, dataset)
+    offline_sgd_nll, offline_sgd_miscl = evaluate_offline_sgd(model_dict, dataset, **data_kwargs)
     benchmark.store_results(offline_sgd_nll, "offline_sgd_nll", output_path)
     benchmark.store_results(offline_sgd_miscl, "offline_sgd_miscl", output_path)
     
