@@ -15,7 +15,7 @@ def generate_random_angles(n_tasks, min_angle=0, max_angle=180, key=0):
 
 
 def rotate_mnist_dataset(X, angles):
-    X_rotated = vmap(rmnist_data.rotate_mnist_jax)(X, angles)
+    X_rotated = vmap(rmnist_data.rotate_mnist)(X, angles)
     
     return X_rotated
 
