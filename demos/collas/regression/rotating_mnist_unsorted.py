@@ -45,6 +45,13 @@ def increase_damp_angle(n_configs, minangle, maxangle):
     return angles
 
 
+def increase_damp_angle_bounded(n_configs, minangle, maxangle):
+    t = np.linspace(-1.5, 0, n_configs)
+    angles = np.exp(t) * np.sin(35 * t)
+    angles = (angles + 1) / 2 * (maxangle - minangle) + minangle + np.random.randn(n_configs) * 2
+    return angles
+
+
 def log_likelihood(params, X, y, apply_fn, scale):
     y = y.ravel()
     mean = apply_fn(params, X).ravel()
