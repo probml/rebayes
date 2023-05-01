@@ -95,10 +95,10 @@ if __name__ == "__main__":
     model_dict = benchmark.init_model(type='cnn') # initialize model
     
     lofi_ranks = (
-        1,
-        5,
-        10,
-        20,
+        # 1,
+        # 5,
+        # 10,
+        # 20,
         50,
     )
     lofi_methods = ("spherical", "diagonal")
@@ -130,9 +130,9 @@ if __name__ == "__main__":
     
     agents = {
         **lofi_agents,
-        'fdekf': None,
-        'vdekf': None,
-        **sgd_agents,
+        # 'fdekf': None,
+        # 'vdekf': None,
+        # **sgd_agents,
     }
     
     nll_results, miscl_results = {}, {}
