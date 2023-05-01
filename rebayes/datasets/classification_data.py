@@ -20,8 +20,8 @@ def load_mnist_dataset(fashion=False, n_train=None, n_val=None, n_test=None):
     ds_builder = tfds.builder(dataset)
     ds_builder.download_and_prepare()
     
-    train_ds = tfds.as_numpy(ds_builder.as_dataset(split='train[5%:]', batch_size=-1))
-    val_ds = tfds.as_numpy(ds_builder.as_dataset(split='train[:5%]', batch_size=-1))
+    train_ds = tfds.as_numpy(ds_builder.as_dataset(split='train[10%:]', batch_size=-1))
+    val_ds = tfds.as_numpy(ds_builder.as_dataset(split='train[:10%]', batch_size=-1))
     test_ds = tfds.as_numpy(ds_builder.as_dataset(split='test', batch_size=-1))
     
     # Normalize pixel values
