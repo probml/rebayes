@@ -3,6 +3,7 @@ Custom callbacks
 """
 
 import jax
+import distrax
 import jax.numpy as jnp
 
 
@@ -85,10 +86,18 @@ def cb_reg_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, ymean, ystd, steps=10
 
 def cb_reg_mc(bel, pred_obs, t, X, y, bel_pred, apply_fn, steps=10, **kwargs):
     agent = kwargs["agent"]
+    scale = kwargs["scale"]
     X_test, y_test = kwargs["X_test"], kwargs["y_test"]
     key = jax.random.fold_in(kwargs["key"], t)
 
     slice_ix = jnp.arange(0, steps) + t - steps // 2
+
+    mean_test = apply_fn(bel_pred.mean, X_test).squeeze()
+    nll = distrax.Normal(pred_obs, scale).log_prob(y.ravel())
+    nll_test = -distrax.Normal(mean_test, scale).log_prob(y_test.ravel())
+    nll_window = nll_test[slice_ix].sum()
+    nll_test = nll_test.sum()
+
     nlpd = agent.nlpd_mc(key, bel_pred, X, y).sum()
     nlpd_test = agent.nlpd_mc(key, bel_pred, X_test, y_test[:, None])
     nlpd_window = nlpd_test[slice_ix].sum()
@@ -103,6 +112,9 @@ def cb_reg_mc(bel, pred_obs, t, X, y, bel_pred, apply_fn, steps=10, **kwargs):
         "nlpd": nlpd,
         "nlpd_test": nlpd_test,
         "nlpd_window": nlpd_window,
+        "nll": nll,
+        "nll_test": nll_test,
+        "nll_window": nll_window,
     }
 
     return res
