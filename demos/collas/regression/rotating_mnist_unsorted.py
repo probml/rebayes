@@ -158,8 +158,8 @@ def load_data(data_transform):
     return data
 
 
-def eval_ll(agent, bel, X, y, scale):
-    yhat = agent.apply_fn(bel.mean, X).ravel()
+def eval_ll(apply_fn, bel, X, y, scale):
+    yhat = apply_fn(bel.mean, X).ravel()
     y = y.ravel()
     ll = distrax.Normal(yhat, scale).log_prob(y).sum()
     ll = -1e100 if np.isnan(ll) else ll
@@ -237,7 +237,8 @@ if __name__ == "__main__":
             memory_size,
         )
         agent, bel = res["agent"], res["bel"]
-        metric = metric_fn(agent, bel)
+        apply_fn = agent.params.emission_mean_function
+        metric = metric_fn(apply_fn, bel)
         return metric
 
     def bbf_rsgd(
@@ -262,7 +263,8 @@ if __name__ == "__main__":
             log_lr, tx_fn, memory_size,
         )
         agent, bel = res["agent"], res["bel"]
-        metric = metric_fn(agent, bel)
+        apply_fn = agent.apply_fn
+        metric = metric_fn(apply_fn, bel)
         return metric
 
     random_state = 2718
