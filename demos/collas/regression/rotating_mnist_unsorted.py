@@ -108,7 +108,7 @@ def load_and_run_rsgd(
     tx_fn,
     memory_size,
     initial_covariance,
-    part_lossfn,
+    lossfn,
     log_likelihood,
     key,
     model,
@@ -122,7 +122,7 @@ def load_and_run_rsgd(
 
     agent = rsgd.init_regression_agent(
         key, log_likelihood, model, X_train, tx, memory_size,
-        lossfn=part_lossfn,
+        lossfn=lossfn,
         prior_precision=1 / initial_covariance,
     )
 
@@ -144,23 +144,6 @@ def load_and_run_rsgd(
     metric = 1e10 if isna else metric
     return -metric
 
-def bbf_rsgd(
-    log_lr,
-    tx_fn,
-    memory_size,
-    metric_fn,
-):
-    """
-    Function to be used in the black-box function
-    for maximisation.
-    """
-    res = load_and_run_rsgd(
-        log_lr, tx_fn, memory_size,
-    )
-    output = tree_to_cpu(res["output"])
-    metric = metric_fn(output)
-    return metric
-
 
 def load_data(data_transform):
     num_train = None
@@ -175,18 +158,14 @@ def load_data(data_transform):
     return data
 
 
-def eval_nll(agent, bel, X, y, scale):
+def eval_ll(agent, bel, X, y, scale):
     yhat = agent.apply_fn(bel, X).ravel()
     y = y.ravel()
     ll = distrax.Normal(yhat, scale).log_prob(y)
-    nll = -ll.sum()
-    return nll
+    return ll.sum()
 
 
 if __name__ == "__main__":
-    ...
-
-def main():
     import sys
     model = MLP()
     key = jax.random.PRNGKey(314)
@@ -229,7 +208,7 @@ def main():
     )
 
     metric_fn = partial(
-        eval_nll,
+        eval_ll,
         scale=scale,
         X=X_callback,
         y=Y_callback,
@@ -254,6 +233,31 @@ def main():
             log_1m_dynamics_weights,
             log_dynamics_covariance,
             memory_size,
+        )
+        agent, bel = res["agent"], res["bel"]
+        metric = metric_fn(agent, bel)
+        return metric
+
+    def bbf_rsgd(
+        log_lr,
+        tx_fn,
+        memory_size,
+        metric_fn,
+    ):
+        """
+        Function to be used in the black-box function
+        for maximisation.
+        """
+        part_load_and_run = partial(load_and_run_rsgd,
+            initial_covariance=initial_covariance,
+            lossfn=part_lossfn,
+            log_likelihood=part_log_likelihood,
+            key=key,
+            model=model,
+            dataset_train=(X_train, Y_train),
+        )
+        res = part_load_and_run(
+            log_lr, tx_fn, memory_size,
         )
         agent, bel = res["agent"], res["bel"]
         metric = metric_fn(agent, bel)
