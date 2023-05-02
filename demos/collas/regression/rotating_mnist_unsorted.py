@@ -126,6 +126,7 @@ if __name__ == "__main__":
                     ymean=ymean, ystd=ystd,
                     X_test=X_callback, y_test=Y_callback,
                     key=key,
+                    scale=scale,
     )
 
     def bbf_lofi(log_1m_dynamics_weights, log_dynamics_covariance, memory_size):
@@ -161,7 +162,7 @@ if __name__ == "__main__":
         callback_rsgd = partial(callback, apply_fn=agent_rsgd.apply_fn, agent=agent_rsgd)
         _, output_rsgd = agent_rsgd.scan(X_train, Y_train, progress_bar=False, callback=callback_rsgd)
         output_rsgd = tree_to_cpu(output_rsgd)
-        # metric = output_rsgd["nlpd"][-10:].mean()
+        # metric = output_rsgd["nll"][-10:].mean()
         metric = output_rsgd["nlpd_test"][-1]
 
         isna = np.isnan(metric)
