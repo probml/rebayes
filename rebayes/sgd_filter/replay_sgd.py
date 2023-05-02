@@ -66,6 +66,45 @@ class FifoTrainState(TrainState):
         )
 
 
+class FifoTrainStateLaplaceDiag(FifoTrainState):
+    buffer_size: int
+    num_obs: int
+    buffer_X: Float[Array, "buffer_size dim_features"]
+    buffer_y: Float[Array, "buffer_size dim_output"]
+    counter: Int[Array, "buffer_size"]
+    precision: Float[Array, "dim_params"]
+
+    @classmethod
+    def create(cls, *, apply_fn, params, tx,
+               buffer_size, dim_features, dim_output,
+               prior_precision=1.0, **kwargs):
+        opt_state = tx.init(params)
+        params_flat, rfn = ravel_pytree(params) 
+        precision = jnp.ones_like(params_flat) * prior_precision
+        precision = rfn(precision)
+        if isinstance(dim_features, int):   # TODO: Refactor for general case
+            buffer_X = jnp.empty((buffer_size, dim_features))
+        else:
+            buffer_X = jnp.empty((buffer_size, *dim_features))
+        buffer_y = jnp.empty((buffer_size, dim_output))
+        counter = jnp.zeros(buffer_size)
+
+        return cls(
+            step=0,
+            num_obs=0,
+            apply_fn=apply_fn,
+            params=params,
+            tx=tx,
+            opt_state=opt_state,
+            buffer_size=buffer_size,
+            buffer_X=buffer_X,
+            buffer_y=buffer_y,
+            counter=counter,
+            precision=precision,
+            **kwargs
+        )
+
+
 class FifoSGD(Rebayes):
     """
     FIFO Replay-buffer SGD training procedure
@@ -106,12 +145,12 @@ class FifoSGD(Rebayes):
     @partial(jax.jit, static_argnums=(0,))
     def _train_step(
         self,
-        state: FifoTrainState,
+        bel: FifoTrainState,
     ) -> Tuple[float, FifoTrainState]:
-        X, y = state.buffer_X, state.buffer_y
-        loss, grads = self.loss_grad(state.params, state.counter, X, y, state.apply_fn)
-        state = state.apply_gradients(grads=grads)
-        return loss, state
+        X, y = bel.buffer_X, bel.buffer_y
+        loss, grads = self.loss_grad(bel.params, bel.counter, X, y, bel.apply_fn)
+        bel = bel.apply_gradients(grads=grads)
+        return loss, bel
 
     @partial(jax.jit, static_argnums=(0,))
     def update_state(self, bel, Xt, yt):
@@ -150,6 +189,20 @@ class FifoSGDLaplaceDiag(FifoSGD):
         self.prior_precision = prior_precision
         self.log_likelihood = log_likelihood
 
+    def init_bel(self):
+        if self.apply_fn is None:
+            raise ValueError("Must provide apply_fn")
+        bel_init = FifoTrainStateLaplaceDiag.create(
+            apply_fn = self.apply_fn,
+            params = self.params,
+            tx = self.tx,
+            buffer_size = self.buffer_size,
+            dim_features = self.dim_features,
+            dim_output = self.dim_output,
+            prior_precision = self.prior_precision
+        )
+        return bel_init
+
     def _get_empirical_fisher(self, bel, X, y):
         """
         Compute the diagonal empirical Fisher information matrix.
@@ -163,8 +216,24 @@ class FifoSGDLaplaceDiag(FifoSGD):
         grads = vgll(bel.params, X, y, bel.apply_fn)
 
         # Empirical Fisher information matrix
-        Fdiag = jax.tree_map(lambda x: -(x ** 2).sum(axis=0) - self.prior_precision, grads)
+        precision = bel.precision
+        Fdiag = jax.tree_map(lambda g, p: -(g ** 2).sum(axis=0) - p, grads, precision)
         return Fdiag
+
+    @partial(jax.jit, static_argnums=(0,))
+    def update_state(self, bel, Xt, yt):
+        bel = bel.apply_buffers(Xt, yt)
+
+        def partial_step(_, bel):
+            _, bel = self._train_step(bel)
+            return bel
+        bel = jax.lax.fori_loop(0, self.n_inner - 1, partial_step, bel)
+        # Do not count inner steps as part of the outer step
+        _, bel = self._train_step(bel)
+        precision = self._get_empirical_fisher(bel, bel.buffer_X, bel.buffer_y)
+        precision = jax.tree_map(lambda x: -x, precision)
+        bel = bel.replace(precision=precision)
+        return bel
     
     def _sample_posterior_params(self, key, bel, nsamples=50):
         """
@@ -172,8 +241,7 @@ class FifoSGDLaplaceDiag(FifoSGD):
         """
         # Belief posterior predictive.
         mean = self.predict_state(bel).mean
-        emp_fisher = self._get_empirical_fisher(bel, bel.buffer_X, bel.buffer_y)
-        cov = jax.tree_map(lambda x: -1 / x, emp_fisher)
+        cov = jax.tree_map(lambda x: 1 / x, bel.precision)
 
         mean_flat, unravel_fn = ravel_pytree(mean)
         cov_flat, _ = ravel_pytree(cov)
