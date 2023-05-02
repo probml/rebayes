@@ -72,6 +72,96 @@ def lossfn(params, counter, X, y, apply_fn, scale):
     return -log_likelihood.sum()
 
 
+def load_and_run_lofi(
+    log_1m_dynamics_weights,
+    log_dynamics_covariance,
+    memory_size,
+    initial_covariance,
+    emission_cov,
+    key,
+    model,
+    dataset_train,
+    progress_bar=False,
+    callback=None
+):
+    X_train, Y_train = dataset_train
+    dynamics_weights = 1 - np.exp(log_1m_dynamics_weights)
+    dynamics_covariance = np.exp(log_dynamics_covariance)
+    agent, rfn = lofi.init_regression_agent(
+        key, model, X_train,
+        initial_covariance, dynamics_weights, dynamics_covariance,
+        emission_cov, memory_size
+    )
+
+    bel, outputs = agent.scan(X_train, Y_train, progress_bar=progress_bar, callback=callback)
+
+    result = {
+        "bel": bel,
+        "agent": agent,
+        "outputs": outputs,
+    }
+    return result
+
+
+def load_and_run_rsgd(
+    log_lr,
+    tx_fn,
+    memory_size,
+    initial_covariance,
+    part_lossfn,
+    log_likelihood,
+    key,
+    model,
+    dataset_train,
+    progress_bar=False,
+    callback=None
+):
+    X_train, Y_train = dataset_train
+    lr = np.exp(log_lr)
+    tx = tx_fn(lr)
+
+    agent = rsgd.init_regression_agent(
+        key, log_likelihood, model, X_train, tx, memory_size,
+        lossfn=part_lossfn,
+        prior_precision=1 / initial_covariance,
+    )
+
+    # callback = partial(callback, apply_fn=agent.apply_fn, agent=agent)
+    bel, output = agent.scan(X_train, Y_train, progress_bar=progress_bar, callback=callback)
+    
+    result = {
+        "bel": bel,
+        "output": output,
+        "agent": agent,
+    }
+    return result
+    output = tree_to_cpu(output)
+
+    # metric = output["nll"][-10:].mean()
+    metric = output["nlpd_test"][-1]
+
+    isna = np.isnan(metric)
+    metric = 1e10 if isna else metric
+    return -metric
+
+def bbf_rsgd(
+    log_lr,
+    tx_fn,
+    memory_size,
+    metric_fn,
+):
+    """
+    Function to be used in the black-box function
+    for maximisation.
+    """
+    res = load_and_run_rsgd(
+        log_lr, tx_fn, memory_size,
+    )
+    output = tree_to_cpu(res["output"])
+    metric = metric_fn(output)
+    return metric
+
+
 def load_data(data_transform):
     num_train = None
     frac_train = 1.0
@@ -85,7 +175,18 @@ def load_data(data_transform):
     return data
 
 
+def eval_nll(agent, bel, X, y, scale):
+    yhat = agent.apply_fn(bel, X).ravel()
+    y = y.ravel()
+    ll = distrax.Normal(yhat, scale).log_prob(y)
+    nll = -ll.sum()
+    return nll
+
+
 if __name__ == "__main__":
+    ...
+
+def main():
     import sys
     model = MLP()
     key = jax.random.PRNGKey(314)
@@ -106,8 +207,6 @@ if __name__ == "__main__":
 
     initial_covariance = 1 / 2000
     emission_cov = 0.01
-    # dynamics_weights = 1.0
-    # dynamics_covariance = 1e-7
     memory_size = 10
     scale = np.sqrt(emission_cov)
 
@@ -129,45 +228,36 @@ if __name__ == "__main__":
                     scale=scale,
     )
 
-    def bbf_lofi(log_1m_dynamics_weights, log_dynamics_covariance, memory_size):
-        dynamics_weights = 1 - np.exp(log_1m_dynamics_weights)
-        dynamics_covariance = np.exp(log_dynamics_covariance)
-        agent_lofi, rfn = lofi.init_regression_agent(
-            key, model, X_train,
-            initial_covariance, dynamics_weights, dynamics_covariance,
-            emission_cov, memory_size
+    metric_fn = partial(
+        eval_nll,
+        scale=scale,
+        X=X_callback,
+        y=Y_callback,
+    )
+
+    def bbf_lofi(
+        log_1m_dynamics_weights,
+        log_dynamics_covariance,
+        memory_size,
+    ):
+        """
+        Function to be used in the black-box function optimization.
+        """
+        part_load_and_run = partial(load_and_run_lofi,
+            initial_covariance=initial_covariance,
+            emission_cov=emission_cov,
+            key=key,
+            model=model,
+            dataset_train=(X_train, Y_train),
         )
-
-        callback_lofi = partial(callback, apply_fn=agent_lofi.params.emission_mean_function, agent=agent_lofi)
-
-        _, output_lofi = agent_lofi.scan(X_train, Y_train, progress_bar=False, callback=callback_lofi)
-        output_lofi = tree_to_cpu(output_lofi)
-
-        # metric = output_lofi["nlpd"][-10:].mean()
-        metric = output_lofi["nlpd_test"][-1]
-        isna = np.isnan(metric)
-        metric = 1e10 if isna else metric
-        return -metric
-
-    def bbf_rsgd(log_lr, tx_fn, memory_size):
-        lr = np.exp(log_lr)
-        tx = tx_fn(lr)
-
-        agent_rsgd = rsgd.init_regression_agent(
-            key, part_log_likelihood, model, X_train, tx, memory_size,
-            lossfn=part_lossfn,
-            prior_precision=1 / initial_covariance,
+        res = part_load_and_run(
+            log_1m_dynamics_weights,
+            log_dynamics_covariance,
+            memory_size,
         )
-
-        callback_rsgd = partial(callback, apply_fn=agent_rsgd.apply_fn, agent=agent_rsgd)
-        _, output_rsgd = agent_rsgd.scan(X_train, Y_train, progress_bar=False, callback=callback_rsgd)
-        output_rsgd = tree_to_cpu(output_rsgd)
-        # metric = output_rsgd["nll"][-10:].mean()
-        metric = output_rsgd["nlpd_test"][-1]
-
-        isna = np.isnan(metric)
-        metric = 1e10 if isna else metric
-        return -metric
+        agent, bel = res["agent"], res["bel"]
+        metric = metric_fn(agent, bel)
+        return metric
 
     random_state = 2718
 
