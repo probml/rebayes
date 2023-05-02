@@ -159,10 +159,11 @@ def load_data(data_transform):
 
 
 def eval_ll(agent, bel, X, y, scale):
-    yhat = agent.apply_fn(bel, X).ravel()
+    yhat = agent.apply_fn(bel.mean, X).ravel()
     y = y.ravel()
-    ll = distrax.Normal(yhat, scale).log_prob(y)
-    return ll.sum()
+    ll = distrax.Normal(yhat, scale).log_prob(y).sum()
+    ll = -1e100 if np.isnan(ll) else ll
+    return ll
 
 
 if __name__ == "__main__":
@@ -218,6 +219,7 @@ if __name__ == "__main__":
         log_1m_dynamics_weights,
         log_dynamics_covariance,
         memory_size,
+        metric_fn,
     ):
         """
         Function to be used in the black-box function optimization.
@@ -278,7 +280,7 @@ if __name__ == "__main__":
     adam_optimisers = {}
     for memory_size in memory_rsgd_list:
         optimiser_rsgd_adam = BayesianOptimization(
-            f=partial(bbf_rsgd, tx_fn=optax.adam, memory_size=memory_size),
+            f=partial(bbf_rsgd, tx_fn=optax.adam, memory_size=memory_size, metric_fn=metric_fn),
             pbounds=bounds_rsgd,
             allow_duplicate_points=True,
             random_state=random_state,
@@ -288,7 +290,7 @@ if __name__ == "__main__":
     rsgd_optimisers = {}
     for memory_size in memory_rsgd_list:
         optimiser_rsgd = BayesianOptimization(
-            f=partial(bbf_rsgd, tx_fn=optax.sgd, memory_size=memory_size),
+            f=partial(bbf_rsgd, tx_fn=optax.sgd, memory_size=memory_size, metric_fn=metric_fn),
             pbounds=bounds_rsgd,
             allow_duplicate_points=True,
             random_state=random_state,
@@ -299,7 +301,7 @@ if __name__ == "__main__":
     lofi_optimisers = {}
     for memory_size in memory_lofi:
         optimiser_lofi = BayesianOptimization(
-            f=partial(bbf_lofi, memory_size=memory_size),
+            f=partial(bbf_lofi, memory_size=memory_size, metric_fn=metric_fn),
             pbounds=bounds_lofi,
             allow_duplicate_points=True,
             random_state=random_state,
