@@ -201,19 +201,14 @@ if __name__ == "__main__":
     X_train = X_train[n_callback:]
     Y_train = Y_train[n_callback:]
 
-    callback = partial(callbacks.cb_reg_mc,
-                    ymean=ymean, ystd=ystd,
-                    X_test=X_callback, y_test=Y_callback,
-                    key=key,
-                    scale=scale,
-    )
+    # callback = partial(callbacks.cb_reg_mc,
+    #                 ymean=ymean, ystd=ystd,
+    #                 X_test=X_callback, y_test=Y_callback,
+    #                 key=key,
+    #                 scale=scale,
+    # )
 
-    metric_fn = partial(
-        eval_ll,
-        scale=scale,
-        X=X_callback,
-        y=Y_callback,
-    )
+    metric_fn = partial(eval_ll, scale=scale, X=X_callback, y=Y_callback)
 
     def bbf_lofi(
         log_1m_dynamics_weights,
