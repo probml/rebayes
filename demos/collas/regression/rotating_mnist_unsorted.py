@@ -135,14 +135,6 @@ def load_and_run_rsgd(
         "agent": agent,
     }
     return result
-    output = tree_to_cpu(output)
-
-    # metric = output["nll"][-10:].mean()
-    metric = output["nlpd_test"][-1]
-
-    isna = np.isnan(metric)
-    metric = 1e10 if isna else metric
-    return -metric
 
 
 def load_data(data_transform):
@@ -200,13 +192,6 @@ if __name__ == "__main__":
     Y_callback = Y_train[:n_callback]
     X_train = X_train[n_callback:]
     Y_train = Y_train[n_callback:]
-
-    # callback = partial(callbacks.cb_reg_mc,
-    #                 ymean=ymean, ystd=ystd,
-    #                 X_test=X_callback, y_test=Y_callback,
-    #                 key=key,
-    #                 scale=scale,
-    # )
 
     metric_fn = partial(eval_ll, scale=scale, X=X_callback, y=Y_callback)
 
