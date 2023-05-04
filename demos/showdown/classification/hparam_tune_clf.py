@@ -10,6 +10,7 @@ import optax
 
 from rebayes.extended_kalman_filter import ekf
 from rebayes.low_rank_filter import lofi
+from rebayes.low_rank_filter import replay_lofi
 from rebayes.sgd_filter import replay_sgd as rsgd
 
 
@@ -68,6 +69,69 @@ def bbf_lofi(
         raise ValueError("method must be either 'diagonal' or 'spherical'")
         
     estimator = lofi_estimator(params)
+
+    if callback_at_end:
+        bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
+        metric = callback(bel, **test_callback_kwargs)
+    else:
+        _, metric = estimator.scan(X_train, y_train, progress_bar=False, callback=callback, **test_callback_kwargs)
+        metric = metric.mean()
+        
+    if jnp.isnan(metric) or jnp.isinf(metric):
+        metric = -1e8
+        
+    return metric
+
+
+def bbf_replay_lofi(
+    log_init_cov,
+    log_dynamics_weights,
+    log_dynamics_cov,
+    log_alpha,
+    # Specify before running
+    emission_mean_fn,
+    emission_cov_fn,
+    train,
+    test,
+    flat_params,
+    callback,
+    apply_fn,
+    buffer_size,
+    dim_input,
+    dim_output,
+    memory_size,
+    inflation = "hybrid",
+    callback_at_end=True,
+    **kwargs,
+):
+    """
+    Black-box function for Bayesian optimization.
+    """
+    X_train, y_train = train
+    X_test, y_test = test
+
+    dynamics_weights = 1 - jnp.exp(log_dynamics_weights).item()
+    dynamics_covariance = jnp.exp(log_dynamics_cov).item()
+    initial_covariance = jnp.exp(log_init_cov).item()
+    alpha = jnp.exp(log_alpha).item()
+
+    test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn, **kwargs}
+    params = replay_lofi.ReplayLoFiParams(
+        buffer_size=buffer_size,
+        dim_input=dim_input,
+        dim_output=dim_output,
+        initial_mean=flat_params,
+        initial_covariance=initial_covariance,
+        dynamics_weights=dynamics_weights,
+        dynamics_covariance=dynamics_covariance,
+        emission_mean_function=emission_mean_fn,
+        emission_cov_function=emission_cov_fn,
+        dynamics_covariance_inflation_factor=alpha,
+        memory_size=memory_size,
+        inflation=inflation,
+    )
+
+    estimator = replay_lofi.RebayesReplayLoFiDiagonal(params)
 
     if callback_at_end:
         bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
@@ -227,6 +291,8 @@ def create_optimizer(
     if "sgd" not in method:
         if "ekf" in method:
             bbf = bbf_ekf
+        elif "replay_lofi" in method:
+            bbf = bbf_replay_lofi
         elif "lofi" in method:
             bbf = bbf_lofi
 
@@ -309,6 +375,15 @@ def build_estimator(init_mean, apply_fn, hparams, emission_mean_fn,
             **hparams,
         )
         estimator = ekf.RebayesEKF(params, method=method)
+    elif "replay_lofi" in method:
+        params = replay_lofi.ReplayLoFiParams(
+            initial_mean=init_mean,
+            emission_mean_function=emission_mean_fn,
+            emission_cov_function=emission_cov_fn,
+            **hparams,
+            **kwargs,
+        )
+        estimator = replay_lofi.RebayesReplayLoFiDiagonal(params)
     elif "lofi" in method:
         if "lofi_method" in kwargs:
             if kwargs["lofi_method"] == "diagonal":
