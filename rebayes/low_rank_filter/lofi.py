@@ -331,7 +331,7 @@ class RebayesLoFiDiagonal(RebayesLoFi):
         x: Float[Array, "input_dim"]
     ) -> Union[Float[Array, "output_dim output_dim"], Any]:
         m, U, Lambda, obs_noise_var, Ups = \
-            bel.mean, bel.basis, bel.svs, bel.eta, bel.obs_noise_var
+            bel.mean, bel.basis, bel.svs, bel.obs_noise_var, bel.Ups
         m_Y = lambda z: self.params.emission_mean_function(z, x)
         Cov_Y = lambda z: self.params.emission_cov_function(z, x)
 
