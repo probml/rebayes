@@ -229,14 +229,16 @@ class RebayesReplayLoFi(Rebayes):
         bel: ReplayLoFiBel,
     ) -> ReplayLoFiBel:
         X, y = bel.buffer_X, bel.buffer_y
+        init_nobs = bel.nobs
         num_timesteps = X.shape[0]
         
         def step(t, bel):
             bel_pred = self.predict_state(bel)
             bel = self._update_state(bel_pred, X[t], y[t])
-
+            
             return bel
         bel = lax.fori_loop(0, num_timesteps, step, bel)
+        bel = bel.replace(nobs=init_nobs+1)
         
         return bel
     
@@ -248,14 +250,31 @@ class RebayesReplayLoFi(Rebayes):
         y: Float[Array, "output_dim"],
     ) -> ReplayLoFiBel:
         bel = bel.apply_io_buffers(x, y)
-        bel.mean_lin = bel.mean
+        bel = bel.replace(mean_lin = bel.mean)
+        bel_replay = bel.replace(
+            pp_mean = bel.buffer_pp_mean[0],
+            mean = bel.buffer_mean[0],
+            basis = bel.buffer_basis[0],
+            svs = bel.buffer_svs[0],
+            eta = bel.buffer_eta[0],
+            Ups = bel.buffer_Ups[0],
+            obs_noise_var = bel.buffer_obs_noise_var[0],
+        )
         
         def partial_step(_, bel):
             bel = self.update_step(bel)
             
             return bel
-        bel = lax.fori_loop(0, self.params.n_inner-1, partial_step, bel)
-        bel = self.update_step(bel)
+        
+        bel_replay = lax.fori_loop(0, self.params.n_inner-1, partial_step, bel_replay)
+        bel_replay = self.update_step(bel_replay)
+        bel = lax.cond(
+            bel.nobs < self.params.buffer_size, 
+            lambda _: self._update_state(bel, x, y),
+            lambda _: bel_replay,
+            None
+        )
+        # bel = jnp.where(bel.nobs < self.params.buffer_size, bel, bel_replay)
         bel = bel.apply_param_buffers()
         
         return bel
@@ -349,7 +368,6 @@ class RebayesReplayLoFiDiagonal(RebayesReplayLoFi):
             _lofi_estimate_noise(m_cond, self.params.emission_mean_function,
                                  x, y, nobs, obs_noise_var,
                                  self.params.adaptive_emission_cov)
-
         bel_cond = bel.replace(
             mean = m_cond,
             basis = U_cond,

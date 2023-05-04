@@ -91,14 +91,14 @@ def _lofi_estimate_noise(
         nobs_est (int): Updated number of observations seen so far.
         obs_noise_var_est (float): Updated estimate of observation noise.
     """
+    nobs_est = nobs + 1
     if not adaptive_variance:
-        return 0, 0.0
+        return nobs_est, 0.0
 
     m_Y = lambda w: y_cond_mean(w, x)
     yhat = jnp.atleast_1d(m_Y(m))
     
     sqerr = ((yhat - y).T @ (yhat - y)).squeeze() / yhat.shape[0]
-    nobs_est = nobs + 1
     obs_noise_var_est = jnp.max(jnp.array([1e-6, obs_noise_var + 1/nobs_est * (sqerr - obs_noise_var)]))
 
     return nobs_est, obs_noise_var_est
