@@ -486,6 +486,7 @@ def _lofi_diagonal_cov_condition_on(
     y: Float[Array, "obs_dim"],
     adaptive_variance: bool = False,
     obs_noise_var: float = 1.0,
+    m_lin: Float[Array, "state_dim"] = None,
 ):
     """Condition step of the low-rank filter with diagonal covariance matrix.
 
@@ -511,7 +512,12 @@ def _lofi_diagonal_cov_condition_on(
     m_Y = lambda w: y_cond_mean(w, x)
     Cov_Y = lambda w: y_cond_cov(w, x)
     
-    yhat = jnp.atleast_1d(m_Y(m))
+    if m_lin is None:
+        H = _jacrev_2d(m_Y, m)
+        yhat = jnp.atleast_1d(m_Y(m))
+    else:
+        H = _jacrev_2d(m_Y, m_lin)
+        yhat = jnp.atleast_1d(m_Y(m_lin)) + H @ (m - m_lin)
     C = yhat.shape[0]
     
     if adaptive_variance:
@@ -520,7 +526,6 @@ def _lofi_diagonal_cov_condition_on(
         R = jnp.atleast_2d(Cov_Y(m))
     R_chol = jnp.linalg.cholesky(R)
     A = jnp.linalg.lstsq(R_chol, jnp.eye(C))[0].T
-    H = _jacrev_2d(m_Y, m)
     W_tilde = jnp.hstack([Lambda * U, (H.T @ A).reshape(P, -1)])
     
     # Update the U matrix
@@ -549,6 +554,7 @@ def _lofi_diagonal_cov_svd_free_condition_on(
     y: Float[Array, "obs_dim"],
     adaptive_variance: bool = False,
     obs_noise_var: float = 1.0,
+    m_lin: Float[Array, "state_dim"] = None,
 ):
     """Condition step of the SVD-free low-rank filter with diagonal covariance matrix.
 
@@ -574,7 +580,12 @@ def _lofi_diagonal_cov_svd_free_condition_on(
     m_Y = lambda w: y_cond_mean(w, x)
     Cov_Y = lambda w: y_cond_cov(w, x)
     
-    yhat = jnp.atleast_1d(m_Y(m))
+    if m_lin is None:
+        H = _jacrev_2d(m_Y, m)
+        yhat = jnp.atleast_1d(m_Y(m))
+    else:
+        H = _jacrev_2d(m_Y, m_lin)
+        yhat = jnp.atleast_1d(m_Y(m_lin)) + H @ (m - m_lin)
     C = yhat.shape[0]
     
     if adaptive_variance:
@@ -583,7 +594,6 @@ def _lofi_diagonal_cov_svd_free_condition_on(
         R = jnp.atleast_2d(Cov_Y(m))
     R_chol = jnp.linalg.cholesky(R)
     A = jnp.linalg.lstsq(R_chol, jnp.eye(C))[0].T
-    H = _jacrev_2d(m_Y, m)
     AH = A.T @ H
     
     Lambda_plus = jnp.sqrt(jnp.einsum("ij,ij->i", AH/Ups.T, AH))
