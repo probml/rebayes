@@ -7,10 +7,8 @@ import tensorflow_probability.substrates.jax as tfp
 
 from typing import Callable
 from functools import partial
-from rebayes.utils import callbacks
-from rebayes.low_rank_filter import lofi
 from bayes_opt import BayesianOptimization
-from rebayes.utils.utils import tree_to_cpu
+from rebayes.low_rank_filter import lofi
 from rebayes.sgd_filter import replay_sgd as rsgd
 from rebayes.datasets import rotating_mnist_data as rmnist
 tfd = tfp.distributions
