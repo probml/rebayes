@@ -10,7 +10,7 @@ import optax
 
 from rebayes.extended_kalman_filter import ekf
 from rebayes.low_rank_filter import lofi
-from rebayes.low_rank_filter import replay_lofi
+from rebayes.low_rank_filter import cold_posterior_lofi
 from rebayes.sgd_filter import replay_sgd as rsgd
 
 
@@ -116,7 +116,7 @@ def bbf_replay_lofi(
     alpha = jnp.exp(log_alpha).item()
 
     test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn, **kwargs}
-    params = replay_lofi.ReplayLoFiParams(
+    params = cold_posterior_lofi.ReplayLoFiParams(
         buffer_size=buffer_size,
         dim_input=dim_input,
         dim_output=dim_output,
@@ -131,7 +131,7 @@ def bbf_replay_lofi(
         inflation=inflation,
     )
 
-    estimator = replay_lofi.RebayesReplayLoFiDiagonal(params)
+    estimator = cold_posterior_lofi.RebayesReplayLoFiDiagonal(params)
 
     if callback_at_end:
         bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
@@ -376,14 +376,14 @@ def build_estimator(init_mean, apply_fn, hparams, emission_mean_fn,
         )
         estimator = ekf.RebayesEKF(params, method=method)
     elif "replay_lofi" in method:
-        params = replay_lofi.ReplayLoFiParams(
+        params = cold_posterior_lofi.ReplayLoFiParams(
             initial_mean=init_mean,
             emission_mean_function=emission_mean_fn,
             emission_cov_function=emission_cov_fn,
             **hparams,
             **kwargs,
         )
-        estimator = replay_lofi.RebayesReplayLoFiDiagonal(params)
+        estimator = cold_posterior_lofi.RebayesReplayLoFiDiagonal(params)
     elif "lofi" in method:
         if "lofi_method" in kwargs:
             if kwargs["lofi_method"] == "diagonal":
