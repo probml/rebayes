@@ -116,7 +116,7 @@ def bbf_replay_lofi(
     alpha = jnp.exp(log_alpha).item()
 
     test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn, **kwargs}
-    params = cold_posterior_lofi.ReplayLoFiParams(
+    params = cold_posterior_lofi.ColdPosteriorLoFiParams(
         buffer_size=buffer_size,
         dim_input=dim_input,
         dim_output=dim_output,
@@ -131,7 +131,7 @@ def bbf_replay_lofi(
         inflation=inflation,
     )
 
-    estimator = cold_posterior_lofi.RebayesReplayLoFiDiagonal(params)
+    estimator = cold_posterior_lofi.ColdPosteriorLoFiDiagonal(params)
 
     if callback_at_end:
         bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
@@ -376,14 +376,14 @@ def build_estimator(init_mean, apply_fn, hparams, emission_mean_fn,
         )
         estimator = ekf.RebayesEKF(params, method=method)
     elif "replay_lofi" in method:
-        params = cold_posterior_lofi.ReplayLoFiParams(
+        params = cold_posterior_lofi.ColdPosteriorLoFiParams(
             initial_mean=init_mean,
             emission_mean_function=emission_mean_fn,
             emission_cov_function=emission_cov_fn,
             **hparams,
             **kwargs,
         )
-        estimator = cold_posterior_lofi.RebayesReplayLoFiDiagonal(params)
+        estimator = cold_posterior_lofi.ColdPosteriorLoFiDiagonal(params)
     elif "lofi" in method:
         if "lofi_method" in kwargs:
             if kwargs["lofi_method"] == "diagonal":
