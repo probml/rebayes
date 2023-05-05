@@ -4,7 +4,7 @@ from typing import Any, NamedTuple, Union
 import chex
 from jax import jit, lax, vmap
 import jax.numpy as jnp
-from jaxtyping import Array, Float, Int
+from jaxtyping import Array, Float
 import tensorflow_probability.substrates.jax as tfp
 
 from rebayes.base import (
@@ -16,13 +16,7 @@ from rebayes.base import (
 )
 from rebayes.low_rank_filter.lofi_core import (
     _jacrev_2d,
-    _lofi_spherical_cov_inflate,
-    _lofi_spherical_cov_predict,
-    _lofi_spherical_cov_svd_free_predict,
     _lofi_estimate_noise,
-    _lofi_spherical_cov_condition_on,
-    _lofi_spherical_cov_svd_free_condition_on,
-    _lofi_orth_condition_on,
     _lofi_diagonal_cov_inflate,
     _lofi_diagonal_cov_predict,
     _lofi_diagonal_cov_condition_on,
@@ -45,20 +39,13 @@ INFLATION_METHODS = [
 
 
 @chex.dataclass
-class ReplayLoFiBel:
+class ColdPosteriorLoFiBel:
     buffer_X: chex.Array
     buffer_y: chex.Array
-    buffer_pp_mean: chex.Array
-    buffer_mean: chex.Array
-    buffer_basis: chex.Array
-    buffer_svs: chex.Array
-    buffer_eta: chex.Array
-    buffer_Ups: chex.Array
-    buffer_obs_noise_var: chex.Array
     
     pp_mean: chex.Array
     mean: chex.Array
-    mean_lin: chex.Array # Linearization point
+    # mean_lin: chex.Array # Linearization point
     basis: chex.Array
     svs: chex.Array
     eta: float
@@ -83,29 +70,8 @@ class ReplayLoFiBel:
             buffer_y=buffer_y,
         )
     
-    def apply_param_buffers(self):
-        m0, m , U, Lambda, eta, Ups, obs_noise_var = \
-            self.pp_mean, self.mean, self.basis, self.svs, self.eta, self.Ups, self.obs_noise_var
-        buffer_pp_mean = self._update_buffer(self.buffer_pp_mean, m0)
-        buffer_mean = self._update_buffer(self.buffer_mean, m)
-        buffer_basis = self._update_buffer(self.buffer_basis, U)
-        buffer_svs = self._update_buffer(self.buffer_svs, Lambda)
-        buffer_eta = self._update_buffer(self.buffer_eta, eta)
-        buffer_Ups = self._update_buffer(self.buffer_Ups, Ups)
-        buffer_obs_noise_var = self._update_buffer(self.buffer_obs_noise_var, obs_noise_var)
 
-        return self.replace(
-            buffer_pp_mean=buffer_pp_mean,
-            buffer_mean=buffer_mean,
-            buffer_basis=buffer_basis,
-            buffer_svs=buffer_svs,
-            buffer_eta=buffer_eta,
-            buffer_Ups=buffer_Ups,
-            buffer_obs_noise_var=buffer_obs_noise_var,
-        )
-    
-
-class ReplayLoFiParams(NamedTuple):
+class ColdPosteriorLoFiParams(NamedTuple):
     buffer_size: int
     dim_input: int
     dim_output: int
@@ -126,10 +92,10 @@ class ReplayLoFiParams(NamedTuple):
     n_inner: int = 1
 
 
-class RebayesReplayLoFi(Rebayes):
+class ColdPosteriorLoFi(Rebayes):
     def __init__(
         self,
-        params: ReplayLoFiParams,
+        params: ColdPosteriorLoFiParams,
     ):
         super().__init__(params)
         
@@ -152,31 +118,19 @@ class RebayesReplayLoFi(Rebayes):
         
         # Set up buffers
         L = self.params.buffer_size
-        P, *_ = init_mean.shape
         D, C = self.params.dim_input, self.params.dim_output
         if isinstance(D, int):
             buffer_X = jnp.zeros((L, D))
         else:
             buffer_X = jnp.zeros((L, *D))
         buffer_Y = jnp.zeros((L, C))
-        buffer_pp_mean, buffer_mean = jnp.zeros((L, P)), jnp.zeros((L, P))
-        buffer_basis, buffer_svs = jnp.zeros((L, P, memory_size)), jnp.zeros((L, memory_size))
-        buffer_eta, buffer_Ups = jnp.zeros((L,)), jnp.zeros((L, *init_Ups.shape))
-        buffer_obs_noise_var = jnp.zeros((L,))
 
-        return ReplayLoFiBel(
+        return ColdPosteriorLoFiBel(
             buffer_X = buffer_X,
             buffer_y = buffer_Y,
-            buffer_pp_mean = buffer_pp_mean,
-            buffer_mean = buffer_mean,
-            buffer_basis = buffer_basis,
-            buffer_svs = buffer_svs,
-            buffer_eta = buffer_eta,
-            buffer_Ups = buffer_Ups,
-            buffer_obs_noise_var = buffer_obs_noise_var,
             pp_mean = pp_mean,
             mean = init_mean,
-            mean_lin = init_mean,
+            # mean_lin = init_mean,
             basis = init_basis,
             svs = init_svs,
             eta = init_eta,
@@ -198,7 +152,7 @@ class RebayesReplayLoFi(Rebayes):
     @partial(jit, static_argnums=(0,))
     def predict_obs(
         self,
-        bel: ReplayLoFiBel,
+        bel: ColdPosteriorLoFiBel,
         x: Float[Array, "input_dim"],
     ) -> Union[Float[Array, "output_dim"], Any]:
         m = bel.mean
@@ -209,46 +163,54 @@ class RebayesReplayLoFi(Rebayes):
     
     @partial(jit, static_argnums=(0,))
     def predict_state(
-        bel: ReplayLoFiBel,
-    ) -> ReplayLoFiBel:
+        bel: ColdPosteriorLoFiBel,
+    ) -> ColdPosteriorLoFiBel:
         
         raise NotImplementedError
     
     @partial(jit, static_argnums=(0,))
     def _update_state(
-        bel: ReplayLoFiBel,
+        bel: ColdPosteriorLoFiBel,
         x: Float[Array, "input_dim"],
         y: Float[Array, "output_dim"],
-    ) -> ReplayLoFiBel:
+    ) -> ColdPosteriorLoFiBel:
         
         raise NotImplementedError
     
     @partial(jit, static_argnums=(0,))
     def update_step(
         self,
-        bel: ReplayLoFiBel,
-    ) -> ReplayLoFiBel:
+        bel: ColdPosteriorLoFiBel,
+    ) -> ColdPosteriorLoFiBel:
         X, y = bel.buffer_X, bel.buffer_y
         num_timesteps = X.shape[0]
+        init_nobs = bel.nobs
         
         def step(t, bel):
             bel_pred = self.predict_state(bel)
-            bel = self._update_state(bel_pred, X[t], y[t])
+            bel_post = self._update_state(bel_pred, X[t], y[t])
+            bel = lax.cond(
+                bel.nobs >= self.params.buffer_size-1,
+                lambda _: bel_post,
+                lambda _: bel.replace(nobs=bel_post.nobs),
+                None,
+            )
 
             return bel
         bel = lax.fori_loop(0, num_timesteps, step, bel)
+        bel = bel.replace(nobs=init_nobs+1)
         
         return bel
     
     @partial(jit, static_argnums=(0,))
     def update_state(
         self,
-        bel: ReplayLoFiBel,
+        bel: ColdPosteriorLoFiBel,
         x: Float[Array, "input_dim"],
         y: Float[Array, "output_dim"],
-    ) -> ReplayLoFiBel:
+    ) -> ColdPosteriorLoFiBel:
         bel = bel.apply_io_buffers(x, y)
-        bel.mean_lin = bel.mean
+        # bel.mean_lin = bel.mean
         
         def partial_step(_, bel):
             bel = self.update_step(bel)
@@ -256,23 +218,22 @@ class RebayesReplayLoFi(Rebayes):
             return bel
         bel = lax.fori_loop(0, self.params.n_inner-1, partial_step, bel)
         bel = self.update_step(bel)
-        bel = bel.apply_param_buffers()
         
         return bel
     
 
-class RebayesReplayLoFiDiagonal(RebayesReplayLoFi):
+class ColdPosteriorLoFiDiagonal(ColdPosteriorLoFi):
     def __init__(
         self,
-        params: ReplayLoFiParams,
+        params: ColdPosteriorLoFiParams,
     ):
         super().__init__(params)
 
     @partial(jit, static_argnums=(0,))
     def predict_state(
         self,
-        bel: ReplayLoFiBel,
-    ) -> ReplayLoFiBel:
+        bel: ColdPosteriorLoFiBel,
+    ) -> ColdPosteriorLoFiBel:
         m0, m, U, Lambda, eta, gamma, q, Ups = \
             bel.pp_mean, bel.mean, bel.basis, bel.svs, bel.eta, bel.gamma, bel.q, bel.Ups
         alpha = self.params.dynamics_covariance_inflation_factor
@@ -300,7 +261,7 @@ class RebayesReplayLoFiDiagonal(RebayesReplayLoFi):
     @partial(jit, static_argnums=(0,))
     def predict_obs_cov(
         self,
-        bel: ReplayLoFiBel,
+        bel: ColdPosteriorLoFiBel,
         x: Float[Array, "input_dim"]
     ) -> Union[Float[Array, "output_dim output_dim"], Any]:
         m, U, Lambda, obs_noise_var, Ups = \
@@ -328,12 +289,12 @@ class RebayesReplayLoFiDiagonal(RebayesReplayLoFi):
     @partial(jit, static_argnums=(0,))
     def _update_state(
         self,
-        bel: ReplayLoFiBel,
+        bel: ColdPosteriorLoFiBel,
         x: Float[Array, "input_dim"],
         y: Float[Array, "output_dim"],
-    ) -> ReplayLoFiBel:
-        m, m_lin, U, Lambda, Ups, nobs, obs_noise_var = \
-            bel.mean, bel.mean_lin, bel.basis, bel.svs, bel.Ups, bel.nobs, bel.obs_noise_var
+    ) -> ColdPosteriorLoFiBel:
+        m, U, Lambda, Ups, nobs, obs_noise_var = \
+            bel.mean, bel.basis, bel.svs, bel.Ups, bel.nobs, bel.obs_noise_var
 
         # Condition on observation.
         update_fn = _lofi_diagonal_cov_condition_on if self.params.use_svd \
@@ -342,7 +303,7 @@ class RebayesReplayLoFiDiagonal(RebayesReplayLoFi):
         m_cond, U_cond, Lambda_cond, Ups_cond = \
             update_fn(m, U, Lambda, Ups, self.params.emission_mean_function,
                       self.params.emission_cov_function, x, y,
-                      self.params.adaptive_emission_cov, obs_noise_var, m_lin)
+                      self.params.adaptive_emission_cov, obs_noise_var)
 
         # Estimate emission covariance.
         nobs_est, obs_noise_var_est = \
