@@ -187,17 +187,13 @@ class ColdPosteriorLoFi(Rebayes):
         init_nobs = bel.nobs
         
         def step(t, bel):
+            print(t)
+            print(f"X[t]: {X[t]}, y[t]: {y[t]}")
             bel_pred = self.predict_state(bel)
             bel_post = self._update_state(bel_pred, X[t], y[t])
-            bel = lax.cond(
-                bel.nobs >= self.params.buffer_size-1,
-                lambda _: bel_post,
-                lambda _: bel.replace(nobs=bel_post.nobs),
-                None,
-            )
 
-            return bel
-        bel = lax.fori_loop(0, num_timesteps, step, bel)
+            return bel_post
+        bel = lax.fori_loop(jnp.maximum(0, num_timesteps-(bel.nobs+1)), num_timesteps, step, bel)
         bel = bel.replace(nobs=init_nobs+1)
         
         return bel
