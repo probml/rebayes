@@ -187,8 +187,6 @@ class ColdPosteriorLoFi(Rebayes):
         init_nobs = bel.nobs
         
         def step(t, bel):
-            print(t)
-            print(f"X[t]: {X[t]}, y[t]: {y[t]}")
             bel_pred = self.predict_state(bel)
             bel_post = self._update_state(bel_pred, X[t], y[t])
 
