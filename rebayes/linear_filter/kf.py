@@ -2,28 +2,27 @@ import jax
 import chex
 import jax.numpy as jnp
 from rebayes.base import Rebayes
-from typing import NamedTuple
 from functools import partial
 
 @chex.dataclass
 class KFBel:
     mean: chex.Array
     cov: chex.Array
-    obs_noise_var: float=None
+    t: int=0
 
 
 class KalmanFilter(Rebayes):
     def __init__(
         self,
         transition_matrix,
-        observation_matrix,
-        system_noise_var,
-        obs_noise_var,
+        system_noise,
+        observation_noise,
+        observation_matrix=None,
     ):
         self.transition_matrix = transition_matrix
         self.observation_matrix = observation_matrix
-        self.system_noise_var = system_noise_var
-        self.obs_noise_var = obs_noise_var
+        self.system_noise = system_noise
+        self.observation_noise = jnp.atleast_2d(observation_noise)
 
     def get_trans_mat_of(self, t: int):
         if callable(self.transition_matrix):
@@ -51,12 +50,8 @@ class KalmanFilter(Rebayes):
 
 
     def init_bel(self, Xinit=None, Yinit=None):
-        bel = KFBel(
-            mean=self.params.initial_mean,
-            cov=self.params.initial_covariance,
-            obs_noise_var=self.params.obs_noise_var
-        )
-        return bel
+        # TODO: implement
+        raise NotImplementedError
     
     @partial(jax.jit, static_argnums=(0,))
     def predict_state(self, bel):
@@ -73,8 +68,9 @@ class KalmanFilter(Rebayes):
         return bel
 
     @partial(jax.jit, static_argnums=(0,))
-    def update_state(self, bel, x, y):
-        C = self.get_obs_mat_of(bel.t)
+    def update_state(self, bel, C, y):
+        # C = self.get_obs_mat_of(bel.t)
+        C = jnp.atleast_2d(C)
         R = self.get_observation_noise_of(bel.t)
         S = C @ bel.cov @ C.T + R
         K = jnp.linalg.solve(S, C @ bel.cov).T
@@ -89,12 +85,13 @@ class KalmanFilter(Rebayes):
 
         bel = bel.replace(
             mean=mean,
-            cov=cov
+            cov=cov,
+            t=bel.t + 1
         )
         return bel
     
     @partial(jax.jit, static_argnums=(0,))
     def predict_obs(self, bel, x):
-        A = self.get_trans_mat_of(bel.t)
-        y_pred = jnp.einsum("ij,...j->...i", A, x)
+        bel = self.predict_state(bel)
+        y_pred = jnp.einsum("i,...i->...", bel.mean, x)
         return y_pred
