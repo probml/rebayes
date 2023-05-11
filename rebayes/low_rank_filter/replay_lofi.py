@@ -272,8 +272,6 @@ class RebayesReplayLoFi(Rebayes):
         bel_replay = lax.fori_loop(0, self.params.n_inner-1, partial_step, bel_replay)
         bel_replay = self.update_step(bel_replay)
         
-        jax.debug.print("prev_bel_mean: {}", self._update_state(bel, x, y).mean)
-        jax.debug.print("prev_belreplay_mean: {}", bel_replay.mean)
         bel = lax.cond(
             bel.nobs < self.params.buffer_size, 
             lambda _: self._update_state(bel, x, y),
@@ -282,8 +280,6 @@ class RebayesReplayLoFi(Rebayes):
         )
         # bel = jnp.where(bel.nobs < self.params.buffer_size, bel, bel_replay)
         bel = bel.apply_param_buffers()
-        
-        jax.debug.print("POST_bel_mean: {}", bel.mean)
         
         return bel
     
