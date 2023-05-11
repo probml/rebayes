@@ -367,9 +367,9 @@ class RebayesReplayLoFiDiagonal(RebayesReplayLoFi):
             else _replay_lofi_diagonal_cov_svd_free_condition_on
 
         m_cond, U_cond, Lambda_cond, Ups_cond = \
-            update_fn(m, U, Lambda, Ups, self.params.emission_mean_function,
+            update_fn(m, m_lin, U, Lambda, Ups, self.params.emission_mean_function,
                       self.params.emission_cov_function, x, y,
-                      self.params.adaptive_emission_cov, obs_noise_var, m_lin)
+                      self.params.adaptive_emission_cov, obs_noise_var)
 
         # Estimate emission covariance.
         nobs_est, obs_noise_var_est = \
