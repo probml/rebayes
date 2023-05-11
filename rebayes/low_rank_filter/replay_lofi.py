@@ -1,7 +1,8 @@
 from functools import partial
-from typing import Any, NamedTuple, Union
+from typing import Any, Callable, NamedTuple, Union
 
 import chex
+import jax
 from jax import jit, lax, vmap
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Int
@@ -11,7 +12,6 @@ from rebayes.base import (
     CovMat,
     EmissionDistFn,
     FnStateAndInputToEmission,
-    FnStateAndInputToEmission2,
     Rebayes,
 )
 from rebayes.low_rank_filter.lofi_core import (
@@ -25,8 +25,8 @@ from rebayes.low_rank_filter.lofi_core import (
     _lofi_orth_condition_on,
     _lofi_diagonal_cov_inflate,
     _lofi_diagonal_cov_predict,
-    _lofi_diagonal_cov_condition_on,
-    _lofi_diagonal_cov_svd_free_condition_on,
+    _replay_lofi_diagonal_cov_condition_on,
+    _replay_lofi_diagonal_cov_svd_free_condition_on,
 )
 from rebayes.utils.sampling import sample_dlr
 
@@ -42,6 +42,9 @@ INFLATION_METHODS = [
     'simple',
     'hybrid',
 ]
+
+
+FnStateStateInputToEmission = Callable[ [Float[Array, "state_dim"], Float[Array, "state_dim"], Float[Array, "input_dim"] ], Float[Array, "emission_dim"]]
 
 
 @chex.dataclass
@@ -114,7 +117,7 @@ class ReplayLoFiParams(NamedTuple):
     dynamics_weights: CovMat
     dynamics_covariance: CovMat
     emission_mean_function: FnStateAndInputToEmission
-    emission_cov_function: FnStateAndInputToEmission2
+    emission_cov_function: FnStateStateInputToEmission
     emission_dist: EmissionDistFn = \
         lambda mean, cov: MVN(loc=mean, scale_tril=jnp.linalg.cholesky(cov))
     adaptive_emission_cov: bool=False
@@ -268,6 +271,9 @@ class RebayesReplayLoFi(Rebayes):
         
         bel_replay = lax.fori_loop(0, self.params.n_inner-1, partial_step, bel_replay)
         bel_replay = self.update_step(bel_replay)
+        
+        jax.debug.print("prev_bel_mean: {}", self._update_state(bel, x, y).mean)
+        jax.debug.print("prev_belreplay_mean: {}", bel_replay.mean)
         bel = lax.cond(
             bel.nobs < self.params.buffer_size, 
             lambda _: self._update_state(bel, x, y),
@@ -276,6 +282,8 @@ class RebayesReplayLoFi(Rebayes):
         )
         # bel = jnp.where(bel.nobs < self.params.buffer_size, bel, bel_replay)
         bel = bel.apply_param_buffers()
+        
+        jax.debug.print("POST_bel_mean: {}", bel.mean)
         
         return bel
     
@@ -325,7 +333,7 @@ class RebayesReplayLoFiDiagonal(RebayesReplayLoFi):
         m, U, Lambda, obs_noise_var, Ups = \
             bel.mean, bel.basis, bel.svs, bel.eta, bel.obs_noise_var
         m_Y = lambda z: self.params.emission_mean_function(z, x)
-        Cov_Y = lambda z: self.params.emission_cov_function(z, x)
+        Cov_Y = lambda z: self.params.emission_cov_function(z, z, x)
 
         C = jnp.atleast_1d(m_Y(m)).shape[0]
         H = _jacrev_2d(m_Y, m)
@@ -355,8 +363,8 @@ class RebayesReplayLoFiDiagonal(RebayesReplayLoFi):
             bel.mean, bel.mean_lin, bel.basis, bel.svs, bel.Ups, bel.nobs, bel.obs_noise_var
 
         # Condition on observation.
-        update_fn = _lofi_diagonal_cov_condition_on if self.params.use_svd \
-            else _lofi_diagonal_cov_svd_free_condition_on
+        update_fn = _replay_lofi_diagonal_cov_condition_on if self.params.use_svd \
+            else _replay_lofi_diagonal_cov_svd_free_condition_on
 
         m_cond, U_cond, Lambda_cond, Ups_cond = \
             update_fn(m, U, Lambda, Ups, self.params.emission_mean_function,
@@ -404,7 +412,7 @@ class RebayesReplayLoFiDiagonal(RebayesReplayLoFi):
         shape = (n_samples,)
         bel = self.predict_state(bel)
         params_sample = sample_dlr(key, bel.basis, bel.Ups.ravel(), shape) + bel.mean
-        scale = jnp.sqrt(self.params.emission_cov_function(0.0, 0.0))
+        scale = jnp.sqrt(self.params.emission_cov_function(0.0, 0.0, 0.0))
         def llfn(params, x, y):
             y = y.ravel()
             mean = self.params.emission_mean_function(params, x).ravel()
