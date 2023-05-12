@@ -639,10 +639,11 @@ def _replay_lofi_diagonal_cov_condition_on(
     """
     P, L = U.shape
     m_Y = lambda w: y_cond_mean(w, x)
-    Cov_Y = lambda w: y_cond_cov(w, m_lin, x)
+    Cov_Y = lambda w: y_cond_cov(w, w, x)
     
     H = _jacrev_2d(m_Y, m_lin)
-    yhat = jnp.atleast_1d(m_Y(m_lin)) + H @ (m - m_lin)
+    # yhat = jnp.atleast_1d(m_Y(m_lin)) + H @ (m - m_lin)
+    yhat = jnp.atleast_1d(m_Y(m))
     C = yhat.shape[0]
     
     if adaptive_variance:
