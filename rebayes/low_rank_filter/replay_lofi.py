@@ -253,11 +253,6 @@ class RebayesReplayLoFi(Rebayes):
         init_nobs = bel.nobs
         num_timesteps = X.shape[0]
         def _step(t, bel):
-            print(f"Replaying timestep {t}...")
-            print("bel.mean_lin:\n", bel.mean_lin)
-            print("bel.mean:\n", bel.mean)
-            print("x:\n", X[t])
-            print("y:\n", y[t])
             bel_pred = self.predict_state(bel)
             bel = self._update_state(bel_pred, X[t], y[t])
             
@@ -325,9 +320,6 @@ class RebayesReplayLoFi(Rebayes):
         """Apply filtering to entire sequence of data. Return final belief state and outputs from callback."""
         num_timesteps = X.shape[0]
         def step(bel, t, update_fn):
-            print("X_buffer: \n", bel.buffer_X, "\n")
-            print("Y_buffer: \n", bel.buffer_y, "\n")
-            print("buffer_mean: \n", bel.buffer_mean, '\n')
             bel_pred = self.predict_state(bel)
             pred_obs = self.predict_obs(bel, X[t])
             bel = update_fn(bel_pred, X[t], Y[t])
