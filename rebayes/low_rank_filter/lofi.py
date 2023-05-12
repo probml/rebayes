@@ -400,8 +400,8 @@ class RebayesLoFiDiagonal(RebayesLoFi):
         yhat_samples = jax.vmap(self.params.emission_mean_function, (0, None))(params_sample, x)
         return yhat_samples
 
-    @partial(jax.jit, static_argnames=("self", "n_samples"))
-    def nlpd_mc(self, key, bel, x, y, n_samples=30):
+    @partial(jax.jit, static_argnames=("self", "n_samples", "glm_predictive", "clf"))
+    def nlpd_mc(self, key, bel, x, y, n_samples=30, glm_predictive=False, clf=False):
         """
         Compute the negative log predictive density (nlpd) as
         a Monte Carlo estimate.
@@ -409,23 +409,42 @@ class RebayesLoFiDiagonal(RebayesLoFi):
             Takes mean, x, y
         """
         x = jnp.atleast_2d(x)
-        y = jnp.atleast_2d(y)
-        shape = (n_samples,)
+        y = jnp.atleast_1d(y)
+        shape = (n_samples,) 
         bel = self.predict_state(bel)
+        
         params_sample = sample_dlr(key, bel.basis, bel.Ups.ravel(), shape) + bel.mean
-        scale = jnp.sqrt(self.params.emission_cov_function(0.0, 0.0))
+        scale = None if clf else jnp.sqrt(self.params.emission_cov_function(0.0, 0.0))
+        
         def llfn(params, x, y):
             y = y.ravel()
             mean = self.params.emission_mean_function(params, x).ravel()
             log_likelihood = self.params.emission_dist(mean, scale).log_prob(y)
+            
+            return log_likelihood.sum()
+        
+        def llfn_glm_predictive(params, x, y):
+            y = y.ravel()
+            m_Y = lambda w: self.params.emission_mean_function(w, x)
+            if clf:
+                m_Y = lambda w: jnp.log(self.params.emission_mean_function(w, x))
+            F = _jacrev_2d(m_Y, bel.mean)
+            mean = (m_Y(bel.mean) + F @ (params - bel.mean)).ravel()
+            if clf:
+                mean = jax.nn.softmax(mean)
+            log_likelihood = self.params.emission_dist(mean, scale).log_prob(y)
+            
             return log_likelihood.sum()
 
         # Compute vectorised nlpd
-        vnlpd = jax.vmap(llfn, (0, None, None))
-        vnlpd = jax.vmap(vnlpd, (None, 0, 0))
-        nlpd_vals = -vnlpd(params_sample, x, y).squeeze()
-
-        return nlpd_vals.mean(axis=-1)
+        if glm_predictive:
+            llfn = llfn_glm_predictive
+            
+        vnlpd = lambda w: jax.vmap(llfn, (None, 0, 0))(w, x, y)
+        nlpd_vals = -jax.lax.map(vnlpd, params_sample).squeeze()
+        nlpd_mean = nlpd_vals.mean(axis=-1)
+    
+        return nlpd_mean
 
 
 def init_regression_agent(

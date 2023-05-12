@@ -1,10 +1,11 @@
 from functools import partial
-from typing import Any, Callable, NamedTuple, Union
+from typing import Any, Callable, NamedTuple, Tuple, Union
 
 import chex
 import jax
 from jax import jit, lax, vmap
 import jax.numpy as jnp
+from jax_tqdm import scan_tqdm
 from jaxtyping import Array, Float, Int
 import tensorflow_probability.substrates.jax as tfp
 
@@ -45,6 +46,21 @@ INFLATION_METHODS = [
 
 
 FnStateStateInputToEmission = Callable[ [Float[Array, "state_dim"], Float[Array, "state_dim"], Float[Array, "input_dim"] ], Float[Array, "emission_dim"]]
+
+
+def _initialize_buffer(item, buffer_size):
+    ndim = 0
+    if isinstance(item, jnp.ndarray):
+        ndim = item.ndim
+    pad_arg = [[0, 0]] * ndim
+    buffer = jnp.pad(
+        jnp.expand_dims(item, 0), 
+        [[buffer_size-1, 0], *pad_arg], 
+        'constant', 
+        constant_values=0
+    )
+
+    return buffer
 
 
 @chex.dataclass
@@ -155,17 +171,18 @@ class RebayesReplayLoFi(Rebayes):
         
         # Set up buffers
         L = self.params.buffer_size
-        P, *_ = init_mean.shape
         D, C = self.params.dim_input, self.params.dim_output
         if isinstance(D, int):
             buffer_X = jnp.zeros((L, D))
         else:
             buffer_X = jnp.zeros((L, *D))
         buffer_Y = jnp.zeros((L, C))
-        buffer_pp_mean, buffer_mean = jnp.zeros((L, P)), jnp.zeros((L, P))
-        buffer_basis, buffer_svs = jnp.zeros((L, P, memory_size)), jnp.zeros((L, memory_size))
-        buffer_eta, buffer_Ups = jnp.zeros((L,)), jnp.zeros((L, *init_Ups.shape))
-        buffer_obs_noise_var = jnp.zeros((L,))
+        init_buffer = partial(_initialize_buffer, buffer_size=L)
+        buffer_pp_mean, buffer_mean = init_buffer(pp_mean), init_buffer(init_mean)
+        buffer_basis, buffer_svs = init_buffer(init_basis), init_buffer(init_svs)
+        buffer_eta, buffer_Ups = init_buffer(init_eta), init_buffer(init_Ups)
+        obs_noise_var = 1.0
+        buffer_obs_noise_var = init_buffer(obs_noise_var)
 
         return ReplayLoFiBel(
             buffer_X = buffer_X,
@@ -185,7 +202,8 @@ class RebayesReplayLoFi(Rebayes):
             eta = init_eta,
             gamma = gamma,
             q = q,
-            Ups = init_Ups
+            Ups = init_Ups,
+            obs_noise_var = obs_noise_var,
         )
 
     @staticmethod
@@ -227,26 +245,30 @@ class RebayesReplayLoFi(Rebayes):
         raise NotImplementedError
     
     @partial(jit, static_argnums=(0,))
-    def update_step(
+    def replay_update_step(
         self,
         bel: ReplayLoFiBel,
     ) -> ReplayLoFiBel:
         X, y = bel.buffer_X, bel.buffer_y
         init_nobs = bel.nobs
         num_timesteps = X.shape[0]
-        
-        def step(t, bel):
+        def _step(t, bel):
+            print(f"Replaying timestep {t}...")
+            print("bel.mean_lin:\n", bel.mean_lin)
+            print("bel.mean:\n", bel.mean)
+            print("x:\n", X[t])
+            print("y:\n", y[t])
             bel_pred = self.predict_state(bel)
             bel = self._update_state(bel_pred, X[t], y[t])
             
             return bel
-        bel = lax.fori_loop(0, num_timesteps, step, bel)
-        bel = bel.replace(nobs=init_nobs+1)
+        bel = lax.fori_loop(0, num_timesteps, _step, bel)
+        bel = bel.replace(nobs=init_nobs)
         
         return bel
     
     @partial(jit, static_argnums=(0,))
-    def update_state(
+    def update_state_without_replay(
         self,
         bel: ReplayLoFiBel,
         x: Float[Array, "input_dim"],
@@ -254,9 +276,23 @@ class RebayesReplayLoFi(Rebayes):
     ) -> ReplayLoFiBel:
         bel = bel.apply_io_buffers(x, y)
         bel = bel.replace(mean_lin = bel.mean)
-        bel_replay = bel.replace(
+        bel = self._update_state(bel, x, y)
+        bel = bel.apply_param_buffers()
+        
+        return bel
+    
+    @partial(jit, static_argnums=(0,))
+    def update_state_with_replay(
+        self,
+        bel: ReplayLoFiBel,
+        x: Float[Array, "input_dim"],
+        y: Float[Array, "output_dim"],
+    ) -> ReplayLoFiBel:
+        bel = bel.apply_io_buffers(x, y)
+        bel = bel.replace(
             pp_mean = bel.buffer_pp_mean[0],
             mean = bel.buffer_mean[0],
+            mean_lin = bel.mean,
             basis = bel.buffer_basis[0],
             svs = bel.buffer_svs[0],
             eta = bel.buffer_eta[0],
@@ -265,23 +301,71 @@ class RebayesReplayLoFi(Rebayes):
         )
         
         def partial_step(_, bel):
-            bel = self.update_step(bel)
+            bel = self.replay_update_step(bel)
             
             return bel
-        
-        bel_replay = lax.fori_loop(0, self.params.n_inner-1, partial_step, bel_replay)
-        bel_replay = self.update_step(bel_replay)
-        
-        bel = lax.cond(
-            bel.nobs < self.params.buffer_size, 
-            lambda _: self._update_state(bel, x, y),
-            lambda _: bel_replay,
-            None
-        )
-        # bel = jnp.where(bel.nobs < self.params.buffer_size, bel, bel_replay)
+        bel = lax.fori_loop(0, self.params.n_inner, partial_step, bel)
+        bel = bel.replace(nobs=bel.nobs+1)
         bel = bel.apply_param_buffers()
         
         return bel
+    
+    def scan(
+        self,
+        X: Float[Array, "ntime input_dim"],
+        Y: Float[Array, "ntime emission_dim"],
+        callback=None,
+        bel=None,
+        progress_bar=False,
+        debug=False,
+        Xinit=None,
+        Yinit=None,
+        **kwargs
+    ) -> Tuple[ReplayLoFiBel, Any]:
+        """Apply filtering to entire sequence of data. Return final belief state and outputs from callback."""
+        num_timesteps = X.shape[0]
+        def step(bel, t, update_fn):
+            print("X_buffer: \n", bel.buffer_X, "\n")
+            print("Y_buffer: \n", bel.buffer_y, "\n")
+            print("buffer_mean: \n", bel.buffer_mean, '\n')
+            bel_pred = self.predict_state(bel)
+            pred_obs = self.predict_obs(bel, X[t])
+            bel = update_fn(bel_pred, X[t], Y[t])
+            out = None
+            if callback is not None:
+                out = callback(bel, pred_obs, t, X[t], Y[t], bel_pred, **kwargs)
+            return bel, out
+        warmup_steps = min(self.params.buffer_size-1, num_timesteps)
+        step_without_replay = partial(step, update_fn=self.update_state_without_replay)
+        step_with_replay = partial(step, update_fn=self.update_state_with_replay)
+        carry = bel
+        if bel is None:
+            if Xinit is not None:
+                carry = self.init_bel(Xinit, Yinit)
+            else:
+                carry = self.init_bel()
+        if progress_bar:
+            step_with_replay = scan_tqdm(num_timesteps)(step_with_replay)
+        if debug:
+            outputs = []
+            for t in range(warmup_steps):
+                carry, out = step_without_replay(carry, t)
+                outputs.append(out)
+            for t in range(warmup_steps, num_timesteps):
+                carry, out = step_with_replay(carry, t)
+                outputs.append(out)
+            bel = carry
+            outputs = jnp.stack(outputs)
+        else:
+            bel, outputs1 = lax.scan(step_without_replay, carry, jnp.arange(warmup_steps))
+            bel, outputs2 = lax.scan(step_with_replay, bel, jnp.arange(warmup_steps, num_timesteps))
+            if outputs1 is None:
+                outputs = outputs2
+            elif outputs2 is None:
+                outputs = outputs1
+            else:
+                outputs = jnp.concatenate([outputs1, outputs2])
+        return bel, outputs
     
 
 class RebayesReplayLoFiDiagonal(RebayesReplayLoFi):
@@ -346,7 +430,6 @@ class RebayesReplayLoFiDiagonal(RebayesReplayLoFi):
         Sigma_obs = V_epi + R
 
         return Sigma_obs
-
 
     @partial(jit, static_argnums=(0,))
     def _update_state(
