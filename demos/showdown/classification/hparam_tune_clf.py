@@ -2,16 +2,21 @@ from functools import partial
 
 import jax
 import jax.numpy as jnp
+import jax.random as jr
 from rebayes import base
 from jax.flatten_util import ravel_pytree
 from jax import vmap, jit
 from bayes_opt import BayesianOptimization
 import optax
+import tensorflow_probability.substrates.jax as tfp
 
 from rebayes.extended_kalman_filter import ekf
 from rebayes.low_rank_filter import lofi
 from rebayes.low_rank_filter import cold_posterior_lofi
+from rebayes.low_rank_filter import replay_lofi
 from rebayes.sgd_filter import replay_sgd as rsgd
+
+tfd = tfp.distributions
 
 
 def apply(flat_params, x, model, unflatten_fn):
@@ -48,7 +53,6 @@ def bbf_lofi(
     initial_covariance = jnp.exp(log_init_cov).item()
     alpha = jnp.exp(log_alpha).item()
 
-    test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn, **kwargs}
     params = lofi.LoFiParams(
         initial_mean=flat_params,
         initial_covariance=initial_covariance,
@@ -59,6 +63,7 @@ def bbf_lofi(
         dynamics_covariance_inflation_factor=alpha,
         memory_size=memory_size,
         inflation=inflation,
+        emission_dist=lambda mean, cov: tfd.Categorical(probs=mean),
     )
 
     if lofi_method == "diagonal":
@@ -69,6 +74,9 @@ def bbf_lofi(
         raise ValueError("method must be either 'diagonal' or 'spherical'")
         
     estimator = lofi_estimator(params)
+    
+    test_callback_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test, 
+                            "apply_fn": apply_fn, "key": jr.PRNGKey(0), **kwargs}
 
     if callback_at_end:
         bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
@@ -115,8 +123,7 @@ def bbf_replay_lofi(
     initial_covariance = jnp.exp(log_init_cov).item()
     alpha = jnp.exp(log_alpha).item()
 
-    test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn, **kwargs}
-    params = cold_posterior_lofi.ColdPosteriorLoFiParams(
+    params = replay_lofi.ReplayLoFiParams(
         buffer_size=buffer_size,
         dim_input=dim_input,
         dim_output=dim_output,
@@ -131,8 +138,11 @@ def bbf_replay_lofi(
         inflation=inflation,
     )
 
-    estimator = cold_posterior_lofi.ColdPosteriorLoFiDiagonal(params)
+    estimator = replay_lofi.RebayesReplayLoFiDiagonal(params)
 
+    test_callback_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test, 
+                            "apply_fn": apply_fn, "key": jr.PRNGKey(0), **kwargs}
+    
     if callback_at_end:
         bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
         metric = callback(bel, **test_callback_kwargs)
@@ -174,7 +184,6 @@ def bbf_ekf(
     initial_covariance = jnp.exp(log_init_cov).item()
     alpha = jnp.exp(log_alpha).item()
 
-    test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn, **kwargs}
     params = ekf.EKFParams(
         initial_mean=flat_params,
         initial_covariance=initial_covariance,
@@ -183,10 +192,14 @@ def bbf_ekf(
         emission_mean_function=emission_mean_fn,
         emission_cov_function=emission_cov_fn,
         dynamics_covariance_inflation_factor=alpha,
+        emission_dist=lambda mean, cov: tfd.Categorical(probs=mean),
     )
 
     estimator = ekf.RebayesEKF(params, method=method)
 
+    test_callback_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test, 
+                            "apply_fn": apply_fn, "key": jr.PRNGKey(0), **kwargs}
+    
     if callback_at_end:
         bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
         metric = callback(bel, **test_callback_kwargs)
@@ -229,8 +242,6 @@ def bbf_rsgd(
         raise ValueError("optimizer must be either 'sgd' or 'adam'")
     
     tx = opt(learning_rate=jnp.exp(log_learning_rate).item())
-
-    test_callback_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn, **kwargs}
     
     @partial(jit, static_argnames=("applyfn",))
     def lossfn_fifo(params, counter, X, y, applyfn):
@@ -240,7 +251,7 @@ def bbf_rsgd(
         loss = (nll * counter).sum() / counter.sum()
         return loss
     
-    estimator = rsgd.FifoSGD(
+    estimator = rsgd.FifoSGDLaplaceDiag(
         lossfn_fifo,
         apply_fn=apply_fn,
         init_params=flat_params,
@@ -251,6 +262,9 @@ def bbf_rsgd(
         n_inner=1,
     )
     
+    test_callback_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test, 
+                            "apply_fn": apply_fn, "key": jr.PRNGKey(0), **kwargs}
+        
     if callback_at_end:
         bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
         metric = callback(bel, **test_callback_kwargs)
@@ -372,18 +386,19 @@ def build_estimator(init_mean, apply_fn, hparams, emission_mean_fn,
             initial_mean=init_mean,
             emission_mean_function=emission_mean_fn,
             emission_cov_function=emission_cov_fn,
+            emission_dist=lambda mean, cov: tfd.Categorical(probs=mean),
             **hparams,
         )
         estimator = ekf.RebayesEKF(params, method=method)
     elif "replay_lofi" in method:
-        params = cold_posterior_lofi.ColdPosteriorLoFiParams(
+        params = replay_lofi.ReplayLoFiParams(
             initial_mean=init_mean,
             emission_mean_function=emission_mean_fn,
             emission_cov_function=emission_cov_fn,
             **hparams,
             **kwargs,
         )
-        estimator = cold_posterior_lofi.ColdPosteriorLoFiDiagonal(params)
+        estimator = replay_lofi.RebayesReplayLoFiDiagonal(params)
     elif "lofi" in method:
         if "lofi_method" in kwargs:
             if kwargs["lofi_method"] == "diagonal":
@@ -399,6 +414,7 @@ def build_estimator(init_mean, apply_fn, hparams, emission_mean_fn,
             initial_mean=init_mean,
             emission_mean_function=emission_mean_fn,
             emission_cov_function=emission_cov_fn,
+            emission_dist=lambda mean, cov: tfd.Categorical(probs=mean),
             **hparams,
             **kwargs,
         )

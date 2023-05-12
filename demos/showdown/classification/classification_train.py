@@ -20,6 +20,7 @@ from rebayes.datasets.rotating_permuted_mnist_data import (
     generate_rotating_mnist_dataset,
     rotate_mnist_dataset
 )
+from rebayes.low_rank_filter.lofi_core import _jacrev_2d
 
 
 # ------------------------------------------------------------------------------
@@ -91,6 +92,13 @@ def init_model(key=0, type='cnn', features=(400, 400, 10), classification=True):
             def emission_cov_function(w, x):
                 ps = emission_mean_function(w, x)
                 return jnp.diag(ps) - jnp.outer(ps, ps) + 1e-3 * jnp.eye(len(ps)) # Add diagonal to avoid singularity
+            
+            def replay_emission_cov_function(w, w_lin, x):
+                m_Y = lambda w: emission_mean_function(w, x)
+                H = _jacrev_2d(m_Y, w_lin)
+                ps = jnp.atleast_1d(m_Y(w_lin)) + H @ (w - w_lin)
+                return jnp.diag(ps) - jnp.outer(ps, ps) + 1e-3 * jnp.eye(len(ps)) # Add diagonal to avoid singularity
+            model_dict["replay_emission_cov_function"] = replay_emission_cov_function
         model_dict['emission_mean_function'] = emission_mean_function
         model_dict['emission_cov_function'] = emission_cov_function
     else:
@@ -110,7 +118,9 @@ def evaluate_function(flat_params, apply_fn, X_test, y_test, loss_fn):
     def evaluate(label, image):
         image = image.reshape((1, 28, 28, 1))
         logits = apply_fn(flat_params, image).ravel()
-        return loss_fn(logits, label)
+        loss = loss_fn(logits, label)
+        
+        return loss
     evals = vmap(evaluate, (0, 0))(y_test, X_test)
     
     return evals.mean()
@@ -125,6 +135,42 @@ def eval_callback(bel, *args, evaluate_fn, nan_val=-1e8, **kwargs):
         eval = jnp.where(jnp.isnan(eval), nan_val, eval)
     
     return eval
+
+
+def eval_nlpd_mc_eval_callback(bel, pred_obs, t, *args, evaluate_fn, nan_val=-1e8, **kwargs):
+    agent, X, y, apply_fn = \
+        kwargs["agent"], kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
+    key = jax.random.fold_in(kwargs["key"], t)
+    
+    if evaluate_fn is None:
+        eval = {}
+    else:
+        eval = evaluate_fn(bel.mean, apply_fn, X, y)
+        if not isinstance(eval, dict):
+            eval = {"eval": eval}
+    nlpd = agent.nlpd_mc(key, bel, X, y, glm_predictive=False, clf=True).mean()
+    nlpd_glm = agent.nlpd_mc(key, bel, X, y, glm_predictive=True, clf=True).mean()
+    eval["nlpd"] = nlpd
+    eval["nlpd_glm"] = nlpd_glm
+    eval = {k: jnp.where(jnp.isnan(v), nan_val, v) for k, v in eval.items()}
+    
+    return eval
+
+
+def eval_lpd_mc_callback(bel, pred_obs, t, *args, nan_val=-1e8, glm_predictive=False, **kwargs):
+    agent, X, y, apply_fn = \
+        kwargs["agent"], kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
+    key = jax.random.fold_in(kwargs["key"], t)
+    nlpd = agent.nlpd_mc(key, bel, X, y, glm_predictive=glm_predictive, clf=True).mean()
+    lpd = jnp.where(jnp.isnan(nlpd), nan_val, -nlpd)
+    
+    return lpd
+
+
+def eval_nlpd_mc_callback(bel, pred_obs, t, *args, nan_val=-1e8, glm_predictive=False, **kwargs):
+    lpd = eval_lpd_mc_callback(bel, pred_obs, t, *args, nan_val=nan_val, glm_predictive=glm_predictive, **kwargs)
+    
+    return -lpd
 
 
 def osa_eval_callback(bel, y_pred, t, X, y, bel_pred, evaluate_fn, nan_val=-1e8, **kwargs):
@@ -243,11 +289,14 @@ def smnist_evaluate_accuracy(flat_params, apply_fn, X_test, y_test):
 # Model Evaluation
 
 def mnist_eval_agent(
-    train, test, apply_fn, callback, agent, bel_init=None, n_iter=20, n_steps=500,
+    train, test, apply_fn, callback, agent, bel_init=None, n_iter=20, n_steps=500, key=0
 ):
+    if isinstance(key, int):
+        key = jr.PRNGKey(key)
     X_train, y_train = train
     X_test, y_test = test
-    test_kwargs = {"X_test": X_test, "y_test": y_test, "apply_fn": apply_fn}
+    test_kwargs = {"agent": agent, "X_test": X_test, "y_test": y_test, 
+                   "apply_fn": apply_fn, "key": key}
     
     @scan_tqdm(n_iter)
     def _step(_, i):
