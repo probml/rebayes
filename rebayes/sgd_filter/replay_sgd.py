@@ -109,8 +109,8 @@ class FifoSGD(Rebayes):
     """
     FIFO Replay-buffer SGD training procedure
     """
-    def __init__(self, lossfn, apply_fn=None, init_params=None, tx=None,
-                 buffer_size=None, dim_features=None, dim_output=None, n_inner=1):
+    def __init__(self, lossfn, apply_fn, init_params, tx,
+                 buffer_size, dim_features, dim_output, n_inner=1):
         self.lossfn = lossfn
         self.apply_fn = apply_fn
         self.params = init_params
