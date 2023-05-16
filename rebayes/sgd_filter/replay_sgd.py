@@ -5,9 +5,17 @@ import jax.numpy as jnp
 from typing import Tuple
 from functools import partial
 from rebayes.base import Rebayes
+from jax import jacrev
 from jax.flatten_util import ravel_pytree
 from jaxtyping import Float, Int, Array
 from flax.training.train_state import TrainState
+import tensorflow_probability.substrates.jax as tfp
+
+tfd = tfp.distributions
+MVN = tfd.MultivariateNormalTriL
+
+_jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
+
 
 class FifoTrainState(TrainState):
     buffer_size: int
@@ -182,10 +190,12 @@ class FifoSGD(Rebayes):
 
 # TODO: replace log_likelihood with TFP distribution
 class FifoSGDLaplaceDiag(FifoSGD):
-    def __init__(self, lossfn, log_likelihood, apply_fn=None, init_params=None, tx=None,
-                 buffer_size=None, dim_features=None, dim_output=None, n_inner=1,
-                 prior_precision=1.0):
+    def __init__(self, lossfn, log_likelihood, apply_fn=None, emission_dist=None,
+                 init_params=None, tx=None, buffer_size=None, dim_features=None, 
+                 dim_output=None, n_inner=1, prior_precision=1.0):
         super().__init__(lossfn, apply_fn, init_params, tx, buffer_size, dim_features, dim_output, n_inner)
+        self.emission_dist = emission_dist if emission_dist is not None \
+            else lambda mean, cov: MVN(loc=mean, scale_tril=jnp.linalg.cholesky(cov))
         self.prior_precision = prior_precision
         self.log_likelihood = log_likelihood
 
@@ -265,22 +275,43 @@ class FifoSGDLaplaceDiag(FifoSGD):
         yhat_samples = jax.vmap(bel.apply_fn, (0, None))(params_sample, x)
         return yhat_samples
 
-    @partial(jax.jit, static_argnames=("self", "n_samples"))
-    def nlpd_mc(self, key, bel, x, y, n_samples=30):
+    @partial(jax.jit, static_argnames=("self", "n_samples", "glm_predictive"))
+    def nlpd_mc(self, key, bel, x, y, n_samples=30, glm_predictive=False):
         """
         Compute the negative log predictive density (nlpd) as a
         Monte Carlo (MC) estimate.
         """
         x = jnp.atleast_2d(x)
-        y = jnp.atleast_2d(y)
+        y = jnp.atleast_1d(y)
+        bel = self.predict_state(bel)
+        
         # 1. Sample params
         params_sample = self._sample_posterior_params(key, bel, nsamples=n_samples)
+        scale = 1/1000
+        
         # 2. Compute vectorised nlpd (vnlpd)
-        vnlpd = jax.vmap(self.log_likelihood, (0, None, None, None))
-        vnlpd = jax.vmap(vnlpd, (None, 0, 0, None))
-        nlpd_vals = -vnlpd(params_sample, x, y, bel.apply_fn)
+        def llfn(params, X, y):
+            logits = self.apply_fn(params, X).ravel()
+            log_likelihood = self.emission_dist(logits, scale).log_prob(y.ravel())
+            
+            return log_likelihood.sum()
+        
+        def llfn_glm_predictive(params, X, y):
+            m_Y = lambda w: self.apply_fn(w, X)
+            F = _jacrev_2d(m_Y, bel.mean)
+            logits = (m_Y(bel.mean) + F @ (params - bel.mean)).ravel()
+            log_likelihood = self.emission_dist(logits, scale).log_prob(y.ravel())
+            
+            return log_likelihood.sum()
+        
+        if glm_predictive:
+            llfn = llfn_glm_predictive
+        
+        vnlpd = lambda w: jax.vmap(llfn, (None, 0, 0))(w, x, y)
+        nlpd_vals = -jax.lax.map(vnlpd, params_sample).squeeze()
+        nlpd_mean = nlpd_vals.mean(axis=-1)
 
-        return nlpd_vals.mean(axis=-1)
+        return nlpd_mean
 
 @partial(jax.jit, static_argnames=("apply_fn",))
 def lossfn_rmse(params, counter, X, y, apply_fn):
