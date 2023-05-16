@@ -2,11 +2,10 @@ from functools import partial
 from typing import Any, Callable, NamedTuple, Tuple, Union
 
 import chex
-import jax
-from jax import jit, lax, vmap
+from jax import jit, lax, vmap, tree_util
 import jax.numpy as jnp
 from jax_tqdm import scan_tqdm
-from jaxtyping import Array, Float, Int
+from jaxtyping import Array, Float
 import tensorflow_probability.substrates.jax as tfp
 
 from rebayes.base import (
@@ -254,6 +253,7 @@ class RebayesReplayLoFi(Rebayes):
         num_timesteps = X.shape[0]
         def _step(t, bel):
             bel_pred = self.predict_state(bel)
+            # bel_pred = bel_pred.replace(mean_lin = bel_pred.mean)
             bel = self._update_state(bel_pred, X[t], y[t])
             
             return bel
@@ -326,6 +326,7 @@ class RebayesReplayLoFi(Rebayes):
             out = None
             if callback is not None:
                 out = callback(bel, pred_obs, t, X[t], Y[t], bel_pred, **kwargs)
+            
             return bel, out
         warmup_steps = min(self.params.buffer_size-1, num_timesteps)
         step_without_replay = partial(step, update_fn=self.update_state_without_replay)
@@ -356,7 +357,9 @@ class RebayesReplayLoFi(Rebayes):
             elif outputs2 is None:
                 outputs = outputs1
             else:
-                outputs = jnp.concatenate([outputs1, outputs2])
+                outputs = tree_util.tree_map(
+                    lambda l1, l2: jnp.concatenate([l1, l2]), outputs1, outputs2
+                )
         return bel, outputs
     
 
