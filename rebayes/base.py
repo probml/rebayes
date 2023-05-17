@@ -26,10 +26,7 @@ EmissionDistFn = Callable[ [Float[Array, "state_dim"], Float[Array, "state_dim s
 CovMat = Union[float, Float[Array, "dim"], Float[Array, "dim dim"]]
 
 
-@chex.dataclass
-class Gaussian:
-    mean: chex.Array
-    cov: chex.Array
+_jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
 
 
 @chex.dataclass
@@ -39,46 +36,26 @@ class Belief:
     # This must be a chex dataclass so that it works with lax.scan as a return type for carry
 
 
-# TODO: Deprecate
-@chex.dataclass
-class RebayesParams:
-#class RebayesParams(NamedTuple):
-    initial_mean: Float[Array, "state_dim"]
-    initial_covariance: CovMat
-    dynamics_weights: CovMat
-    dynamics_covariance: CovMat
-    emission_mean_function: FnStateAndInputToEmission
-    emission_cov_function: FnStateAndInputToEmission2
-    #emission_dist: EmissionDistFn = lambda mean, cov: MVN(loc=mean, covariance_matrix=cov)
-    #emission_dist=lambda mu, Sigma: tfd.Poisson(log_rate = jnp.log(mu))
-    adaptive_emission_cov: bool=False
-    dynamics_covariance_inflation_factor: float=0.0
-
-
-def make_rebayes_params():
-    # dummy constructor
-    model_params = RebayesParams(
-        initial_mean=None,
-        initial_covariance=None,
-        dynamics_weights=None,
-        dynamics_covariance=None,
-        emission_mean_function=None,
-        emission_cov_function=None,
-    ) 
-    
-    return model_params
-
-
 class Rebayes(ABC):
     def __init__(
         self,
-        params: RebayesParams,
+        apply_fn: FnStateToState,
+        dynamics_covariance: CovMat,
+        emission_mean_function: Union[FnStateToEmission, FnStateAndInputToEmission],
+        emission_cov_function: Union[FnStateToEmission2, FnStateAndInputToEmission2],
+        emission_dist: EmissionDistFn,
     ):
-        self.params = params
+        self.apply_fn = apply_fn
+        self.dynamics_covariance = dynamics_covariance
+        self.emission_mean_function = emission_mean_function
+        self.emission_cov_function = emission_cov_function
+        self.emission_dist = emission_dist
 
 
     def init_bel(
         self,
+        initial_mean: Float[Array, "state_dim"],
+        initial_covariance: CovMat,
         Xinit = None,
         Yinit = None,
     ) -> Belief:
@@ -121,7 +98,7 @@ class Rebayes(ABC):
     ) -> float:
         """Return log p(y(t) | X(t), D(1:t-1))"""
         pred_obs_mean, pred_obs_cov = self.predict_obs(bel, X), self.predict_obs_cov(bel, X)
-        emission_dist = self.params.emission_dist(pred_obs_mean, pred_obs_cov)
+        emission_dist = self.emission_dist(pred_obs_mean, pred_obs_cov)
         log_prob = emission_dist.log_prob(y)
         
         return log_prob
@@ -135,6 +112,57 @@ class Rebayes(ABC):
     ) -> Belief:
         """Return bel(t|t) = p(z(t) | X(t), y(t), D(1:t-1)) using bel(t|t-1) and Yt"""
         raise NotImplementedError
+    
+    @partial(jit, static_argnums=(0,))
+    def sample_state(
+        self,
+        bel: Belief,
+        key: Float[Array, "key_dim"],
+        n_samples: int = 100,
+    ) -> Float[Array, "n_samples state_dim"]:
+        """Return samples from p(z(t) | D(1:t))"""
+        raise NotImplementedError
+    
+    @partial(jax.jit, static_argnames=("self", "n_samples", "glm_predictive"))
+    def nlpd_mc(self, key, bel, x, y, n_samples=30, glm_predictive=False):
+        """
+        Compute the negative log predictive density (nlpd) as
+        a Monte Carlo estimate.
+        llfn: log likelihood function
+            Takes mean, x, y
+        """
+        x = jnp.atleast_2d(x)
+        y = jnp.atleast_1d(y)
+        bel = self.predict_state(bel)
+
+        params_sample = self.sample_state(bel, key, n_samples)
+        
+        def llfn(params, x, y):
+            y = y.ravel()
+            args = self.apply_fn(params, x)
+            log_likelihood = self.emission_dist(*args).log_prob(y)
+            
+            return log_likelihood.sum()
+
+        def llfn_glm_predictive(params, x, y):
+            y = y.ravel()
+            m_Y = lambda w: self.apply_fn(w, x)
+            F = _jacrev_2d(m_Y, bel.mean)
+            mean = (m_Y(bel.mean) + F @ (params - bel.mean)).ravel()
+            log_likelihood = self.emission_dist(mean, scale).log_prob(y)
+            
+            return log_likelihood.sum()
+
+        # Compute vectorised nlpd
+        if glm_predictive:
+            llfn = llfn_glm_predictive
+
+        vnlpd = lambda w: jax.vmap(llfn, (None, 0, 0))(w, x, y)
+        nlpd_vals = -jax.lax.map(vnlpd, params_sample).squeeze()
+        nlpd_mean = nlpd_vals.mean()
+
+        return nlpd_mean
+
     
     def scan(
         self,
@@ -157,6 +185,7 @@ class Rebayes(ABC):
             out = None
             if callback is not None:
                 out = callback(bel, pred_obs, t, X[t], Y[t], bel_pred, **kwargs)
+            
             return bel, out
         carry = bel
         if bel is None:
