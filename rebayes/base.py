@@ -1,20 +1,18 @@
-from abc import ABC
-from collections import namedtuple
-from functools import partial
-from typing import Callable, Union, Tuple, Any
-
 import jax
 import chex
-from jax import jit
-from jax.lax import scan
 import jax.numpy as jnp
+from jax.lax import scan
+import tensorflow_probability.substrates.jax as tfp
+
+from jax import jit
 from jaxtyping import Float, Array
 from jax_tqdm import scan_tqdm
-import tensorflow_probability.substrates.jax as tfp
+from functools import partial
+from abc import ABC, abstractmethod
+from typing import Callable, Union, Tuple, Any
 
 tfd = tfp.distributions
 MVN = tfd.MultivariateNormalFullCovariance
-
 
 FnStateToState = Callable[ [Float[Array, "state_dim"]], Float[Array, "state_dim"]]
 FnStateAndInputToState = Callable[ [Float[Array, "state_dim"], Float[Array, "input_dim"]], Float[Array, "state_dim"]]
@@ -25,8 +23,7 @@ FnStateAndInputToEmission2 = Callable[[Float[Array, "state_dim"], Float[Array, "
 EmissionDistFn = Callable[ [Float[Array, "state_dim"], Float[Array, "state_dim state_dim"]], tfd.Distribution]
 CovMat = Union[float, Float[Array, "dim"], Float[Array, "dim dim"]]
 
-
-_jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
+_jacrev_2d = lambda f, x: jnp.atleast_2d(jax.jacrev(f)(x))
 
 
 @chex.dataclass
@@ -39,19 +36,18 @@ class Belief:
 class Rebayes(ABC):
     def __init__(
         self,
-        apply_fn: FnStateToState,
         dynamics_covariance: CovMat,
         emission_mean_function: Union[FnStateToEmission, FnStateAndInputToEmission],
         emission_cov_function: Union[FnStateToEmission2, FnStateAndInputToEmission2],
         emission_dist: EmissionDistFn,
     ):
-        self.apply_fn = apply_fn
         self.dynamics_covariance = dynamics_covariance
         self.emission_mean_function = emission_mean_function
         self.emission_cov_function = emission_cov_function
         self.emission_dist = emission_dist
 
 
+    @abstractmethod
     def init_bel(
         self,
         initial_mean: Float[Array, "state_dim"],
@@ -59,7 +55,7 @@ class Rebayes(ABC):
         Xinit = None,
         Yinit = None,
     ) -> Belief:
-        raise NotImplementedError
+        ...
 
     @partial(jit, static_argnums=(0,))
     def predict_state(
@@ -77,7 +73,7 @@ class Rebayes(ABC):
         bel: Belief,
         X: Float[Array, "input_dim"]
     ) -> Union[Float[Array, "output_dim"], Any]: 
-        """Return E(y(t) | X(t), D(1:t-1))"""
+        """eturn E(y(t) | X(t), D(1:t-1))"""
         return None
     
     @partial(jit, static_argnums=(0,))
@@ -103,7 +99,7 @@ class Rebayes(ABC):
         
         return log_prob
 
-    @partial(jit, static_argnums=(0,))
+    @abstractmethod
     def update_state(
         self,
         bel: Belief,
@@ -111,9 +107,9 @@ class Rebayes(ABC):
         y: Float[Array, "obs_dim"]
     ) -> Belief:
         """Return bel(t|t) = p(z(t) | X(t), y(t), D(1:t-1)) using bel(t|t-1) and Yt"""
-        raise NotImplementedError
+        ...
     
-    @partial(jit, static_argnums=(0,))
+    @abstractmethod
     def sample_state(
         self,
         bel: Belief,
@@ -121,7 +117,7 @@ class Rebayes(ABC):
         n_samples: int = 100,
     ) -> Float[Array, "n_samples state_dim"]:
         """Return samples from p(z(t) | D(1:t))"""
-        raise NotImplementedError
+        ...
     
     @partial(jax.jit, static_argnames=("self", "n_samples", "glm_predictive"))
     def nlpd_mc(self, key, bel, x, y, n_samples=30, glm_predictive=False):
@@ -139,17 +135,17 @@ class Rebayes(ABC):
         
         def llfn(params, x, y):
             y = y.ravel()
-            args = self.apply_fn(params, x)
+            args = self.emission_mean_function(params, x)
             log_likelihood = self.emission_dist(*args).log_prob(y)
             
             return log_likelihood.sum()
 
         def llfn_glm_predictive(params, x, y):
             y = y.ravel()
-            m_Y = lambda w: self.apply_fn(w, x)
+            m_Y = lambda w: self.emission_mean_function(w, x)
             F = _jacrev_2d(m_Y, bel.mean)
             mean = (m_Y(bel.mean) + F @ (params - bel.mean)).ravel()
-            log_likelihood = self.emission_dist(mean, scale).log_prob(y)
+            log_likelihood = self.emission_dist(mean, scale).log_prob(y) # TODO: FIx undefined scale
             
             return log_likelihood.sum()
 
@@ -166,10 +162,12 @@ class Rebayes(ABC):
     
     def scan(
         self,
+        initial_mean: Float[Array, "state_dim"],
+        initial_covariance: CovMat,
         X: Float[Array, "ntime input_dim"],
         Y: Float[Array, "ntime emission_dim"],
         callback=None,
-        bel=None,
+        bel=None, # TODO: I don't think we need bel as an argument
         progress_bar=False,
         debug=False,
         Xinit=None,
@@ -189,10 +187,8 @@ class Rebayes(ABC):
             return bel, out
         carry = bel
         if bel is None:
-            if Xinit is not None:
-                carry = self.init_bel(Xinit, Yinit)
-            else:
-                carry = self.init_bel()
+            # Make initial_covariance optional? for exampl, point-estimate RSGD
+            carry = self.init_bel(initial_mean, initial_covariance, Xinit, Yinit)
         if progress_bar:
             step = scan_tqdm(num_timesteps)(step)
         if debug:

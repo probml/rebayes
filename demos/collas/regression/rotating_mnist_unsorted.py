@@ -2,12 +2,14 @@ import jax
 import optax
 import distrax
 import numpy as np
+import jax.numpy as jnp
 import flax.linen as nn
 import tensorflow_probability.substrates.jax as tfp
 
 from typing import Callable
 from functools import partial
 from bayes_opt import BayesianOptimization
+from jax.flatten_util import ravel_pytree
 from rebayes.low_rank_filter import lofi
 from rebayes.sgd_filter import replay_sgd as rsgd
 from rebayes.datasets import rotating_mnist_data as rmnist
@@ -83,15 +85,19 @@ def load_and_run_lofi(
     callback=None
 ):
     X_train, Y_train = dataset_train
+    _, dim_in = X_train.shape
+    params = model.init(key, jnp.ones((1, dim_in)))
+    params, _ = ravel_pytree(params)
+
     dynamics_weights = 1 - np.exp(log_1m_dynamics_weights)
     dynamics_covariance = np.exp(log_dynamics_covariance)
-    agent, rfn = lofi.init_regression_agent(
-        key, model, X_train,
-        initial_covariance, dynamics_weights, dynamics_covariance,
-        emission_cov, memory_size
+    agent, _ = lofi.init_regression_agent(
+        model, X_train, dynamics_weights, dynamics_covariance, emission_cov, memory_size
     )
 
-    bel, outputs = agent.scan(X_train, Y_train, progress_bar=progress_bar, callback=callback)
+    bel, outputs = agent.scan(
+        params, initial_covariance, X_train, Y_train, progress_bar=progress_bar, callback=callback
+    )
 
     result = {
         "bel": bel,
@@ -125,7 +131,9 @@ def load_and_run_rsgd(
     )
 
     # callback = partial(callback, apply_fn=agent.apply_fn, agent=agent)
-    bel, output = agent.scan(X_train, Y_train, progress_bar=progress_bar, callback=callback)
+    bel, output = agent.scan(
+        X_train, Y_train, progress_bar=progress_bar, callback=callback
+    )
     
     result = {
         "bel": bel,
@@ -191,7 +199,9 @@ if __name__ == "__main__":
     X_train = X_train[n_callback:]
     Y_train = Y_train[n_callback:]
 
-    metric_fn = partial(eval_ll, scale=scale, X=X_callback, y=Y_callback)
+    metric_fn = partial(
+        eval_ll, scale=scale, X=X_callback, y=Y_callback
+    )
 
     def bbf_lofi(
         log_1m_dynamics_weights,
@@ -215,7 +225,7 @@ if __name__ == "__main__":
             memory_size,
         )
         agent, bel = res["agent"], res["bel"]
-        apply_fn = agent.params.emission_mean_function
+        apply_fn = agent.emission_mean_function
         metric = metric_fn(apply_fn, bel)
         return metric
 
@@ -293,6 +303,10 @@ if __name__ == "__main__":
         "n_iter": 15,
     }
 
+    print("Training LoFi")
+    for memory_size, optimiser_lofi in lofi_optimisers.items():
+        print(f"Memory size: {memory_size}")
+        optimiser_lofi.maximize(**optimizer_eval_kwargs)
     print("Training RSGD")
     for memory_size, optimiser_rsgd in rsgd_optimisers.items():
         print(f"Memory size: {memory_size}")
@@ -301,7 +315,3 @@ if __name__ == "__main__":
     for memory_size, optimiser_rsgd_adam in adam_optimisers.items():
         print(f"Memory size: {memory_size}")
         optimiser_rsgd_adam.maximize(**optimizer_eval_kwargs)
-    print("Training LoFi")
-    for memory_size, optimiser_lofi in lofi_optimisers.items():
-        print(f"Memory size: {memory_size}")
-        optimiser_lofi.maximize(**optimizer_eval_kwargs)

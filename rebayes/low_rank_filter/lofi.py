@@ -1,22 +1,28 @@
 from functools import partial
-from typing import Union, Any
 
 import jax
 import chex
 from jax import jit
 import jax.numpy as jnp
-from jaxtyping import Float, Array
 import tensorflow_probability.substrates.jax as tfp
 
+from typing import Union, Any, Tuple
+from jaxtyping import Float, Array
 from jax.flatten_util import ravel_pytree
 from rebayes.utils.sampling import sample_dlr
 from rebayes.base import (
+    Belief,
+    FnStateToState,
+    FnStateToEmission,
+    FnStateToEmission2,
     CovMat,
     EmissionDistFn,
     FnStateAndInputToEmission,
     FnStateAndInputToEmission2,
     Rebayes,
 )
+
+# TODO (proposed): import lofi_core only and access functions using dot notation
 from rebayes.low_rank_filter.lofi_core import (
     _jacrev_2d,
     _lofi_spherical_cov_inflate,
@@ -37,7 +43,6 @@ from rebayes.low_rank_filter.lofi_core import (
 
 tfd = tfp.distributions
 MVN = tfd.MultivariateNormalTriL
-
 
 INFLATION_METHODS = [
     'bayesian',
@@ -84,36 +89,54 @@ class LoFiParams:
 class RebayesLoFi(Rebayes):
     def __init__(
         self,
-        params: LoFiParams,
+        dynamics_covariance: CovMat,
+        emission_mean_function: Union[FnStateToEmission, FnStateAndInputToEmission],
+        emission_cov_function: Union[FnStateToEmission2, FnStateAndInputToEmission2],
+        emission_dist: EmissionDistFn,
+        dynamics_weights: CovMat,
+        memory_size: int,
+        # TODO: (deprecate?)
+        adaptive_emission_cov: bool,
+        dynamics_covariance_inflation_factor: float,
+        steady_state: bool,
+        inflation: str,
+        use_svd: bool,
     ):
-        super().__init__(params)
+        super().__init__(dynamics_covariance, emission_mean_function, emission_cov_function, emission_dist)
+        self.memory_size = memory_size
+        self.dynamics_weights = dynamics_weights
+        self.adaptive_emission_cov = adaptive_emission_cov
+        self.dynamics_covariance_inflation_factor = dynamics_covariance_inflation_factor
+        self.steady_state = steady_state
+        self.inflation = inflation
+        self.use_svd = use_svd
 
         # Check inflation type
-        if params.inflation not in INFLATION_METHODS:
-            raise ValueError(f"Unknown inflation method: {params.inflation}.")
+        if inflation not in INFLATION_METHODS:
+            raise ValueError(f"Unknown inflation method: {inflation}.")
 
-    def init_bel(self):
-        pp_mean = self.params.initial_mean # Predictive prior mean
-        init_mean = self.params.initial_mean # Initial mean
-        memory_size = self.params.memory_size
+    def init_bel(self, initial_mean, initial_covariance, X, y):
+        pp_mean = initial_mean # Predictive prior mean
+        init_mean = initial_mean # Initial mean
+        memory_size = self.memory_size
         init_basis = jnp.zeros((len(init_mean), memory_size)) # Initial basis
         init_svs = jnp.zeros(memory_size) # Initial singular values
-        init_eta = 1 / self.params.initial_covariance # Initial precision
-        gamma = self.params.dynamics_weights # Dynamics weights
-        q = self.params.dynamics_covariance # Dynamics covariance
-        if self.params.steady_state: # Steady-state constraint
+        init_eta = 1 / initial_covariance # Initial precision
+        gamma = self.dynamics_weights # Dynamics weights
+        q = self.dynamics_covariance # Dynamics covariance
+        if self.steady_state: # Steady-state constraint
             q = self.steady_state_constraint(init_eta, gamma)
         init_Ups = jnp.ones((len(init_mean), 1)) * init_eta
 
         return LoFiBel(
-            pp_mean = pp_mean,
-            mean = init_mean,
-            basis = init_basis,
-            svs = init_svs,
-            eta = init_eta,
-            gamma = gamma,
-            q = q,
-            Ups = init_Ups
+            pp_mean=pp_mean,
+            mean=init_mean,
+            basis=init_basis,
+            svs=init_svs,
+            eta=init_eta,
+            gamma=gamma,
+            q=q,
+            Ups=init_Ups
         )
 
     @staticmethod
@@ -123,7 +146,6 @@ class RebayesLoFi(Rebayes):
     ) -> float:
         """Return dynamics covariance according to the steady-state constraint."""
         q = (1 - gamma**2) / eta
-
         return q
 
     @partial(jit, static_argnums=(0,))
@@ -133,7 +155,7 @@ class RebayesLoFi(Rebayes):
         x: Float[Array, "input_dim"],
     ) -> Union[Float[Array, "output_dim"], Any]:
         m = bel.mean
-        m_Y = lambda z: self.params.emission_mean_function(z, x)
+        m_Y = lambda z: self.emission_mean_function(z, x)
         y_pred = jnp.atleast_1d(m_Y(m))
 
         return y_pred
@@ -155,27 +177,27 @@ class RebayesLoFiSpherical(RebayesLoFi):
     ) -> LoFiBel:
         m0, m, U, Lambda, eta, gamma, q = \
             bel.pp_mean, bel.mean, bel.basis, bel.svs, bel.eta, bel.gamma, bel.q
-        alpha = self.params.dynamics_covariance_inflation_factor
-        inflation = self.params.inflation
+        alpha = self.dynamics_covariance_inflation_factor
+        inflation = self.inflation
 
         # Inflate posterior covariance.
         m_infl, U_infl, Lambda_infl, eta_infl = \
             _lofi_spherical_cov_inflate(m0, m, U, Lambda, eta, alpha, inflation)
 
         # Predict dynamics.
-        predict_fn = _lofi_spherical_cov_predict if self.params.use_svd \
+        predict_fn = _lofi_spherical_cov_predict if self.use_svd \
             else _lofi_spherical_cov_svd_free_predict
 
         pp_mean_pred, m_pred, U_pred, Lambda_pred, eta_pred = \
             predict_fn(m0, m_infl, U_infl, Lambda_infl, gamma, q, eta_infl,
-                       self.params.steady_state)
+                       self.steady_state)
 
         bel_pred = bel.replace(
-            pp_mean = pp_mean_pred,
-            mean = m_pred,
-            basis = U_pred,
-            svs = Lambda_pred,
-            eta = eta_pred,
+            pp_mean=pp_mean_pred,
+            mean=m_pred,
+            basis=U_pred,
+            svs=Lambda_pred,
+            eta=eta_pred,
         )
 
         return bel_pred
@@ -189,12 +211,12 @@ class RebayesLoFiSpherical(RebayesLoFi):
     ) -> Union[Float[Array, "output_dim output_dim"], Any]:
         m, U, Lambda, eta, obs_noise_var = \
             bel.mean, bel.basis, bel.svs, bel.eta, bel.obs_noise_var
-        m_Y = lambda z: self.params.emission_mean_function(z, x)
-        Cov_Y = lambda z: self.params.emission_cov_function(z, x)
+        m_Y = lambda z: self.emission_mean_function(z, x)
+        Cov_Y = lambda z: self.emission_cov_function(z, x)
 
         C = jnp.atleast_1d(m_Y(m)).shape[0]
         H = _jacrev_2d(m_Y, m)
-        if self.params.adaptive_emission_cov:
+        if self.adaptive_emission_cov:
             R = jnp.eye(C) * obs_noise_var
         else:
             R = jnp.atleast_2d(Cov_Y(m))
@@ -217,25 +239,25 @@ class RebayesLoFiSpherical(RebayesLoFi):
             bel.mean, bel.basis, bel.svs, bel.eta, bel.nobs, bel.obs_noise_var
 
         # Condition on observation.
-        update_fn = _lofi_spherical_cov_condition_on if self.params.use_svd \
+        update_fn = _lofi_spherical_cov_condition_on if self.use_svd \
             else _lofi_spherical_cov_svd_free_condition_on
 
         m_cond, U_cond, Lambda_cond = \
-            update_fn(m, U, Lambda, eta, self.params.emission_mean_function,
-                      self.params.emission_cov_function, x, y,
-                      self.params.adaptive_emission_cov, obs_noise_var)
+            update_fn(m, U, Lambda, eta, self.emission_mean_function,
+                      self.emission_cov_function, x, y,
+                      self.adaptive_emission_cov, obs_noise_var)
 
         # Estimate emission covariance.
         nobs_est, obs_noise_var_est = \
-            _lofi_estimate_noise(m_cond, self.params.emission_mean_function,
-                                 x, y, nobs, obs_noise_var, self.params.adaptive_emission_cov)
+            _lofi_estimate_noise(m_cond, self.emission_mean_function,
+                                 x, y, nobs, obs_noise_var, self.adaptive_emission_cov)
 
         bel_cond = bel.replace(
-            mean = m_cond,
-            basis = U_cond,
-            svs = Lambda_cond,
-            nobs = nobs_est,
-            obs_noise_var = obs_noise_var_est,
+            mean=m_cond,
+            basis=U_cond,
+            svs=Lambda_cond,
+            nobs=nobs_est,
+            obs_noise_var=obs_noise_var_est,
         )
 
         return bel_cond
@@ -263,16 +285,16 @@ class RebayesLoFiOrthogonal(RebayesLoFiSpherical):
         # Condition on observation.
         m_cond, U_cond, Lambda_cond = \
             _lofi_orth_condition_on(m, U, Lambda, eta,
-                                    self.params.emission_mean_function,
-                                    self.params.emission_cov_function,
-                                    x, y, self.params.adaptive_emission_cov,
+                                    self.emission_mean_function,
+                                    self.emission_cov_function,
+                                    x, y, self.adaptive_emission_cov,
                                     obs_noise_var, nobs)
 
         # Estimate emission covariance.
         nobs_est, obs_noise_var_est = \
-            _lofi_estimate_noise(m_cond, self.params.emission_mean_function,
+            _lofi_estimate_noise(m_cond, self.emission_mean_function,
                                  x, y, nobs, obs_noise_var,
-                                 self.params.adaptive_emission_cov)
+                                 self.adaptive_emission_cov)
 
         bel_cond = bel.replace(
             mean = m_cond,
@@ -290,9 +312,23 @@ class RebayesLoFiOrthogonal(RebayesLoFiSpherical):
 class RebayesLoFiDiagonal(RebayesLoFi):
     def __init__(
         self,
-        params: LoFiParams,
+        dynamics_covariance: CovMat,
+        emission_mean_function: Union[FnStateToEmission, FnStateAndInputToEmission],
+        emission_cov_function: Union[FnStateToEmission2, FnStateAndInputToEmission2],
+        emission_dist: EmissionDistFn,
+        memory_size: int = 10,
+        adaptive_emission_cov: bool = False,
+        dynamics_covariance_inflation_factor: float = 0.0,
+        dynamics_weights: CovMat = 1.0,
+        steady_state: bool = False,
+        inflation: str = 'bayesian',
+        use_svd: bool = True,
     ):
-        super().__init__(params)
+        super().__init__(
+        dynamics_covariance, emission_mean_function, emission_cov_function, emission_dist,
+        memory_size, adaptive_emission_cov, dynamics_covariance_inflation_factor, dynamics_weights,
+        steady_state, inflation, use_svd
+        )
 
     @partial(jit, static_argnums=(0,))
     def predict_state(
@@ -301,8 +337,8 @@ class RebayesLoFiDiagonal(RebayesLoFi):
     ) -> LoFiBel:
         m0, m, U, Lambda, eta, gamma, q, Ups = \
             bel.pp_mean, bel.mean, bel.basis, bel.svs, bel.eta, bel.gamma, bel.q, bel.Ups
-        alpha = self.params.dynamics_covariance_inflation_factor
-        inflation = self.params.inflation
+        alpha = self.dynamics_covariance_inflation_factor
+        inflation = self.inflation
 
         # Inflate posterior covariance.
         m_infl, U_infl, Lambda_infl, Ups_infl = \
@@ -313,12 +349,12 @@ class RebayesLoFiDiagonal(RebayesLoFi):
             _lofi_diagonal_cov_predict(m0, m_infl, U_infl, Lambda_infl, gamma, q, eta, Ups_infl)
 
         bel_pred = bel.replace(
-            pp_mean = pp_mean_pred,
-            mean = m_pred,
-            basis = U_pred,
-            svs = Lambda_pred,
-            eta = eta_pred,
-            Ups = Ups_pred,
+            pp_mean=pp_mean_pred,
+            mean=m_pred,
+            basis=U_pred,
+            svs=Lambda_pred,
+            eta=eta_pred,
+            Ups=Ups_pred,
         )
 
         return bel_pred
@@ -332,12 +368,12 @@ class RebayesLoFiDiagonal(RebayesLoFi):
     ) -> Union[Float[Array, "output_dim output_dim"], Any]:
         m, U, Lambda, obs_noise_var, Ups = \
             bel.mean, bel.basis, bel.svs, bel.obs_noise_var, bel.Ups
-        m_Y = lambda z: self.params.emission_mean_function(z, x)
-        Cov_Y = lambda z: self.params.emission_cov_function(z, x)
+        m_Y = lambda z: self.emission_mean_function(z, x)
+        Cov_Y = lambda z: self.emission_cov_function(z, x)
 
         C = jnp.atleast_1d(m_Y(m)).shape[0]
         H = _jacrev_2d(m_Y, m)
-        if self.params.adaptive_emission_cov:
+        if self.adaptive_emission_cov:
             R = jnp.eye(C) * obs_noise_var
         else:
             R = jnp.atleast_2d(Cov_Y(m))
@@ -353,6 +389,13 @@ class RebayesLoFiDiagonal(RebayesLoFi):
 
 
     @partial(jit, static_argnums=(0,))
+    def sample_state(self, bel: Belief, key: Array, shape: Tuple) -> Array:
+        bel = self.predict_state(bel)
+        params_sample = sample_dlr(key, bel.basis, bel.Ups.ravel(), shape) + bel.mean
+        return params_sample
+
+
+    @partial(jit, static_argnums=(0,))
     def update_state(
         self,
         bel: LoFiBel,
@@ -363,27 +406,27 @@ class RebayesLoFiDiagonal(RebayesLoFi):
             bel.mean, bel.basis, bel.svs, bel.Ups, bel.nobs, bel.obs_noise_var
 
         # Condition on observation.
-        update_fn = _lofi_diagonal_cov_condition_on if self.params.use_svd \
+        update_fn = _lofi_diagonal_cov_condition_on if self.use_svd \
             else _lofi_diagonal_cov_svd_free_condition_on
 
         m_cond, U_cond, Lambda_cond, Ups_cond = \
-            update_fn(m, U, Lambda, Ups, self.params.emission_mean_function,
-                      self.params.emission_cov_function, x, y,
-                      self.params.adaptive_emission_cov, obs_noise_var)
+            update_fn(m, U, Lambda, Ups, self.emission_mean_function,
+                      self.emission_cov_function, x, y,
+                      self.adaptive_emission_cov, obs_noise_var)
 
         # Estimate emission covariance.
         nobs_est, obs_noise_var_est = \
-            _lofi_estimate_noise(m_cond, self.params.emission_mean_function,
+            _lofi_estimate_noise(m_cond, self.emission_mean_function,
                                  x, y, nobs, obs_noise_var,
-                                 self.params.adaptive_emission_cov)
+                                 self.adaptive_emission_cov)
 
         bel_cond = bel.replace(
-            mean = m_cond,
-            basis = U_cond,
-            svs = Lambda_cond,
-            Ups = Ups_cond,
-            nobs = nobs_est,
-            obs_noise_var = obs_noise_var_est,
+            mean=m_cond,
+            basis=U_cond,
+            svs=Lambda_cond,
+            Ups=Ups_cond,
+            nobs=nobs_est,
+            obs_noise_var=obs_noise_var_est,
         )
 
         return bel_cond
@@ -397,7 +440,7 @@ class RebayesLoFiDiagonal(RebayesLoFi):
         # Belief posterior predictive.
         bel = self.predict_state(bel)
         params_sample = sample_dlr(key, bel.basis, bel.Ups.ravel(), shape) + bel.mean
-        yhat_samples = jax.vmap(self.params.emission_mean_function, (0, None))(params_sample, x)
+        yhat_samples = jax.vmap(self.emission_mean_function, (0, None))(params_sample, x)
         return yhat_samples
 
     @partial(jax.jit, static_argnames=("self", "n_samples", "glm_predictive", "clf"))
@@ -414,25 +457,25 @@ class RebayesLoFiDiagonal(RebayesLoFi):
         bel = self.predict_state(bel)
         
         params_sample = sample_dlr(key, bel.basis, bel.Ups.ravel(), shape) + bel.mean
-        scale = None if clf else jnp.sqrt(self.params.emission_cov_function(0.0, 0.0))
+        scale = None if clf else jnp.sqrt(self.emission_cov_function(0.0, 0.0))
         
         def llfn(params, x, y):
             y = y.ravel()
-            mean = self.params.emission_mean_function(params, x).ravel()
-            log_likelihood = self.params.emission_dist(mean, scale).log_prob(y)
+            mean = self.emission_mean_function(params, x).ravel()
+            log_likelihood = self.emission_dist(mean, scale).log_prob(y)
             
             return log_likelihood.sum()
         
         def llfn_glm_predictive(params, x, y):
             y = y.ravel()
-            m_Y = lambda w: self.params.emission_mean_function(w, x)
+            m_Y = lambda w: self.emission_mean_function(w, x)
             if clf:
-                m_Y = lambda w: jnp.log(self.params.emission_mean_function(w, x))
+                m_Y = lambda w: jnp.log(self.emission_mean_function(w, x))
             F = _jacrev_2d(m_Y, bel.mean)
             mean = (m_Y(bel.mean) + F @ (params - bel.mean)).ravel()
             if clf:
                 mean = jax.nn.softmax(mean)
-            log_likelihood = self.params.emission_dist(mean, scale).log_prob(y)
+            log_likelihood = self.emission_dist(mean, scale).log_prob(y)
             
             return log_likelihood.sum()
 
@@ -448,25 +491,22 @@ class RebayesLoFiDiagonal(RebayesLoFi):
 
 
 def init_regression_agent(
-        key,
         model,
         X_init,
-        initial_covariance,
         dynamics_weights,
         dynamics_covariance,
         emission_cov,
         memory_size
 ):
+    key = jax.random.PRNGKey(0)
     _, dim_in = X_init.shape
-    params = model.init(key, jnp.ones((1, dim_in)))
-    flat_params, recfn = ravel_pytree(params)
+    pdummy = model.init(key, jnp.ones((1, dim_in)))
+    _, recfn = ravel_pytree(pdummy)
 
     def apply_fn(flat_params, x):
         return model.apply(recfn(flat_params), x)
 
-    lofi_params = LoFiParams(
-        initial_mean=flat_params,
-        initial_covariance=initial_covariance,
+    agent = RebayesLoFiDiagonal(
         dynamics_weights=dynamics_weights,
         dynamics_covariance=dynamics_covariance,
         emission_mean_function=apply_fn,
@@ -478,5 +518,4 @@ def init_regression_agent(
         emission_dist=tfd.Normal
     )
 
-    agent = RebayesLoFiDiagonal(lofi_params)
     return agent, recfn

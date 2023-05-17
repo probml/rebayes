@@ -121,7 +121,7 @@ class FifoSGD(Rebayes):
                  buffer_size, dim_features, dim_output, n_inner=1):
         self.lossfn = lossfn
         self.apply_fn = apply_fn
-        self.params = init_params
+        # self.params = init_params
         self.tx = tx
         self.buffer_size = buffer_size
         self.dim_features = dim_features
@@ -130,12 +130,12 @@ class FifoSGD(Rebayes):
         self.loss_grad = jax.value_and_grad(self.lossfn, 0)
 
 
-    def init_bel(self):
+    def init_bel(self, params, _, X, y):
         if self.apply_fn is None:
             raise ValueError("Must provide apply_fn")
         bel_init = FifoTrainState.create(
             apply_fn = self.apply_fn,
-            params = self.params,
+            params = params,
             tx = self.tx,
             buffer_size = self.buffer_size,
             dim_features = self.dim_features,
@@ -199,17 +199,17 @@ class FifoSGDLaplaceDiag(FifoSGD):
         self.prior_precision = prior_precision
         self.log_likelihood = log_likelihood
 
-    def init_bel(self):
+    def init_bel(self, params, initial_covariance, X, y):
         if self.apply_fn is None:
             raise ValueError("Must provide apply_fn")
         bel_init = FifoTrainStateLaplaceDiag.create(
             apply_fn = self.apply_fn,
-            params = self.params,
+            params = params,
             tx = self.tx,
             buffer_size = self.buffer_size,
             dim_features = self.dim_features,
             dim_output = self.dim_output,
-            prior_precision = self.prior_precision
+            prior_precision = 1 / initial_covariance
         )
         return bel_init
 
@@ -341,7 +341,6 @@ def lossfn_xentropy(params, counter, X, y, apply_fn):
 
 
 def init_regression_agent(
-    key,
     log_likelihood, # use emission_dist
     model,
     X_init,
@@ -355,6 +354,7 @@ def init_regression_agent(
     Initialise regression agent with a given Flax model
     to tackle a 1d-output regression problem.
     """
+    key = jax.random.PRNGKey(0)
     apply_fn = model.apply
     init_params = model.init(key, X_init)
     out = model.apply(init_params, X_init)
