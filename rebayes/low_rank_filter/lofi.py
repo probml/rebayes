@@ -335,19 +335,19 @@ class RebayesLoFiDiagonal(RebayesLoFi):
         self,
         bel: LoFiBel,
     ) -> LoFiBel:
-        m0, m, U, Lambda, eta, gamma, q, Ups = \
-            bel.pp_mean, bel.mean, bel.basis, bel.svs, bel.eta, bel.gamma, bel.q, bel.Ups
         alpha = self.dynamics_covariance_inflation_factor
-        inflation = self.inflation
 
         # Inflate posterior covariance.
-        m_infl, U_infl, Lambda_infl, Ups_infl = \
-            _lofi_diagonal_cov_inflate(m0, m, U, Lambda, eta, Ups, alpha, inflation)
+        inflate_params = _lofi_diagonal_cov_inflate(
+            bel.pp_mean, bel.mean, bel.basis, bel.svs, bel.eta, bel.Ups, alpha, self.inflation
+        )
+        m_infl, U_infl, Lambda_infl, Ups_infl = inflate_params
 
         # Predict dynamics.
-        pp_mean_pred, m_pred, U_pred, Lambda_pred, eta_pred, Ups_pred = \
-            _lofi_diagonal_cov_predict(m0, m_infl, U_infl, Lambda_infl, gamma, q, eta, Ups_infl)
+        pred_dynamics = _lofi_diagonal_cov_predict(bel.pp_mean, m_infl, U_infl, Lambda_infl, bel.gamma, bel.q, bel.eta, Ups_infl)
+        pp_mean_pred, m_pred, U_pred, Lambda_pred, eta_pred, Ups_pred = pred_dynamics
 
+        # Update belief 
         bel_pred = bel.replace(
             pp_mean=pp_mean_pred,
             mean=m_pred,
