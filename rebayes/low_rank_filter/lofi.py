@@ -325,8 +325,8 @@ class RebayesLoFiDiagonal(RebayesLoFi):
         use_svd: bool = True,
     ):
         super().__init__(
-        dynamics_covariance, emission_mean_function, emission_cov_function, emission_dist,
-        memory_size, adaptive_emission_cov, dynamics_covariance_inflation_factor, dynamics_weights,
+        dynamics_covariance, emission_mean_function, emission_cov_function, emission_dist, dynamics_weights,
+        memory_size, adaptive_emission_cov, dynamics_covariance_inflation_factor, 
         steady_state, inflation, use_svd
         )
 
