@@ -196,7 +196,7 @@ class RebayesLoFiSpherical(RebayesLoFi):
         self,
         bel: LoFiBel,
         x: Float[Array, "input_dim"],
-        y: Float[Array, "obs_dim"]
+        y: Float[Array, "output_dim"]
     ) -> LoFiBel:
         m, U, Lambda, eta, nobs, obs_noise_var = \
             bel.mean, bel.basis, bel.svs, bel.eta, bel.nobs, bel.obs_noise_var
@@ -256,7 +256,7 @@ class RebayesLoFiOrthogonal(RebayesLoFiSpherical):
         self,
         bel: LoFiBel,
         x: Float[Array, "input_dim"],
-        y: Float[Array, "obs_dim"]
+        y: Float[Array, "output_dim"]
     ) -> LoFiBel:
         m, U, Lambda, eta, nobs, obs_noise_var = \
             bel.mean, bel.basis, bel.svs, bel.eta, bel.nobs, bel.obs_noise_var
@@ -349,7 +349,7 @@ class RebayesLoFiDiagonal(RebayesLoFi):
         self,
         bel: LoFiBel,
         x: Float[Array, "input_dim"],
-        y: Float[Array, "obs_dim"]
+        y: Float[Array, "output_dim"]
     ) -> LoFiBel:
         m, U, Lambda, Ups, nobs, obs_noise_var = \
             bel.mean, bel.basis, bel.svs, bel.Ups, bel.nobs, bel.obs_noise_var
@@ -399,7 +399,7 @@ class RebayesLoFiDiagonal(RebayesLoFi):
         key: Array, 
         x: Float[Array, "input_dim"],
         n_samples: int=1,
-    ):
+    ) -> Float[Array, "n_samples output_dim"]:
         """
         Sample observations from the posterior predictive distribution.
         """
