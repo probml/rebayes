@@ -379,7 +379,7 @@ class RebayesLoFiDiagonal(RebayesLoFi):
 
         return bel_cond
     
-    @partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,3))
     def sample_state(
         self, 
         bel: LoFiBel, 
