@@ -35,11 +35,13 @@ class Belief:
 class Rebayes(ABC):
     def __init__(
         self,
+        dynamics_covariance: CovMat,
         emission_mean_function: Union[FnStateToEmission, FnStateAndInputToEmission],
         emission_cov_function: Union[FnStateToEmission2, FnStateAndInputToEmission2],
         emission_dist: EmissionDistFn,
         adaptive_emission_covariance: bool = False,
     ):
+        self.dynamics_covariance = dynamics_covariance
         self.emission_mean_function = emission_mean_function
         self.emission_cov_function = emission_cov_function
         self.emission_dist = emission_dist
