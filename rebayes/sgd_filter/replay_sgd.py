@@ -267,7 +267,7 @@ class FifoSGDLaplaceDiag(FifoSGD):
         return params_sample
         
     @partial(jax.jit, static_argnums=(0,4))
-    def pred_obs_mc(self, key, bel, x, shape=None):
+    def pred_obs_mc(self, bel, key, x, shape=None):
         """
         Sample observations from the posterior predictive distribution.
         """
@@ -280,7 +280,7 @@ class FifoSGDLaplaceDiag(FifoSGD):
         return yhat_samples
 
     @partial(jax.jit, static_argnames=("self", "n_samples", "glm_predictive"))
-    def nlpd_mc(self, key, bel, x, y, n_samples=30, glm_predictive=False):
+    def nlpd_mc(self, bel, key, x, y, n_samples=30, glm_predictive=False):
         """
         Compute the negative log predictive density (nlpd) as a
         Monte Carlo (MC) estimate.

@@ -98,10 +98,9 @@ def cb_reg_mc(bel, pred_obs, t, X, y, bel_pred, apply_fn, steps=10, **kwargs):
     nll_window = nll_test[slice_ix].sum()
     nll_test = nll_test.sum()
 
-    nlpd = agent.nlpd_mc(key, bel_pred, X, y).sum()
-    nlpd_test = agent.nlpd_mc(key, bel_pred, X_test, y_test[:, None])
-    nlpd_window = nlpd_test[slice_ix].sum()
-    nlpd_test = nlpd_test.sum()
+    nlpd = agent.nlpd_mc(bel_pred, key, X, y).sum()
+    nlpd_test = agent.nlpd_mc(bel_pred, key, X_test, y_test[:, None]).sum()
+    nlpd_window = agent.nlpd_mc(bel_pred, key, X_test[slice_ix], y_test[slice_ix][:, None]).sum()
 
     res = cb_reg_sup(
         bel, pred_obs, t, X, y, bel_pred, apply_fn, **kwargs
