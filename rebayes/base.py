@@ -1,15 +1,15 @@
-import jax
-import chex
-import jax.numpy as jnp
-from jax.lax import scan
-import tensorflow_probability.substrates.jax as tfp
+from abc import ABC, abstractmethod
+from functools import partial
+from typing import Callable, Union, Tuple, Any
 
-from jax import jit
+import chex
+import jax
+from jax import jit, vmap
+from jax.lax import scan
+import jax.numpy as jnp
 from jaxtyping import Float, Array
 from jax_tqdm import scan_tqdm
-from functools import partial
-from abc import ABC, abstractmethod
-from typing import Callable, Union, Tuple, Any
+import tensorflow_probability.substrates.jax as tfp
 
 tfd = tfp.distributions
 MVN = tfd.MultivariateNormalFullCovariance
@@ -23,12 +23,11 @@ FnStateAndInputToEmission2 = Callable[[Float[Array, "state_dim"], Float[Array, "
 EmissionDistFn = Callable[ [Float[Array, "state_dim"], Float[Array, "state_dim state_dim"]], tfd.Distribution]
 CovMat = Union[float, Float[Array, "dim"], Float[Array, "dim dim"]]
 
-_jacrev_2d = lambda f, x: jnp.atleast_2d(jax.jacrev(f)(x))
-
 
 @chex.dataclass
 class Belief:
-    dummy: float
+    mean: Float[Array, "state_dim"]
+    obs_noise_var: float
     # The belief state can be a Gaussian or some other representation (eg samples)
     # This must be a chex dataclass so that it works with lax.scan as a return type for carry
 
@@ -36,16 +35,15 @@ class Belief:
 class Rebayes(ABC):
     def __init__(
         self,
-        dynamics_covariance: CovMat,
         emission_mean_function: Union[FnStateToEmission, FnStateAndInputToEmission],
         emission_cov_function: Union[FnStateToEmission2, FnStateAndInputToEmission2],
         emission_dist: EmissionDistFn,
+        adaptive_emission_covariance: bool = False,
     ):
-        self.dynamics_covariance = dynamics_covariance
         self.emission_mean_function = emission_mean_function
         self.emission_cov_function = emission_cov_function
         self.emission_dist = emission_dist
-
+        self.adaptive_emission_covariance = adaptive_emission_covariance
 
     @abstractmethod
     def init_bel(
@@ -67,14 +65,14 @@ class Rebayes(ABC):
         """
         return bel
 
-    @partial(jit, static_argnums=(0,))
+    @abstractmethod
     def predict_obs(
         self,
         bel: Belief,
         X: Float[Array, "input_dim"]
     ) -> Union[Float[Array, "output_dim"], Any]: 
-        """eturn E(y(t) | X(t), D(1:t-1))"""
-        return None
+        """Return E(y(t) | X(t), D(1:t-1))"""
+        ...
     
     @partial(jit, static_argnums=(0,))
     def predict_obs_cov(
@@ -84,6 +82,22 @@ class Rebayes(ABC):
     ) -> Union[Float[Array, "output_dim output_dim"], Any]: 
         """Return Cov(y(t) | X(t), D(1:t-1))"""
         return None
+    
+    @partial(jit, static_argnums=(0,))
+    def obs_cov(
+        self,
+        bel: Belief,
+        X: Float[Array, "input_dim"]
+    ) -> Union[Float[Array, "output_dim output_dim"], Any]:
+        """Return R(t)"""
+        y_pred = jnp.atleast_1d(self.predict_obs(bel, X))
+        C, *_ = y_pred.shape
+        if self.adaptive_emission_covariance:
+            R = bel.obs_noise_var * jnp.eye(C)
+        else:
+            R = jnp.atleast_2d(self.emission_cov_function(bel.mean, X))
+        
+        return R
     
     @partial(jit, static_argnums=(0,))
     def evaluate_log_prob(
@@ -116,50 +130,43 @@ class Rebayes(ABC):
         key: Float[Array, "key_dim"],
         n_samples: int = 100,
     ) -> Float[Array, "n_samples state_dim"]:
-        """Return samples from p(z(t) | D(1:t))"""
+        """Return samples from p(z(t) | D(1:t-1))"""
         ...
     
-    @partial(jax.jit, static_argnames=("self", "n_samples", "glm_predictive"))
-    def nlpd_mc(self, key, bel, x, y, n_samples=30, glm_predictive=False):
+    @partial(jax.jit, static_argnames=("self", "n_samples", "glm_callback"))
+    def nlpd_mc(
+        self,
+        bel: Belief,
+        key: Float[Array, "key_dim"],
+        x: Float[Array, "ntime input_dim"],
+        y: Float[Array, "ntime emission_dim"],
+        n_samples: int=30,
+        glm_callback=None,
+    ) -> float:
         """
         Compute the negative log predictive density (nlpd) as
         a Monte Carlo estimate.
-        llfn: log likelihood function
-            Takes mean, x, y
         """
         x = jnp.atleast_2d(x)
         y = jnp.atleast_1d(y)
         bel = self.predict_state(bel)
-
         params_sample = self.sample_state(bel, key, n_samples)
+        mean_fn = self.emission_mean_function if glm_callback is None else glm_callback
         
         def llfn(params, x, y):
             y = y.ravel()
-            args = self.emission_mean_function(params, x)
-            log_likelihood = self.emission_dist(*args).log_prob(y)
-            
-            return log_likelihood.sum()
-
-        def llfn_glm_predictive(params, x, y):
-            y = y.ravel()
-            m_Y = lambda w: self.emission_mean_function(w, x)
-            F = _jacrev_2d(m_Y, bel.mean)
-            mean = (m_Y(bel.mean) + F @ (params - bel.mean)).ravel()
-            log_likelihood = self.emission_dist(mean, scale).log_prob(y) # TODO: FIx undefined scale
+            mean = mean_fn(params, x)
+            R = self.obs_cov(bel, x)
+            log_likelihood = self.emission_dist(mean, R).log_prob(y)
             
             return log_likelihood.sum()
 
         # Compute vectorised nlpd
-        if glm_predictive:
-            llfn = llfn_glm_predictive
+        lpd = vmap(vmap(llfn, (None, 0, 0)), (0, None, None))(params_sample, x, y)
+        nlpd = -lpd.mean()
 
-        vnlpd = lambda w: jax.vmap(llfn, (None, 0, 0))(w, x, y)
-        nlpd_vals = -jax.lax.map(vnlpd, params_sample).squeeze()
-        nlpd_mean = nlpd_vals.mean()
+        return nlpd
 
-        return nlpd_mean
-
-    
     def scan(
         self,
         initial_mean: Float[Array, "state_dim"],
