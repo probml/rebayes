@@ -5,6 +5,7 @@ from functools import partial
 import jax
 from jax import jit, vmap
 from jax import numpy as jnp
+import jax.random as jr
 from jaxtyping import Array, Float
 import tensorflow_probability.substrates.jax as tfp
 
@@ -18,15 +19,16 @@ from rebayes.base import (
     FnStateToState,
     Rebayes,
 )
-from rebayes.extended_kalman_filter.ekf_core import (
-    _jacrev_2d,
-    _ekf_estimate_noise,
-    _full_covariance_dynamics_predict, 
-    _full_covariance_condition_on,
-    _diagonal_dynamics_predict,
-    _variational_diagonal_ekf_condition_on,  
-    _fully_decoupled_ekf_condition_on
-)
+import rebayes.extended_kalman_filter.ekf_core as core
+# from rebayes.extended_kalman_filter.ekf_core import (
+#     _jacrev_2d,
+#     _ekf_estimate_noise,
+#     _full_covariance_dynamics_predict, 
+#     _full_covariance_condition_on,
+#     _diagonal_dynamics_predict,
+#     _variational_diagonal_ekf_condition_on,  
+#     _fully_decoupled_ekf_condition_on
+# )
 
 
 tfd = tfp.distributions
@@ -34,15 +36,15 @@ MVN = tfd.MultivariateNormalTriL
 
 
 PREDICT_FNS = {
-    "fcekf": _full_covariance_dynamics_predict,
-    "fdekf": _diagonal_dynamics_predict,
-    "vdekf": _diagonal_dynamics_predict,
+    "fcekf": core._full_covariance_dynamics_predict,
+    "fdekf": core._diagonal_dynamics_predict,
+    "vdekf": core._diagonal_dynamics_predict,
 }
 
 UPDATE_FNS = {
-    "fcekf": _full_covariance_condition_on,
-    "fdekf": _fully_decoupled_ekf_condition_on,
-    "vdekf": _variational_diagonal_ekf_condition_on,
+    "fcekf": core._full_covariance_condition_on,
+    "fdekf": core._fully_decoupled_ekf_condition_on,
+    "vdekf": core._variational_diagonal_ekf_condition_on,
 }
 
 
@@ -84,28 +86,46 @@ class EKFParams(NamedTuple):
 class RebayesEKF(Rebayes):
     def __init__(
         self,
-        params: EKFParams,
-        method: str,
+        dynamics_weights_or_function: Union[float, FnStateToState],
+        dynamics_covariance: CovMat,
+        emission_mean_function: Union[FnStateToEmission, FnStateAndInputToEmission],
+        emission_cov_function: Union[FnStateToEmission2, FnStateAndInputToEmission2],
+        emission_dist: EmissionDistFn = \
+            lambda mean, cov: MVN(loc=mean, scale_tril=jnp.linalg.cholesky(cov)),
+        adaptive_emission_cov: bool = False,
+        dynamics_covariance_inflation_factor: float = 0.0,
+        method: str="fcekf",
     ):  
-        self.m0, self.P0, self.d, self.Q0, self.h, self.R, self.emission_dist, self.ada_var, self.alpha = params
+        super().__init__(dynamics_covariance, emission_mean_function, emission_cov_function, emission_dist)
+        self.dynamics_weights = dynamics_weights_or_function
+        self.adaptive_emission_cov = adaptive_emission_cov
+        self.dynamics_covariance_inflation_factor = dynamics_covariance_inflation_factor
+        
+        # self.m0, self.P0, self.d, self.Q0, self.h, self.R, self.emission_dist, self.ada_var, self.alpha = params
         self.method = method
         if method == "fcekf":
-            if isinstance(self.d, float):
-                gamma = self.d
-                self.d = lambda x: gamma * x
+            if isinstance(self.dynamics_weights, float):
+                gamma = self.dynamics_weights
+                self.dynamics_weights = lambda x: gamma * x
         elif method in ["fdekf", "vdekf"]:
-            assert isinstance(self.d, float) # Dynamics should be a scalar
+            assert isinstance(self.dynamics_weights, float) # Dynamics should be a scalar
         else:
             raise ValueError('unknown method ', method)        
         self.pred_fn, self.update_fn = PREDICT_FNS[method], UPDATE_FNS[method]
-        self.P0, self.Q0 = \
-            (_process_ekf_cov(cov, self.m0.shape[0], method) for cov in [self.P0, self.Q0])
         self.nobs, self.obs_noise_var = 0, 0.0
 
-    def init_bel(self, Xinit=None, Yinit=None):
+    def init_bel(
+        self,
+        initial_mean: Float[Array, "state_dim"],
+        initial_covariance: CovMat,
+        Xinit: Float[Array, "input_dim"]=None,
+        Yinit: Float[Array, "output_dim"]=None,
+    ) -> EKFBel:
+        P, *_ = initial_mean.shape
+        P0 = _process_ekf_cov(initial_covariance, P, self.method)
         bel = EKFBel(
-            mean = self.m0,
-            cov = self.P0,
+            mean = initial_mean,
+            cov = P0,
             nobs = self.nobs,
             obs_noise_var = self.obs_noise_var,
         )
@@ -113,11 +133,46 @@ class RebayesEKF(Rebayes):
             bel, _ = self.scan(Xinit, Yinit, bel=bel)
             
         return bel
-       
+
     @partial(jit, static_argnums=(0,))
-    def predict_state(self, bel):
+    def predict_obs(
+        self, 
+        bel: EKFBel, 
+        x: Float[Array, "input_dim"],
+    ) -> Float[Array, "output_dim"]:
+        m = bel.mean
+        m_Y = lambda z: self.emission_mean_function(z, x)
+        y_pred = jnp.atleast_1d(m_Y(m))
+        
+        return y_pred
+    
+    @partial(jit, static_argnums=(0,))
+    def predict_obs_cov(
+        self, 
+        bel: EKFBel,
+        x: Float[Array, "input_dim"],
+    ) -> Float[Array, "output_dim output_dim"]:
         m, P = bel.mean, bel.cov
-        m_pred, P_pred = self.pred_fn(m, P, self.d, self.Q0, self.alpha)    
+        m_Y = lambda z: self.emission_mean_function(z, x)
+        H =  core._jacrev_2d(m_Y, m)
+        if self.method == 'fcekf':
+            V_epi = H @ P @ H.T
+        else:
+            V_epi = (P * H) @ H.T
+        R = self.obs_cov(bel, x)
+        P_obs = V_epi + R
+        
+        return P_obs
+    
+    @partial(jit, static_argnums=(0,))
+    def predict_state(
+        self, 
+        bel: EKFBel,
+    ) -> EKFBel:
+        m, P = bel.mean, bel.cov
+        dynamics_covariance = _process_ekf_cov(self.dynamics_covariance, m.shape[0], self.method)
+        m_pred, P_pred = self.pred_fn(m, P, self.dynamics_weights, dynamics_covariance, 
+                                      self.dynamics_covariance_inflation_factor)
         bel_pred = bel.replace(
             mean = m_pred,
             cov = P_pred,
@@ -126,40 +181,19 @@ class RebayesEKF(Rebayes):
         return bel_pred
 
     @partial(jit, static_argnums=(0,))
-    def predict_obs(self, bel, u):
-        y_pred = jnp.atleast_1d(self.h(bel.mean, u))
-        
-        return y_pred
-    
-    @partial(jit, static_argnums=(0,))
-    def predict_obs_cov(self, bel, u):
-        m, P, obs_noise_var = bel.mean, bel.cov, bel.obs_noise_var
-        m_Y = lambda z: self.h(z, u)
-        Cov_Y = lambda z: self.R(z, u)
-        H =  _jacrev_2d(m_Y, m)
-        y_pred = jnp.atleast_1d(m_Y(m))
-        C, *_ = y_pred.shape
-        
-        if self.ada_var:
-            R = obs_noise_var * jnp.eye(C)
-        else:
-            R = jnp.atleast_2d(Cov_Y(m))
-        if self.method == 'fcekf':
-            V_epi = H @ P @ H.T
-        else:
-            V_epi = (P * H) @ H.T
-        P_obs = V_epi + R
-        
-        return P_obs
-    
-
-    @partial(jit, static_argnums=(0,))
-    def update_state(self, bel, u, y):
+    def update_state(
+        self, 
+        bel: EKFBel,
+        x: Float[Array, "input_dim"],
+        y: Float[Array, "output_dim"],
+    ) -> EKFBel:
         m, P, nobs, obs_noise_var = bel.mean, bel.cov, bel.nobs, bel.obs_noise_var
-        m_cond, P_cond = self.update_fn(m, P, self.h, self.R, u, y, 1, self.ada_var, obs_noise_var)
-        nobs_cond, obs_noise_var_cond = _ekf_estimate_noise(m_cond, self.h, u, y, 
-                                                            nobs, obs_noise_var,
-                                                            self.ada_var)
+        m_cond, P_cond = self.update_fn(m, P, self.emission_mean_function, 
+                                        self.emission_cov_function, x, y, 
+                                        1, self.adaptive_emission_cov, obs_noise_var)
+        nobs_cond, obs_noise_var_cond = \
+            core._ekf_estimate_noise(m_cond, self.emission_mean_function, x, y, 
+                                     nobs, obs_noise_var, self.adaptive_emission_cov)
         bel_cond = EKFBel(
             mean = m_cond,
             cov = P_cond,
@@ -169,19 +203,35 @@ class RebayesEKF(Rebayes):
         
         return bel_cond
     
-    @partial(jit, static_argnums=(0,4))
-    def pred_obs_mc(self, key, bel, x, shape=None):
-        """
-        Sample observations from the posterior predictive distribution.
-        """
-        shape = shape or (1,)
-        # Belief posterior predictive.
+    @partial(jit, static_argnums=(0,))
+    def sample_state(
+        self, 
+        bel: EKFBel,
+        key: Array, 
+        n_samples: int=100
+    ) -> Float[Array, "n_samples state_dim"]:
         bel = self.predict_state(bel)
+        shape = (n_samples,)
         if self.method != "fcekf":
             cov = jnp.diagflat(bel.cov)
         else:
             cov = bel.cov
-        params_sample = jax.random.multivariate_normal(key, bel.mean, cov, shape)
+        params_sample = jr.multivariate_normal(key, bel.mean, cov, shape)
+        
+        return params_sample
+    
+    @partial(jit, static_argnums=(0,4))
+    def pred_obs_mc(
+        self, 
+        bel: EKFBel,
+        key: Array,
+        x: Float[Array, "input_dim"],
+        n_samples: int=1
+    ) -> Float[Array, "n_samples output_dim"]:
+        """
+        Sample observations from the posterior predictive distribution.
+        """
+        params_sample = self.sample_state(bel, key, n_samples)
         yhat_samples = vmap(self.h, (0, None))(params_sample, x)
         
         return yhat_samples
