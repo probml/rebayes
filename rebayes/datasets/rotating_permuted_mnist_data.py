@@ -18,11 +18,15 @@ def rotate_mnist_dataset(X, angles):
     X_rotated = vmap(rmnist_data.rotate_mnist)(X, angles)
     
     return X_rotated
+    
 
-
-def generate_rotating_mnist_dataset(X, min_angle=0, max_angle=180, key=0):
+def generate_rotating_mnist_dataset(X=None, min_angle=0, max_angle=180, key=0, target_digit=None):
     if isinstance(key, int):
         key = jr.PRNGKey(key)
+    if X is None:
+        (X, y), _ = rmnist_data.load_mnist()
+        if target_digit is not None:
+            X = X[y == target_digit]
     random_angles = generate_random_angles(len(X), min_angle, max_angle, key)
     X_rotated = rotate_mnist_dataset(X, random_angles)
     
