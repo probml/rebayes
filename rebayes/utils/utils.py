@@ -24,8 +24,9 @@ class MLP(nn.Module):
 
     @nn.compact
     def __call__(self, x):
+        x = x.ravel()
         for feat in self.features[:-1]:
-            x = self.activation(nn.Dense(feat)(x.ravel()))
+            x = self.activation(nn.Dense(feat)(x))
         x = nn.Dense(self.features[-1])(x)
         return x
 
@@ -48,7 +49,10 @@ def get_mlp_flattened_params(model_dims, key=0, activation=nn.relu):
     # Define MLP model
     input_dim, features = model_dims[0], model_dims[1:]
     model = MLP(features, activation)
-    dummy_input = jnp.ones((input_dim,))
+    if isinstance(input_dim, int):
+        dummy_input = jnp.ones((input_dim,))
+    else:
+        dummy_input = jnp.ones((*input_dim,))
 
     # Initialize parameters using dummy input
     params = model.init(key, dummy_input)
