@@ -49,26 +49,6 @@ class LoFiBel:
     obs_noise_var: float = 1.0
 
 
-# @chex.dataclass
-# class LoFiParams:
-#     """Lightweight container for LOFI parameters.
-#     """
-#     initial_mean: Float[Array, "state_dim"]
-#     initial_covariance: CovMat
-#     dynamics_weights: CovMat
-#     dynamics_covariance: CovMat
-#     emission_mean_function: FnStateAndInputToEmission
-#     emission_cov_function: FnStateAndInputToEmission2
-#     emission_dist: EmissionDistFn = \
-#         lambda mean, cov: MVN(loc=mean, scale_tril=jnp.linalg.cholesky(cov))
-#     adaptive_emission_cov: bool=False
-#     dynamics_covariance_inflation_factor: float=0.0
-#     memory_size: int = 10
-#     steady_state: bool = False
-#     inflation: str = 'bayesian'
-#     use_svd: bool = True
-
-
 class RebayesLoFi(Rebayes):
     def __init__(
         self,
