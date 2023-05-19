@@ -89,8 +89,8 @@ def load_and_run_lofi(
     params = model.init(key, jnp.ones((1, dim_in)))
     params, _ = ravel_pytree(params)
 
-    dynamics_weights = 1 - np.exp(log_1m_dynamics_weights)
-    dynamics_covariance = np.exp(log_dynamics_covariance)
+    dynamics_weights = 1 - jnp.exp(log_1m_dynamics_weights)
+    dynamics_covariance = jnp.exp(log_dynamics_covariance)
     agent, _ = lofi.init_regression_agent(
         model, X_train, dynamics_weights, dynamics_covariance, emission_cov, memory_size
     )
@@ -121,18 +121,20 @@ def load_and_run_rsgd(
     callback=None
 ):
     X_train, Y_train = dataset_train
-    lr = np.exp(log_lr)
+    lr = jnp.exp(log_lr)
     tx = tx_fn(lr)
+    dim_in = X_train.shape[1]
+    params = model.init(key, jnp.ones((1, dim_in)))
 
     agent = rsgd.init_regression_agent(
-        key, log_likelihood, model, X_train, tx, memory_size,
+        log_likelihood, model, X_train, tx, memory_size,
         lossfn=lossfn,
-        prior_precision=1 / initial_covariance,
+        prior_precision=1 / initial_covariance, # TODO: deprecate
     )
 
     # callback = partial(callback, apply_fn=agent.apply_fn, agent=agent)
     bel, output = agent.scan(
-        X_train, Y_train, progress_bar=progress_bar, callback=callback
+        params, initial_covariance, X_train, Y_train, progress_bar=progress_bar, callback=callback
     )
     
     result = {
@@ -160,7 +162,6 @@ def eval_ll(apply_fn, bel, X, y, scale):
     yhat = apply_fn(bel.mean, X).ravel()
     y = y.ravel()
     ll = distrax.Normal(yhat, scale).log_prob(y).sum()
-    ll = -1e100 if np.isnan(ll) else ll
     return ll
 
 
@@ -227,6 +228,8 @@ if __name__ == "__main__":
         agent, bel = res["agent"], res["bel"]
         apply_fn = agent.emission_mean_function
         metric = metric_fn(apply_fn, bel)
+
+        metric = jnp.nan_to_num(metric, nan=-1e100)
         return metric
 
     def bbf_rsgd(
@@ -253,6 +256,8 @@ if __name__ == "__main__":
         agent, bel = res["agent"], res["bel"]
         apply_fn = agent.apply_fn
         metric = metric_fn(apply_fn, bel)
+
+        metric = jnp.nan_to_num(metric, nan=-1e100)
         return metric
 
     random_state = 2718
@@ -269,8 +274,10 @@ if __name__ == "__main__":
     memory_rsgd_list = [1, 5, 10]
     adam_optimisers = {}
     for memory_size in memory_rsgd_list:
+        f_part = partial(bbf_rsgd, tx_fn=optax.adam, memory_size=memory_size, metric_fn=metric_fn)
+        f_part = jax.jit(f_part)
         optimiser_rsgd_adam = BayesianOptimization(
-            f=partial(bbf_rsgd, tx_fn=optax.adam, memory_size=memory_size, metric_fn=metric_fn),
+            f=f_part,
             pbounds=bounds_rsgd,
             allow_duplicate_points=True,
             random_state=random_state,
@@ -279,8 +286,10 @@ if __name__ == "__main__":
 
     rsgd_optimisers = {}
     for memory_size in memory_rsgd_list:
+        f_part = partial(bbf_rsgd, tx_fn=optax.sgd, memory_size=memory_size, metric_fn=metric_fn)
+        f_part = jax.jit(f_part)
         optimiser_rsgd = BayesianOptimization(
-            f=partial(bbf_rsgd, tx_fn=optax.sgd, memory_size=memory_size, metric_fn=metric_fn),
+            f=f_part,
             pbounds=bounds_rsgd,
             allow_duplicate_points=True,
             random_state=random_state,
@@ -290,8 +299,10 @@ if __name__ == "__main__":
     memory_lofi = [5, 10]
     lofi_optimisers = {}
     for memory_size in memory_lofi:
+        f_part = partial(bbf_lofi, memory_size=memory_size, metric_fn=metric_fn)
+        f_part = jax.jit(f_part)
         optimiser_lofi = BayesianOptimization(
-            f=partial(bbf_lofi, memory_size=memory_size, metric_fn=metric_fn),
+            f=f_part,
             pbounds=bounds_lofi,
             allow_duplicate_points=True,
             random_state=random_state,
@@ -303,10 +314,6 @@ if __name__ == "__main__":
         "n_iter": 15,
     }
 
-    print("Training LoFi")
-    for memory_size, optimiser_lofi in lofi_optimisers.items():
-        print(f"Memory size: {memory_size}")
-        optimiser_lofi.maximize(**optimizer_eval_kwargs)
     print("Training RSGD")
     for memory_size, optimiser_rsgd in rsgd_optimisers.items():
         print(f"Memory size: {memory_size}")
@@ -315,3 +322,7 @@ if __name__ == "__main__":
     for memory_size, optimiser_rsgd_adam in adam_optimisers.items():
         print(f"Memory size: {memory_size}")
         optimiser_rsgd_adam.maximize(**optimizer_eval_kwargs)
+    print("Training LoFi")
+    for memory_size, optimiser_lofi in lofi_optimisers.items():
+        print(f"Memory size: {memory_size}")
+        optimiser_lofi.maximize(**optimizer_eval_kwargs)
