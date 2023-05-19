@@ -29,6 +29,25 @@ class MLP(nn.Module):
             x = self.activation(nn.Dense(feat)(x))
         x = nn.Dense(self.features[-1])(x)
         return x
+    
+    
+def scaling_factor(model_dims):
+    """This is the factor that is used to scale the
+    standardized parameters back into the original space."""
+    features = jnp.array(model_dims)
+    biases = features[1:]
+    fan_ins = features[:-1]
+    num_kernels = features[:-1] * features[1:]
+    bias_fanin_kernels = zip(biases, fan_ins, num_kernels)
+    factors = []
+    for term in bias_fanin_kernels:
+        bias, fan_in, num_kernel = (x.item() for x in term)
+        factors.extend([1.0] * bias)
+        factors.extend([jnp.sqrt(1/fan_in)] * num_kernel)
+    factors = jnp.array(factors).ravel()
+
+    return factors
+    
 
 def get_mlp_flattened_params(model_dims, key=0, activation=nn.relu):
     """Generate MLP model, initialize it using dummy input, and
@@ -57,14 +76,15 @@ def get_mlp_flattened_params(model_dims, key=0, activation=nn.relu):
     # Initialize parameters using dummy input
     params = model.init(key, dummy_input)
     flat_params, unflatten_fn = ravel_pytree(params)
-
+    scaling = scaling_factor(model_dims)
+    flat_params = flat_params / scaling
+    rec_fn = lambda x: unflatten_fn(x * scaling)
+    
     # Define apply function
-    def apply(flat_params, x, model, unflatten_fn):
-        return model.apply(unflatten_fn(flat_params), jnp.atleast_1d(x))
+    def apply_fn(flat_params, x):
+        return model.apply(rec_fn(flat_params), jnp.atleast_1d(x))
 
-    apply_fn = partial(apply, model=model, unflatten_fn=unflatten_fn)
-
-    return model, flat_params, unflatten_fn, apply_fn
+    return model, flat_params, rec_fn, apply_fn
 
 
 ### EKF
