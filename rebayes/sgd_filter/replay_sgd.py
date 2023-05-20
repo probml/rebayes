@@ -129,7 +129,8 @@ class FifoSGD(Rebayes):
         self.loss_grad = jax.value_and_grad(self.lossfn, 0)
 
 
-    def init_bel(self, params, _, X, y):
+    # TODO: implement buffer initialisation with X, y
+    def init_bel(self, params, _, X=None, y=None):
         if self.apply_fn is None:
             raise ValueError("Must provide apply_fn")
         bel_init = FifoTrainState.create(
