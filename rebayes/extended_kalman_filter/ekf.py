@@ -20,15 +20,6 @@ from rebayes.base import (
     Rebayes,
 )
 import rebayes.extended_kalman_filter.ekf_core as core
-# from rebayes.extended_kalman_filter.ekf_core import (
-#     _jacrev_2d,
-#     _ekf_estimate_noise,
-#     _full_covariance_dynamics_predict, 
-#     _full_covariance_condition_on,
-#     _diagonal_dynamics_predict,
-#     _variational_diagonal_ekf_condition_on,  
-#     _fully_decoupled_ekf_condition_on
-# )
 
 
 tfd = tfp.distributions
@@ -68,19 +59,6 @@ class EKFBel:
     cov: chex.Array
     nobs: int=None
     obs_noise_var: float=None
-
-
-class EKFParams(NamedTuple):
-    initial_mean: Float[Array, "state_dim"]
-    initial_covariance: CovMat
-    dynamics_weights_or_function: Union[float, FnStateToState]
-    dynamics_covariance: CovMat
-    emission_mean_function: Union[FnStateToEmission, FnStateAndInputToEmission]
-    emission_cov_function: Union[FnStateToEmission2, FnStateAndInputToEmission2]
-    emission_dist: EmissionDistFn = \
-        lambda mean, cov: MVN(loc=mean, scale_tril=jnp.linalg.cholesky(cov))
-    adaptive_emission_cov: bool = False
-    dynamics_covariance_inflation_factor: float = 0.0
 
 
 class RebayesEKF(Rebayes):
