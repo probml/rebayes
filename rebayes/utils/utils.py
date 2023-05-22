@@ -15,7 +15,7 @@ import numpy as np
 from dynamax.generalized_gaussian_ssm.models import ParamsGGSSM
 
 # constant is stddev of standard normal truncated to (-2, 2)
-TRUNCATED_STD = 1.0 / jnp.array(.87962566103423978) 
+TRUNCATED_STD = 20.0 / jnp.array(.87962566103423978)
 _jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
 
 ### MLP
