@@ -137,10 +137,23 @@ class RebayesLoFi(Rebayes):
 class RebayesLoFiSpherical(RebayesLoFi):
     def __init__(
         self,
-        *args,
-        **kwargs,
+        dynamics_weights: CovMat,
+        dynamics_covariance: CovMat,
+        emission_mean_function: Union[FnStateToEmission, FnStateAndInputToEmission],
+        emission_cov_function: Union[FnStateToEmission2, FnStateAndInputToEmission2],
+        emission_dist: EmissionDistFn = \
+            lambda mean, cov: MVN(loc=mean, scale_tril=jnp.linalg.cholesky(cov)),
+        adaptive_emission_cov: bool=False,
+        dynamics_covariance_inflation_factor: float=0.0,
+        memory_size: int = 10,
+        steady_state: bool = False,
+        inflation: str = 'bayesian',
+        use_svd: bool = True,
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(dynamics_weights, dynamics_covariance, emission_mean_function, 
+                         emission_cov_function, emission_dist, adaptive_emission_cov, 
+                         dynamics_covariance_inflation_factor, memory_size, steady_state, 
+                         inflation, use_svd)
 
     @partial(jit, static_argnums=(0,))
     def predict_state(
@@ -246,10 +259,23 @@ class RebayesLoFiSpherical(RebayesLoFi):
 class RebayesLoFiOrthogonal(RebayesLoFiSpherical):
     def __init__(
         self,
-        *args,
-        **kwargs,
+        dynamics_weights: CovMat,
+        dynamics_covariance: CovMat,
+        emission_mean_function: Union[FnStateToEmission, FnStateAndInputToEmission],
+        emission_cov_function: Union[FnStateToEmission2, FnStateAndInputToEmission2],
+        emission_dist: EmissionDistFn = \
+            lambda mean, cov: MVN(loc=mean, scale_tril=jnp.linalg.cholesky(cov)),
+        adaptive_emission_cov: bool=False,
+        dynamics_covariance_inflation_factor: float=0.0,
+        memory_size: int = 10,
+        steady_state: bool = False,
+        inflation: str = 'bayesian',
+        use_svd: bool = True,
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(dynamics_weights, dynamics_covariance, emission_mean_function, 
+                         emission_cov_function, emission_dist, adaptive_emission_cov, 
+                         dynamics_covariance_inflation_factor, memory_size, steady_state, 
+                         inflation, use_svd)
 
     @partial(jit, static_argnums=(0,))
     def update_state(
@@ -288,10 +314,23 @@ class RebayesLoFiOrthogonal(RebayesLoFiSpherical):
 class RebayesLoFiDiagonal(RebayesLoFi):
     def __init__(
         self,
-        *args,
-        **kwargs,
+        dynamics_weights: CovMat,
+        dynamics_covariance: CovMat,
+        emission_mean_function: Union[FnStateToEmission, FnStateAndInputToEmission],
+        emission_cov_function: Union[FnStateToEmission2, FnStateAndInputToEmission2],
+        emission_dist: EmissionDistFn = \
+            lambda mean, cov: MVN(loc=mean, scale_tril=jnp.linalg.cholesky(cov)),
+        adaptive_emission_cov: bool=False,
+        dynamics_covariance_inflation_factor: float=0.0,
+        memory_size: int = 10,
+        steady_state: bool = False,
+        inflation: str = 'bayesian',
+        use_svd: bool = True,
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(dynamics_weights, dynamics_covariance, emission_mean_function, 
+                         emission_cov_function, emission_dist, adaptive_emission_cov, 
+                         dynamics_covariance_inflation_factor, memory_size, steady_state, 
+                         inflation, use_svd)
 
     @partial(jit, static_argnums=(0,))
     def predict_state(
