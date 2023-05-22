@@ -24,6 +24,7 @@ import rebayes.extended_kalman_filter.ekf_core as core
 
 tfd = tfp.distributions
 MVN = tfd.MultivariateNormalTriL
+MVD = tfd.MultivariateNormalDiag
 
 
 PREDICT_FNS = {
@@ -79,7 +80,6 @@ class RebayesEKF(Rebayes):
         self.adaptive_emission_cov = adaptive_emission_cov
         self.dynamics_covariance_inflation_factor = dynamics_covariance_inflation_factor
         
-        # self.m0, self.P0, self.d, self.Q0, self.h, self.R, self.emission_dist, self.ada_var, self.alpha = params
         self.method = method
         if method == "fcekf":
             if isinstance(self.dynamics_weights, float):
@@ -155,7 +155,6 @@ class RebayesEKF(Rebayes):
             mean = m_pred,
             cov = P_pred,
         )
-        
         return bel_pred
 
     @partial(jit, static_argnums=(0,))
@@ -181,7 +180,7 @@ class RebayesEKF(Rebayes):
         
         return bel_cond
     
-    @partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,3))
     def sample_state(
         self, 
         bel: EKFBel,
@@ -191,14 +190,14 @@ class RebayesEKF(Rebayes):
         bel = self.predict_state(bel)
         shape = (n_samples,)
         if self.method != "fcekf":
-            cov = jnp.diagflat(bel.cov)
+            mvn = MVD(loc=bel.mean, scale_diag=jnp.sqrt(bel.cov))
         else:
-            cov = bel.cov
-        params_sample = jr.multivariate_normal(key, bel.mean, cov, shape)
+            mvn = MVN(loc=bel.mean, scale_tril=jnp.linalg.cholesky(bel.cov))
+        params_sample = mvn.sample(seed=key, sample_shape=shape)
         
         return params_sample
     
-    @partial(jit, static_argnums=(0,4))
+    @partial(jit, static_argnums=(0,4,))
     def pred_obs_mc(
         self, 
         bel: EKFBel,
@@ -210,6 +209,6 @@ class RebayesEKF(Rebayes):
         Sample observations from the posterior predictive distribution.
         """
         params_sample = self.sample_state(bel, key, n_samples)
-        yhat_samples = vmap(self.h, (0, None))(params_sample, x)
+        yhat_samples = vmap(self.emission_mean_function, (0, None))(params_sample, x)
         
         return yhat_samples
