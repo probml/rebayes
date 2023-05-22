@@ -19,10 +19,6 @@ from rebayes.sgd_filter import replay_sgd as rsgd
 tfd = tfp.distributions
 
 
-def apply(flat_params, x, model, unflatten_fn):
-    return model.apply(unflatten_fn(flat_params), x)
-
-
 def bbf_lofi(
     log_init_cov,
     log_dynamics_weights,
@@ -53,9 +49,14 @@ def bbf_lofi(
     initial_covariance = jnp.exp(log_init_cov).item()
     alpha = jnp.exp(log_alpha).item()
 
-    params = lofi.LoFiParams(
-        initial_mean=flat_params,
-        initial_covariance=initial_covariance,
+    if lofi_method == "diagonal":
+        lofi_estimator = lofi.RebayesLoFiDiagonal
+    elif lofi_method == "spherical":
+        lofi_estimator = lofi.RebayesLoFiSpherical
+    else:
+        raise ValueError("method must be either 'diagonal' or 'spherical'")
+    
+    estimator = lofi_estimator(
         dynamics_weights=dynamics_weights,
         dynamics_covariance=dynamics_covariance,
         emission_mean_function=emission_mean_fn,
@@ -65,24 +66,16 @@ def bbf_lofi(
         inflation=inflation,
         emission_dist=lambda mean, cov: tfd.Categorical(probs=mean),
     )
-
-    if lofi_method == "diagonal":
-        lofi_estimator = lofi.RebayesLoFiDiagonal
-    elif lofi_method == "spherical":
-        lofi_estimator = lofi.RebayesLoFiSpherical
-    else:
-        raise ValueError("method must be either 'diagonal' or 'spherical'")
-        
-    estimator = lofi_estimator(params)
     
     test_callback_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test, 
                             "apply_fn": apply_fn, "key": jr.PRNGKey(0), **kwargs}
 
     if callback_at_end:
-        bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
+        bel, _ = estimator.scan(flat_params, initial_covariance, X_train, y_train, progress_bar=False)
         metric = callback(bel, **test_callback_kwargs)
     else:
-        _, metric = estimator.scan(X_train, y_train, progress_bar=False, callback=callback, **test_callback_kwargs)
+        _, metric = estimator.scan(flat_params, initial_covariance, X_train, y_train, 
+                                   progress_bar=False, callback=callback, **test_callback_kwargs)
         metric = metric.mean()
         
     if jnp.isnan(metric) or jnp.isinf(metric):
@@ -184,27 +177,25 @@ def bbf_ekf(
     initial_covariance = jnp.exp(log_init_cov).item()
     alpha = jnp.exp(log_alpha).item()
 
-    params = ekf.EKFParams(
-        initial_mean=flat_params,
-        initial_covariance=initial_covariance,
+    estimator = ekf.RebayesEKF(
         dynamics_weights_or_function=dynamics_weights,
         dynamics_covariance=dynamics_covariance,
         emission_mean_function=emission_mean_fn,
         emission_cov_function=emission_cov_fn,
         dynamics_covariance_inflation_factor=alpha,
         emission_dist=lambda mean, cov: tfd.Categorical(probs=mean),
+        method=method,
     )
-
-    estimator = ekf.RebayesEKF(params, method=method)
 
     test_callback_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test, 
                             "apply_fn": apply_fn, "key": jr.PRNGKey(0), **kwargs}
     
     if callback_at_end:
-        bel, _ = estimator.scan(X_train, y_train, progress_bar=False)
+        bel, _ = estimator.scan(flat_params, initial_covariance, X_train, y_train, progress_bar=False)
         metric = callback(bel, **test_callback_kwargs)
     else:
-        _, metric = estimator.scan(X_train, y_train, progress_bar=False, callback=callback, **test_callback_kwargs)
+        _, metric = estimator.scan(flat_params, initial_covariance, X_train, y_train, 
+                                   progress_bar=False, callback=callback, **test_callback_kwargs)
         metric = metric.mean()
         
     if jnp.isnan(metric) or jnp.isinf(metric):
@@ -279,28 +270,23 @@ def bbf_rsgd(
 
 
 def create_optimizer(
-    model,
+    model_dict,
     bounds,
-    random_state,
     train,
     test,
-    emission_mean_fn,
-    emission_cov_fn,
     callback=None,
     method="fdekf",
+    random_state=0,
     verbose=2,
     callback_at_end=True,
     **kwargs
 ):
-    key = jax.random.PRNGKey(random_state)
     X_train, _ = train
     _, *n_features = X_train.shape
 
-    batch_init = jnp.ones((1, *n_features))
-    params_init = model.init(key, batch_init)
-    flat_params, recfn = ravel_pytree(params_init)
-
-    apply_fn = partial(apply, model=model, unflatten_fn=recfn)
+    flat_params, emission_mean_fn, emission_cov_fn, apply_fn = \
+        model_dict["flat_params"], model_dict["emission_mean_function"], \
+            model_dict["emission_cov_function"], model_dict["apply_fn"]
     
     if "sgd" not in method:
         if "ekf" in method:
@@ -376,20 +362,24 @@ def get_best_params(optimizer, method):
     return hparams
 
 
-def build_estimator(init_mean, apply_fn, hparams, emission_mean_fn, 
-                    emission_cov_fn, method, **kwargs):
+def build_estimator(model_dict, hparams, method, **kwargs):
     """
     _ is a dummy parameter for compatibility with lofi 
     """
+    init_mean, apply_fn, emission_mean_fn, emission_cov_fn = \
+        model_dict["flat_params"], model_dict["apply_fn"], \
+            model_dict["emission_mean_function"], model_dict["emission_cov_function"]
+    hparams = hparams.copy()
     if "ekf" in method:
-        params = ekf.EKFParams(
-            initial_mean=init_mean,
+        init_covariance = hparams.pop("initial_covariance")
+        estimator = ekf.RebayesEKF(
             emission_mean_function=emission_mean_fn,
             emission_cov_function=emission_cov_fn,
             emission_dist=lambda mean, cov: tfd.Categorical(probs=mean),
+            method=method,
             **hparams,
         )
-        estimator = ekf.RebayesEKF(params, method=method)
+        estimator = (estimator, init_mean, init_covariance)
     elif "replay_lofi" in method:
         params = replay_lofi.ReplayLoFiParams(
             initial_mean=init_mean,
@@ -410,15 +400,15 @@ def build_estimator(init_mean, apply_fn, hparams, emission_mean_fn,
         else:
             estimator = lofi.RebayesLoFiDiagonal
         kwargs.pop("lofi_method")
-        params = lofi.LoFiParams(
-            initial_mean=init_mean,
+        init_covariance = hparams.pop("initial_covariance")
+        estimator = estimator(
             emission_mean_function=emission_mean_fn,
             emission_cov_function=emission_cov_fn,
             emission_dist=lambda mean, cov: tfd.Categorical(probs=mean),
             **hparams,
             **kwargs,
         )
-        estimator = estimator(params)
+        estimator = (estimator, init_mean, init_covariance)
     elif "sgd" in method:
         if "optimizer" in kwargs:
             if kwargs["optimizer"] == "sgd":
