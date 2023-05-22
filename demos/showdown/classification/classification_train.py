@@ -20,6 +20,9 @@ from rebayes.datasets.rotating_permuted_mnist_data import (
     generate_rotating_mnist_dataset,
     rotate_mnist_dataset
 )
+from rebayes.utils.utils import (
+    get_mlp_flattened_params
+)
 from rebayes.low_rank_filter.lofi_core import _jacrev_2d
 
 
@@ -59,27 +62,29 @@ class MLP(nn.Module):
 def init_model(key=0, type='cnn', features=(400, 400, 10), classification=True):
     if isinstance(key, int):
         key = jr.PRNGKey(key)
-    
+    input_dim = [1, 28, 28, 1]
+    model_dim = [input_dim, *features]
     if type == 'cnn':
         if classification:
             model = CNN()
         else:
             model = CNN(output_dim=1)
+        params = model.init(key, jnp.ones(input_dim))['params']
+        flat_params, unflatten_fn = ravel_pytree(params)
+        apply_fn = lambda w, x: model.apply({'params': unflatten_fn(w)}, x).ravel()
+
+        emission_mean_function = apply_fn
     elif type == 'mlp':
-        model = MLP(features)
+        model, flat_params, _, apply_fn = get_mlp_flattened_params(model_dim, key)
     else:
         raise ValueError(f'Unknown model type: {type}')
     
-    params = model.init(key, jnp.ones([1, 28, 28, 1]))['params']
-    flat_params, unflatten_fn = ravel_pytree(params)
-    apply_fn = lambda w, x: model.apply({'params': unflatten_fn(w)}, x).ravel()
-    
-    emission_mean_function = apply_fn
     model_dict = {
         'model': model,
         'flat_params': flat_params,
         'apply_fn': apply_fn,
     }
+    
     if classification:
         if features[-1] == 1:
             # Binary classification
