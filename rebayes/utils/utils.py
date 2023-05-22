@@ -4,7 +4,7 @@ import optax
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-from jax import lax
+from jax import jit
 import flax.linen as nn
 from jax.flatten_util import ravel_pytree
 from jax.experimental import host_callback
@@ -14,6 +14,8 @@ import numpy as np
 
 from dynamax.generalized_gaussian_ssm.models import ParamsGGSSM
 
+# constant is stddev of standard normal truncated to (-2, 2)
+TRUNCATED_STD = 1.0 / jnp.array(.87962566103423978) 
 _jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
 
 ### MLP
@@ -43,7 +45,7 @@ def scaling_factor(model_dims):
     for term in bias_fanin_kernels:
         bias, fan_in, num_kernel = (x.item() for x in term)
         factors.extend([1.0] * bias)
-        factors.extend([jnp.sqrt(1/fan_in)] * num_kernel)
+        factors.extend([TRUNCATED_STD/jnp.sqrt(fan_in)] * num_kernel)
     factors = jnp.array(factors).ravel()
 
     return factors
@@ -72,6 +74,7 @@ def get_mlp_flattened_params(model_dims, key=0, activation=nn.relu):
         dummy_input = jnp.ones((input_dim,))
     else:
         dummy_input = jnp.ones((*input_dim,))
+        model_dims = [np.prod(input_dim)] + model_dims[1:]
 
     # Initialize parameters using dummy input
     params = model.init(key, dummy_input)
@@ -81,6 +84,7 @@ def get_mlp_flattened_params(model_dims, key=0, activation=nn.relu):
     rec_fn = lambda x: unflatten_fn(x * scaling)
     
     # Define apply function
+    @jit
     def apply_fn(flat_params, x):
         return model.apply(rec_fn(flat_params), jnp.atleast_1d(x))
 
