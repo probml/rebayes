@@ -160,10 +160,8 @@ def eval_nlpd_mc_eval_callback(bel, pred_obs, t, *args, evaluate_fn, nan_val=-1e
         eval = evaluate_fn(bel.mean, apply_fn, X, y)
         if not isinstance(eval, dict):
             eval = {"eval": eval}
-    nlpd = agent.nlpd_mc(key, bel, X, y, glm_predictive=False, clf=True).mean()
-    nlpd_glm = agent.nlpd_mc(key, bel, X, y, glm_predictive=True, clf=True).mean()
+    nlpd = agent.nlpd_mc(bel, key, X, y).mean()
     eval["nlpd"] = nlpd
-    eval["nlpd_glm"] = nlpd_glm
     eval = {k: jnp.where(jnp.isnan(v), nan_val, v) for k, v in eval.items()}
     
     return eval
@@ -173,7 +171,7 @@ def eval_lpd_mc_callback(bel, pred_obs, t, *args, nan_val=-1e8, **kwargs):
     agent, X, y, apply_fn = \
         kwargs["agent"], kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
     key = jax.random.fold_in(kwargs["key"], t)
-    nlpd = agent.nlpd_mc(key, bel, X, y).mean()
+    nlpd = agent.nlpd_mc(bel, key, X, y).mean()
     lpd = jnp.where(jnp.isnan(nlpd), nan_val, -nlpd)
     
     return lpd
