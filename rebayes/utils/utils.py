@@ -15,7 +15,7 @@ import numpy as np
 from dynamax.generalized_gaussian_ssm.models import ParamsGGSSM
 
 # constant is stddev of standard normal truncated to (-2, 2)
-TRUNCATED_STD = 20.0 / jnp.array(.87962566103423978)
+TRUNCATED_STD = 20.0 / np.array(.87962566103423978)
 _jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
 
 ### MLP
@@ -31,12 +31,11 @@ class MLP(nn.Module):
             x = self.activation(nn.Dense(feat)(x))
         x = nn.Dense(self.features[-1])(x)
         return x
-    
-    
+
 def scaling_factor(model_dims):
     """This is the factor that is used to scale the
     standardized parameters back into the original space."""
-    features = jnp.array(model_dims)
+    features = np.array(model_dims)
     biases = features[1:]
     fan_ins = features[:-1]
     num_kernels = features[:-1] * features[1:]
@@ -45,11 +44,10 @@ def scaling_factor(model_dims):
     for term in bias_fanin_kernels:
         bias, fan_in, num_kernel = (x.item() for x in term)
         factors.extend([1.0] * bias)
-        factors.extend([TRUNCATED_STD/jnp.sqrt(fan_in)] * num_kernel)
-    factors = jnp.array(factors).ravel()
+        factors.extend([TRUNCATED_STD/np.sqrt(fan_in)] * num_kernel)
+    factors = np.array(factors).ravel()
 
-    return factors
-    
+    return factors    
 
 def get_mlp_flattened_params(model_dims, key=0, activation=nn.relu):
     """Generate MLP model, initialize it using dummy input, and
