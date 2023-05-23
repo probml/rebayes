@@ -178,3 +178,8 @@ def eval_runs(key, num_runs_pc, agent, model, train, test, eval_callback, test_k
     outputs = evalf(keys)
     outputs = jax.tree_map(lambda x: x.reshape(num_sims, -1), outputs)
     return outputs
+
+
+def symmetrize_matrix(A):
+    """Symmetrize a matrix."""
+    return (A + A.T) / 2
