@@ -59,7 +59,7 @@ class MLP(nn.Module):
         return x
     
 
-def init_model(key=0, type='cnn', features=(400, 400, 10), classification=True):
+def init_model(key=0, type='cnn', features=(400, 400, 10), classification=True, rescale=True):
     if isinstance(key, int):
         key = jr.PRNGKey(key)
     input_dim = [1, 28, 28, 1]
@@ -75,7 +75,14 @@ def init_model(key=0, type='cnn', features=(400, 400, 10), classification=True):
 
         emission_mean_function = apply_fn
     elif type == 'mlp':
-        model, flat_params, _, apply_fn = get_mlp_flattened_params(model_dim, key)
+        if rescale:
+            model, flat_params, _, apply_fn = get_mlp_flattened_params(model_dim, key)
+        else:
+            model = MLP(features)
+            params = model.init(key, jnp.ones(input_dim))['params']
+            flat_params, unflatten_fn = ravel_pytree(params)
+            apply_fn = lambda w, x: model.apply({'params': unflatten_fn(w)}, x).ravel()
+            
     else:
         raise ValueError(f'Unknown model type: {type}')
     
@@ -166,7 +173,7 @@ def eval_lpd_mc_callback(bel, pred_obs, t, *args, nan_val=-1e8, glm_predictive=F
     agent, X, y, apply_fn = \
         kwargs["agent"], kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
     key = jax.random.fold_in(kwargs["key"], t)
-    nlpd = agent.nlpd_mc(key, bel, X, y, glm_predictive=glm_predictive, clf=True).mean()
+    nlpd = agent.nlpd_mc(key, bel, X, y, glm_predictive=glm_predictive).mean()
     lpd = jnp.where(jnp.isnan(nlpd), nan_val, -nlpd)
     
     return lpd
