@@ -25,17 +25,15 @@ def bbf_lofi(
     log_dynamics_cov,
     log_alpha,
     # Specify before running
-    emission_mean_fn,
-    emission_cov_fn,
+    init_fn,
     train,
     test,
-    flat_params,
     callback,
-    apply_fn,
     memory_size,
     inflation = "hybrid",
     lofi_method = "diagonal",
     callback_at_end=True,
+    n_seeds=5,
     **kwargs,
 ):
     """
@@ -56,6 +54,10 @@ def bbf_lofi(
     else:
         raise ValueError("method must be either 'diagonal' or 'spherical'")
     
+    model_dict = init_fn(key=0)
+    emission_mean_fn, emission_cov_fn, apply_fn = \
+        model_dict["emission_mean_function"], model_dict["emission_cov_function"], model_dict["apply_fn"]
+    
     estimator = lofi_estimator(
         dynamics_weights=dynamics_weights,
         dynamics_covariance=dynamics_covariance,
@@ -70,18 +72,24 @@ def bbf_lofi(
     test_callback_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test, 
                             "apply_fn": apply_fn, "key": jr.PRNGKey(0), **kwargs}
 
-    if callback_at_end:
-        bel, _ = estimator.scan(flat_params, initial_covariance, X_train, y_train, progress_bar=False)
-        metric = callback(bel, **test_callback_kwargs)
-    else:
-        _, metric = estimator.scan(flat_params, initial_covariance, X_train, y_train, 
-                                   progress_bar=False, callback=callback, **test_callback_kwargs)
-        metric = metric.mean()
+    result = []
+    for i in range(n_seeds):
+        model_dict = init_fn(key=i)
+        flat_params = model_dict["flat_params"]
+        if callback_at_end:
+            bel, _ = estimator.scan(flat_params, initial_covariance, X_train, y_train, progress_bar=False)
+            metric = callback(bel, **test_callback_kwargs)
+        else:
+            _, metric = estimator.scan(flat_params, initial_covariance, X_train, y_train, 
+                                       progress_bar=False, callback=callback, **test_callback_kwargs)
+            metric = metric.mean()
+        result.append(metric)
+    result = jnp.array(result).mean()
+    
+    if jnp.isnan(result) or jnp.isinf(result):
+        result = -1e8
         
-    if jnp.isnan(metric) or jnp.isinf(metric):
-        metric = -1e8
-        
-    return metric
+    return result
 
 
 def bbf_replay_lofi(
@@ -155,15 +163,13 @@ def bbf_ekf(
     log_dynamics_cov,
     log_alpha,
     # Specify before running
-    emission_mean_fn,
-    emission_cov_fn,
+    init_fn,
     train,
     test,
-    flat_params,
     callback,
-    apply_fn,
     method="fdekf",
     callback_at_end=True,
+    n_seeds=5,
     **kwargs,
 ):
     """
@@ -177,6 +183,10 @@ def bbf_ekf(
     initial_covariance = jnp.exp(log_init_cov).item()
     alpha = jnp.exp(log_alpha).item()
 
+    model_dict = init_fn(key=0)
+    emission_mean_fn, emission_cov_fn, apply_fn = \
+        model_dict["emission_mean_function"], model_dict["emission_cov_function"], model_dict["apply_fn"]
+    
     estimator = ekf.RebayesEKF(
         dynamics_weights_or_function=dynamics_weights,
         dynamics_covariance=dynamics_covariance,
@@ -190,18 +200,24 @@ def bbf_ekf(
     test_callback_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test, 
                             "apply_fn": apply_fn, "key": jr.PRNGKey(0), **kwargs}
     
-    if callback_at_end:
-        bel, _ = estimator.scan(flat_params, initial_covariance, X_train, y_train, progress_bar=False)
-        metric = callback(bel, **test_callback_kwargs)
-    else:
-        _, metric = estimator.scan(flat_params, initial_covariance, X_train, y_train, 
-                                   progress_bar=False, callback=callback, **test_callback_kwargs)
-        metric = metric.mean()
+    result = []
+    for i in range(n_seeds):
+        model_dict = init_fn(key=i)
+        flat_params = model_dict["flat_params"]
+        if callback_at_end:
+            bel, _ = estimator.scan(flat_params, initial_covariance, X_train, y_train, progress_bar=False)
+            metric = callback(bel, **test_callback_kwargs)
+        else:
+            _, metric = estimator.scan(flat_params, initial_covariance, X_train, y_train, 
+                                       progress_bar=False, callback=callback, **test_callback_kwargs)
+            metric = metric.mean()
+        result.append(metric)
+    result = jnp.array(result).mean()
         
-    if jnp.isnan(metric) or jnp.isinf(metric):
-        metric = -1e8
+    if jnp.isnan(result) or jnp.isinf(result):
+        result = -1e8
 
-    return metric
+    return result
 
 
 def bbf_rsgd(
@@ -270,7 +286,7 @@ def bbf_rsgd(
 
 
 def create_optimizer(
-    model_dict,
+    init_fn,
     bounds,
     train,
     test,
@@ -279,14 +295,12 @@ def create_optimizer(
     random_state=0,
     verbose=2,
     callback_at_end=True,
+    n_seeds=5,
     **kwargs
 ):
+    """init_fn(key) is a function of random jax key"""
     X_train, _ = train
     _, *n_features = X_train.shape
-
-    flat_params, emission_mean_fn, emission_cov_fn, apply_fn = \
-        model_dict["flat_params"], model_dict["emission_mean_function"], \
-            model_dict["emission_cov_function"], model_dict["apply_fn"]
     
     if "sgd" not in method:
         if "ekf" in method:
@@ -298,14 +312,12 @@ def create_optimizer(
 
         bbf_partial = partial(
             bbf,
-            emission_mean_fn=emission_mean_fn,
-            emission_cov_fn=emission_cov_fn,
+            init_fn=init_fn,
             train=train,
             test=test,
-            flat_params=flat_params,
             callback=callback,
-            apply_fn=apply_fn,
             callback_at_end=callback_at_end,
+            n_seeds=n_seeds,
             **kwargs
         )
         if "ekf" in method:
@@ -314,11 +326,10 @@ def create_optimizer(
     else:
         bbf_partial = partial(
             bbf_rsgd,
+            init_fn=init_fn,
             train=train,
             test=test,
-            flat_params=flat_params,
             callback=callback,
-            apply_fn=apply_fn,
             callback_at_end=callback_at_end,
             **kwargs # Must include loss_fn, buffer_size, dim_output if method is rsgd
         )
@@ -331,7 +342,7 @@ def create_optimizer(
         allow_duplicate_points=True,
     )
 
-    return optimizer, apply_fn, n_features
+    return optimizer
 
 
 def get_best_params(optimizer, method):
