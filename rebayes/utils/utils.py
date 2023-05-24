@@ -49,7 +49,8 @@ def scaling_factor(model_dims):
 
     return factors    
 
-def get_mlp_flattened_params(model_dims, key=0, activation=nn.relu):
+def get_mlp_flattened_params(model_dims, key=0, activation=nn.relu, rescale=False, 
+                             zero_ll=False):
     """Generate MLP model, initialize it using dummy input, and
     return the model, its flattened initial parameters, function
     to unflatten parameters, and apply function for the model.
@@ -77,7 +78,13 @@ def get_mlp_flattened_params(model_dims, key=0, activation=nn.relu):
     # Initialize parameters using dummy input
     params = model.init(key, dummy_input)
     flat_params, unflatten_fn = ravel_pytree(params)
-    scaling = scaling_factor(model_dims)
+    
+    if zero_ll:
+        # Zero out the final layer weights
+        final_layer_n_params = features[-1] * features[-2] if len(features) > 1 else features[-1]
+        flat_params = flat_params.at[-final_layer_n_params:].set(0.0)
+    
+    scaling = scaling_factor(model_dims, zero_ll) if rescale else 1.0
     flat_params = flat_params / scaling
     rec_fn = lambda x: unflatten_fn(x * scaling)
     

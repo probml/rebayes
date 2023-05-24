@@ -59,7 +59,7 @@ class MLP(nn.Module):
         return x
     
 
-def init_model(key=0, type='cnn', features=(400, 400, 10), classification=True, rescale=True):
+def init_model(key=0, type='cnn', features=(400, 400, 10), classification=True, rescale=True, zero_ll=False):
     if isinstance(key, int):
         key = jr.PRNGKey(key)
     input_dim = [1, 28, 28, 1]
@@ -75,13 +75,8 @@ def init_model(key=0, type='cnn', features=(400, 400, 10), classification=True, 
 
         emission_mean_function = apply_fn
     elif type == 'mlp':
-        if rescale:
-            model, flat_params, _, apply_fn = get_mlp_flattened_params(model_dim, key)
-        else:
-            model = MLP(features)
-            params = model.init(key, jnp.ones(input_dim))['params']
-            flat_params, unflatten_fn = ravel_pytree(params)
-            apply_fn = lambda w, x: model.apply({'params': unflatten_fn(w)}, x).ravel()
+        model, flat_params, _, apply_fn = \
+            get_mlp_flattened_params(model_dim, key, rescale=rescale, zero_ll=zero_ll)
             
     else:
         raise ValueError(f'Unknown model type: {type}')
