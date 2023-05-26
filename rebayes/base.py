@@ -131,11 +131,12 @@ class Rebayes(ABC):
         bel: Belief,
         key: Float[Array, "key_dim"],
         n_samples: int = 100,
+        temperature: float = 1.0,
     ) -> Float[Array, "n_samples state_dim"]:
         """Return samples from p(z(t) | D(1:t-1))"""
         ...
     
-    @partial(jax.jit, static_argnames=("self", "n_samples", "glm_callback"))
+    @partial(jax.jit, static_argnames=("self", "n_samples", "temperature", "glm_callback"))
     def nlpd_mc(
         self,
         bel: Belief,
@@ -143,6 +144,7 @@ class Rebayes(ABC):
         x: Float[Array, "ntime input_dim"],
         y: Float[Array, "ntime emission_dim"],
         n_samples: int=30,
+        temperature: float=1.0,
         glm_callback=None,
     ) -> float:
         """
@@ -152,7 +154,7 @@ class Rebayes(ABC):
         x = jnp.atleast_2d(x)
         y = jnp.atleast_1d(y)
         bel = self.predict_state(bel)
-        params_sample = self.sample_state(bel, key, n_samples)
+        params_sample = self.sample_state(bel, key, n_samples, temperature)
         mean_fn = self.emission_mean_function if glm_callback is None else glm_callback
         
         def llfn(params, x, y):
