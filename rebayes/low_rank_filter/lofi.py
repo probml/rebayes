@@ -243,13 +243,14 @@ class RebayesLoFiSpherical(RebayesLoFi):
         self,
         bel: LoFiBel, 
         key: Array, 
-        n_samples: int=100
+        n_samples: int=100,
+        temperature: float = 1.0,
     ) -> Float[Array, "n_samples state_dim"]:
         bel = self.predict_state(bel)
         P, *_ = bel.mean.shape
         diag = bel.eta * jnp.ones((P,))
         shape = (n_samples,)
-        params_sample = sample_dlr(key, bel.basis, diag, shape) + bel.mean
+        params_sample = sample_dlr(key, bel.basis, diag, temperature, shape) + bel.mean
         
         return params_sample
 
@@ -423,11 +424,12 @@ class RebayesLoFiDiagonal(RebayesLoFi):
         self, 
         bel: LoFiBel, 
         key: Array, 
-        n_samples: int=100
+        n_samples: int=100,
+        temperature: float = 1.0,
     ) -> Float[Array, "n_samples state_dim"]:
         bel = self.predict_state(bel)
         shape = (n_samples,)
-        params_sample = sample_dlr(key, bel.basis, bel.Ups.ravel(), shape) + bel.mean
+        params_sample = sample_dlr(key, bel.basis, bel.Ups.ravel(), temperature, shape) + bel.mean
         
         return params_sample
 
@@ -438,11 +440,12 @@ class RebayesLoFiDiagonal(RebayesLoFi):
         key: Array, 
         x: Float[Array, "input_dim"],
         n_samples: int=1,
+        temperature: float = 1.0,
     ) -> Float[Array, "n_samples output_dim"]:
         """
         Sample observations from the posterior predictive distribution.
         """
-        params_sample = self.sample_state(bel, key, n_samples)
+        params_sample = self.sample_state(bel, key, n_samples, temperature)
         yhat_samples = jax.vmap(self.emission_mean_function, (0, None))(params_sample, x)
         
         return yhat_samples
