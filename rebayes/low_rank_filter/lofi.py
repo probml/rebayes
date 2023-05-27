@@ -476,7 +476,7 @@ def init_regression_agent(
         dynamics_covariance_inflation_factor=0.0,
         memory_size=memory_size,
         steady_state=False,
-        emission_dist=tfd.Normal
+        emission_dist=lambda mean, cov: tfd.Normal(loc=mean, scale=jnp.sqrt(cov))
     )
 
     return agent, recfn
