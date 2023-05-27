@@ -167,7 +167,7 @@ class Rebayes(ABC):
 
         # Compute vectorised nlpd
         lpd = vmap(vmap(llfn, (None, 0, 0)), (0, None, None))(params_sample, x, y)
-        nlpd = -lpd.mean()
+        nlpd = -lpd
 
         return nlpd
 
