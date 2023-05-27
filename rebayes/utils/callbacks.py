@@ -89,18 +89,16 @@ def cb_reg_mc(bel, pred_obs, t, X, y, bel_pred, apply_fn, steps=10, **kwargs):
     scale = kwargs["scale"]
     X_test, y_test = kwargs["X_test"], kwargs["y_test"]
     key = jax.random.fold_in(kwargs["key"], t)
-
     slice_ix = jnp.arange(0, steps) + t - steps // 2
-
     mean_test = apply_fn(bel_pred.mean, X_test).squeeze()
     nll = distrax.Normal(pred_obs, scale).log_prob(y.ravel())
     nll_test = -distrax.Normal(mean_test, scale).log_prob(y_test.ravel())
-    nll_window = nll_test[slice_ix].sum()
-    nll_test = nll_test.sum()
+    nll_window = nll_test[slice_ix].mean()
+    nll_test = nll_test.mean()
 
-    nlpd = agent.nlpd_mc(bel_pred, key, X, y).sum()
-    nlpd_test = agent.nlpd_mc(bel_pred, key, X_test, y_test[:, None]).sum()
-    nlpd_window = agent.nlpd_mc(bel_pred, key, X_test[slice_ix], y_test[slice_ix][:, None]).sum()
+    nlpd = agent.nlpd_mc(bel_pred, key, X, y).mean()
+    nlpd_test = agent.nlpd_mc(bel_pred, key, X_test, y_test[:, None]).mean()
+    nlpd_window = agent.nlpd_mc(bel_pred, key, X_test[slice_ix], y_test[slice_ix][:, None]).mean()
 
     res = cb_reg_sup(
         bel, pred_obs, t, X, y, bel_pred, apply_fn, **kwargs
