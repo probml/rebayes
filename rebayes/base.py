@@ -178,7 +178,7 @@ class Rebayes(ABC):
         X: Float[Array, "ntime input_dim"],
         Y: Float[Array, "ntime emission_dim"],
         callback=None,
-        bel=None, # TODO: I don't think we need bel as an argument
+        bel=None,
         progress_bar=False,
         debug=False,
         Xinit=None,
@@ -221,7 +221,7 @@ class Rebayes(ABC):
         Y: Float[Array, "batch_size emission_dim"],
         progress_bar=False
     ) -> Tuple[Belief, Any]:
-        bel, _ = self.scan(X, Y, bel=bel, progress_bar=progress_bar)
+        bel, _ = self.scan(None, None, X, Y, bel=bel, progress_bar=progress_bar)
         return bel
     
     def update_state_batch_with_callback(
@@ -236,12 +236,15 @@ class Rebayes(ABC):
     ) -> Tuple[Belief, Any]:
         if callback is not None:
             callback = partial(callback, i=i)
-        bel, outputs = self.scan(X, Y, callback=callback, bel=bel, progress_bar=progress_bar, **kwargs)
+        bel, outputs = self.scan(None, None, X, Y, callback=callback, bel=bel, 
+                                 progress_bar=progress_bar, **kwargs)
         return bel, outputs
     
     def scan_dataloader(
         self,
-        data_loader,
+        initial_mean: Float[Array, "state_dim"],
+        initial_covariance: CovMat,
+        data_loader: Any,
         callback=None,
         bel=None,
         callback_at_end=True,
@@ -249,8 +252,8 @@ class Rebayes(ABC):
         **kwargs,
     ) -> Tuple[Belief, Any]:
         if bel is None:
-            bel = self.init_bel()
-        outputs = []    
+            bel = self.init_bel(initial_mean, initial_covariance)
+        outputs = []
         for i, batch in enumerate(data_loader):
             bel_pre_update = bel
             Xtr, Ytr = batch[0], batch[1]
