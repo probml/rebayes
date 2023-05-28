@@ -13,11 +13,11 @@ import jax.numpy as jnp
 import jax.random as jr
 import optax
 from jax_tqdm import scan_tqdm
+import numpy as np
 from tqdm import trange
 import jax_dataloader.core as jdl
 
 from rebayes.datasets.rotating_permuted_mnist_data import (
-    generate_rotating_mnist_dataset,
     rotate_mnist_dataset
 )
 from rebayes.utils.utils import (
@@ -25,6 +25,7 @@ from rebayes.utils.utils import (
 )
 from rebayes.low_rank_filter.lofi_core import _jacrev_2d
 
+TRUNCATED_STD = 20.0 / np.array(.87962566103423978)
 
 # ------------------------------------------------------------------------------
 # NN Models
@@ -59,7 +60,8 @@ class MLP(nn.Module):
         return x
     
 
-def init_model(key=0, type='cnn', features=(400, 400, 10), classification=True, rescale=True, zero_ll=False):
+def init_model(key=0, type='cnn', features=(400, 400, 10), classification=True, 
+               rescale=False, zero_ll=False, bias_weight_cov_ratio=TRUNCATED_STD):
     if isinstance(key, int):
         key = jr.PRNGKey(key)
     input_dim = [1, 28, 28, 1]
@@ -76,7 +78,8 @@ def init_model(key=0, type='cnn', features=(400, 400, 10), classification=True, 
         emission_mean_function = apply_fn
     elif type == 'mlp':
         model, flat_params, _, apply_fn = \
-            get_mlp_flattened_params(model_dim, key, rescale=rescale, zero_ll=zero_ll)
+            get_mlp_flattened_params(model_dim, key, rescale=rescale, zero_ll=zero_ll,
+                                     bias_weight_cov_ratio=bias_weight_cov_ratio)
             
     else:
         raise ValueError(f'Unknown model type: {type}')
@@ -144,7 +147,8 @@ def eval_callback(bel, *args, evaluate_fn, nan_val=-1e8, **kwargs):
     return eval
 
 
-def eval_nlpd_mc_eval_callback(bel, pred_obs, t, *args, evaluate_fn, nan_val=-1e8, **kwargs):
+def eval_nlpd_mc_eval_callback(bel, pred_obs, t, *args, evaluate_fn, nan_val=-1e8,
+                               n_samples=30, temperature=1.0, **kwargs):
     agent, X, y, apply_fn = \
         kwargs["agent"], kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
     key = jax.random.fold_in(kwargs["key"], t)
@@ -155,25 +159,28 @@ def eval_nlpd_mc_eval_callback(bel, pred_obs, t, *args, evaluate_fn, nan_val=-1e
         eval = evaluate_fn(bel.mean, apply_fn, X, y)
         if not isinstance(eval, dict):
             eval = {"eval": eval}
-    nlpd = agent.nlpd_mc(bel, key, X, y).mean()
+    nlpd = agent.nlpd_mc(bel, key, X, y, n_samples=n_samples, temperature=temperature).mean()
     eval["nlpd"] = nlpd
     eval = {k: jnp.where(jnp.isnan(v), nan_val, v) for k, v in eval.items()}
     
     return eval
 
 
-def eval_lpd_mc_callback(bel, pred_obs, t, *args, nan_val=-1e8, **kwargs):
+def eval_lpd_mc_callback(bel, pred_obs, t, *args, nan_val=-1e8, n_samples=30,
+                         temperature=1.0, **kwargs):
     agent, X, y, apply_fn = \
         kwargs["agent"], kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
     key = jax.random.fold_in(kwargs["key"], t)
-    nlpd = agent.nlpd_mc(bel, key, X, y).mean()
+    nlpd = agent.nlpd_mc(bel, key, X, y, n_samples=n_samples, temperature=temperature).mean()
     lpd = jnp.where(jnp.isnan(nlpd), nan_val, -nlpd)
     
     return lpd
 
 
-def eval_nlpd_mc_callback(bel, pred_obs, t, *args, nan_val=-1e8, glm_predictive=False, **kwargs):
-    lpd = eval_lpd_mc_callback(bel, pred_obs, t, *args, nan_val=nan_val, glm_predictive=glm_predictive, **kwargs)
+def eval_nlpd_mc_callback(bel, pred_obs, t, *args, nan_val=-1e8, n_samples=30,
+                          temperature=1.0, **kwargs):
+    lpd = eval_lpd_mc_callback(bel, pred_obs, t, *args, nan_val=nan_val, n_samples=n_samples,
+                               temperature=temperature, **kwargs)
     
     return -lpd
 
@@ -185,10 +192,10 @@ def osa_eval_callback(bel, y_pred, t, X, y, bel_pred, evaluate_fn, nan_val=-1e8,
     return eval
 
 
-def osa_nlpd_mc_callback(bel, y_pred, t, X, y, bel_pred, **kwargs):
+def osa_nlpd_mc_callback(bel, y_pred, t, X, y, bel_pred, n_samples=30, temperature=1.0, **kwargs):
     agent, key = kwargs["agent"], kwargs["key"]
     
-    nlpd = agent.nlpd_mc(key, bel, X, y)
+    nlpd = agent.nlpd_mc(bel, key, X, y, n_samples=n_samples, temperature=temperature)
     
     result = {
         "nlpd": nlpd,
@@ -294,7 +301,8 @@ def smnist_evaluate_accuracy(flat_params, apply_fn, X_test, y_test):
 # Model Evaluation
 
 def mnist_eval_agent(
-    train, test, apply_fn, callback, agent, bel_init=None, n_iter=20, n_steps=500, key=0
+    init_fn, init_cov, train, test, apply_fn, callback, agent, bel_init=None, 
+    n_iter=20, n_steps=500, key=0
 ):
     if isinstance(key, int):
         key = jr.PRNGKey(key)
@@ -305,10 +313,12 @@ def mnist_eval_agent(
     
     @scan_tqdm(n_iter)
     def _step(_, i):
-        key = jr.PRNGKey(i)
-        indx = jr.choice(key, len(X_train), (n_steps,))
+        keys = jr.split(jr.PRNGKey(i))
+        indx = jr.choice(keys[0], len(X_train), (n_steps,))
         X_curr, y_curr = X_train[indx], y_train[indx]
-        _, result = agent.scan(X_curr, y_curr, callback=callback, **test_kwargs, bel=bel_init)
+        init_mean = init_fn(keys[1])["flat_params"]
+        _, result = agent.scan(init_mean, init_cov, X_curr, y_curr, 
+                               callback=callback, **test_kwargs, bel=bel_init)
         
         return None, result
 
@@ -376,6 +386,7 @@ def nonstationary_mnist_callback(bel, pred_obs, t, x, y, bel_pred, i,
     overall_nll_result = nll_evaluate_fn(bel.mean, apply_fn, cum_X_test, cum_y_test)
     current_nll_result = nll_evaluate_fn(bel.mean, apply_fn, curr_X_test, curr_y_test)
     task1_nll_result = nll_evaluate_fn(bel.mean, apply_fn, X_test[:ntest_per_batch], y_test[:ntest_per_batch])
+        
     nll_result = {
         'overall': overall_nll_result,
         'current': current_nll_result,
@@ -400,15 +411,16 @@ def nonstationary_mnist_callback(bel, pred_obs, t, x, y, bel_pred, i,
 
 
 def nonstationary_mnist_eval_agent(
+    init_fn,
+    init_cov,
     load_dataset_fn, 
     ntrain_per_task,
     ntest_per_task,
-    apply_fn,
-    agent,  
+    agent,
     bel=None,
     n_iter=10,
-    nll_loss_fn=None, 
-    miscl_loss_fn=None
+    nll_loss_fn=None,
+    miscl_loss_fn=None,
 ):
     result = {
         "nll": {"overall": jnp.array([]), "current": jnp.array([]), "task1": jnp.array([])},
@@ -416,12 +428,16 @@ def nonstationary_mnist_eval_agent(
     }
     for i in trange(n_iter, desc='Evaluating agent...'):
         # Load dataset with random permutation and random shuffle
-        dataset = load_dataset_fn(key=i)
-        (Xtr, Ytr), _, (Xte, Yte) = dataset.values()
+        keys = jr.split(jr.PRNGKey(i))
+        dataset = load_dataset_fn(key=keys[0])
+        Xtr, Ytr, *_ = dataset["train"]
+        Xte, Yte, *_ = dataset["test"]
         train_ds = jdl.ArrayDataset(Xtr, Ytr)
         train_loader = jdl.DataLoaderJax(
             train_ds, batch_size=ntrain_per_task, shuffle=False, drop_last=False
         )
+        model_dict = init_fn(keys[1])
+        init_mean, apply_fn = model_dict['flat_params'], model_dict['apply_fn']
         
         test_kwargs = {
             'X_test': Xte,
@@ -431,8 +447,11 @@ def nonstationary_mnist_eval_agent(
         }
         
         _, curr_result = agent.scan_dataloader(
+            init_mean,
+            init_cov,
             train_loader, 
-            callback=partial(nonstationary_mnist_callback, nll_loss_fn=nll_loss_fn, miscl_loss_fn=miscl_loss_fn),
+            callback=partial(nonstationary_mnist_callback, nll_loss_fn=nll_loss_fn, 
+                             miscl_loss_fn=miscl_loss_fn ),
             bel=bel,
             callback_at_end=False,
             **test_kwargs
