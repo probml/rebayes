@@ -185,14 +185,16 @@ class RebayesEKF(Rebayes):
         self, 
         bel: EKFBel,
         key: Array, 
-        n_samples: int=100
+        n_samples: int=100,
+        temperature: float=1.0,
     ) -> Float[Array, "n_samples state_dim"]:
         bel = self.predict_state(bel)
         shape = (n_samples,)
+        cooled_cov = bel.cov * temperature
         if self.method != "fcekf":
-            mvn = MVD(loc=bel.mean, scale_diag=jnp.sqrt(bel.cov))
+            mvn = MVD(loc=bel.mean, scale_diag=jnp.sqrt(cooled_cov))
         else:
-            mvn = MVN(loc=bel.mean, scale_tril=jnp.linalg.cholesky(bel.cov))
+            mvn = MVN(loc=bel.mean, scale_tril=jnp.linalg.cholesky(cooled_cov))
         params_sample = mvn.sample(seed=key, sample_shape=shape)
         
         return params_sample
