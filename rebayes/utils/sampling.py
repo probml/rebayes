@@ -30,6 +30,7 @@ def sample_dlr_single(key, W, diag, temperature=1.0):
     
     x_plus = jnp.einsum("ij,kj,k->i", L, W, x)
     x_plus = x - x_plus + jnp.einsum("ij,j->i", L, eps)
+    
     return x_plus
 
 
@@ -40,4 +41,5 @@ def sample_dlr(key, W, diag, temperature=1.0, shape=None):
     keys = jax.random.split(key, n_elements)
     samples = jax.vmap(sample_dlr_single, in_axes=(0, None, None, None))(keys, W, diag, temperature)
     samples = samples.reshape(*shape, -1)
+    
     return samples

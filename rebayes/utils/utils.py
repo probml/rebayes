@@ -32,7 +32,7 @@ class MLP(nn.Module):
         x = nn.Dense(self.features[-1])(x)
         return x
 
-def scaling_factor(model_dims):
+def scaling_factor(model_dims, bias_weight_cov_ratio):
     """This is the factor that is used to scale the
     standardized parameters back into the original space."""
     features = np.array(model_dims)
@@ -44,13 +44,13 @@ def scaling_factor(model_dims):
     for term in bias_fanin_kernels:
         bias, fan_in, num_kernel = (x.item() for x in term)
         factors.extend([1.0] * bias)
-        factors.extend([TRUNCATED_STD/np.sqrt(fan_in)] * num_kernel)
+        factors.extend([bias_weight_cov_ratio/np.sqrt(fan_in)] * num_kernel)
     factors = np.array(factors).ravel()
 
     return factors    
 
 def get_mlp_flattened_params(model_dims, key=0, activation=nn.relu, rescale=False, 
-                             zero_ll=False):
+                             zero_ll=False, bias_weight_cov_ratio=TRUNCATED_STD):
     """Generate MLP model, initialize it using dummy input, and
     return the model, its flattened initial parameters, function
     to unflatten parameters, and apply function for the model.
@@ -84,7 +84,7 @@ def get_mlp_flattened_params(model_dims, key=0, activation=nn.relu, rescale=Fals
         final_layer_n_params = features[-1] * features[-2] if len(features) > 1 else features[-1]
         flat_params = flat_params.at[-final_layer_n_params:].set(0.0)
     
-    scaling = scaling_factor(model_dims, zero_ll) if rescale else 1.0
+    scaling = scaling_factor(model_dims, bias_weight_cov_ratio) if rescale else 1.0
     flat_params = flat_params / scaling
     rec_fn = lambda x: unflatten_fn(x * scaling)
     
