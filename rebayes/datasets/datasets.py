@@ -1,32 +1,20 @@
 """
 Preprocessing and data augmentation for the datasets.
 """
-import re
-import io
-import os
-import jax
 import chex
-import zipfile
-import requests
-import numpy as np
-import pandas as pd
+import jax
 import jax.numpy as jnp
 import jax.random as jr
 from jax import vmap
-import matplotlib.pyplot as plt
-
-from typing import Union
+import numpy as np
 from jaxtyping import  Float, Array
-
 import torchvision
-from torchvision.transforms import ToTensor
-
-import jax_dataloader.core as jdl
 
 @chex.dataclass
 class LRState:
     params: Float[Array, "dim_input"]
     cov: Float[Array, "dim_input dim_input"]
+
 
 class LRDataset:
     """
@@ -46,6 +34,7 @@ class LRDataset:
         if normalize:
             norm2 = jnp.linalg.norm(array) ** 2
             array = array / norm2
+            
         return array
     
     def sample_covariance(self, key, normalize):
@@ -62,12 +51,14 @@ class LRDataset:
     
     def sample_inputs(self, key, mean, cov, n_obs):
         X = jax.random.multivariate_normal(key, mean, cov, (n_obs,))
+        
         return X
     
     def sample_outputs(self, key, params, X):
         n_obs = len(X)
         err = jax.random.normal(key, (n_obs,))
         y = jnp.einsum("m,...m->...", params, X) + err * self.sigma
+        
         return y
     
     def sample_train(self, key, num_obs):
@@ -91,12 +82,13 @@ class LRDataset:
         key_x, key_y = jax.random.split(key)
         X = self.sample_inputs(key_x, self.mean, state.cov, num_obs)
         y = self.sample_outputs(key_y, state.params, X)
+        
         return X, y
 
 
 def showdown_preprocess(
-        train, test, n_warmup=1000, n_test_warmup=100, xaxis=0,
-        normalise_target=True, normalise_features=True,
+    train, test, n_warmup=1000, n_test_warmup=100, xaxis=0,
+    normalise_target=True, normalise_features=True,
 ):
     (X_train, y_train) = train
     (X_test, y_test) = test
@@ -161,7 +153,6 @@ def showdown_preprocess(
     return data, norm_cst
 
 
-
 def load_mnist(root="./data", download=True):
     mnist_train = torchvision.datasets.MNIST(root=root, train=True, download=download)
     images = np.array(mnist_train.data) / 255.0
@@ -173,6 +164,7 @@ def load_mnist(root="./data", download=True):
 
     train = (images, labels)
     test = (images_test, labels_test)
+    
     return train, test
 
 
@@ -195,6 +187,7 @@ def load_classification_mnist(
 
     train = (X, y_ohe)
     test = (X_test, y_ohe_test)
+    
     return train, test
 
 
@@ -241,7 +234,6 @@ def load_1d_synthetic_dataset(n_train=100, n_test=100, key=0, trenches=False, so
         X_train, y_train = X_train[sorted_idx], y_train[sorted_idx]
 
     return (X_train, y_train), (X_test, y_test)
-
 
 
 def make_1d_regression(n_train=100, n_test=100, key=0, trenches=False, sort_data=False, coef=jnp.array([2.0,3.0]), sort_test=True):
@@ -294,4 +286,3 @@ def make_1d_regression(n_train=100, n_test=100, key=0, trenches=False, sort_data
         X_train, y_train = X_train[sorted_idx], y_train[sorted_idx]
 
     return X_train, y_train, X_test, y_test
-
