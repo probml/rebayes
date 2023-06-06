@@ -14,7 +14,7 @@ def make_1d_regression(
     minval, maxval = -0.5, 0.5
 
     def f(x):
-        y = coef2 * x + 0.3 * jnp.sin(coef0 + coef1 * jnp.pi * x)
+        y = coef2 * x + 0.3 * jnp.sin(2.0 + coef1 * jnp.pi * x)
         return y
         
     @jax.vmap
