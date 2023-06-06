@@ -295,13 +295,20 @@ class LRVGA(Rebayes):
         return bel
 
     @partial(jax.jit, static_argnums=(0,4))
-    def pred_obs_mc(self, key, bel, x, shape=None):
+    def pred_obs_mc(self, bel, key, x, n_samples=None):
         """
         Sample observations from the posterior predictive distribution.
         """
-        shape = shape or (1,)
+        shape = (n_samples,) if n_samples is not None else (1,)
         # Belief posterior predictive.
         bel = self.predict_state(bel)
-        params_sample = sample_dlr(key, bel.W, bel.Psi.ravel(), shape) + bel.mu
+        params_sample = sample_dlr(key, bel.W, bel.Psi.ravel(), shape=shape) + bel.mu
         yhat_samples, _ = jax.vmap(self.fwd_link, (0, None, None))(params_sample, bel, x)
         return yhat_samples
+    
+    @partial(jax.jit, static_argnums=(0,4))
+    def sample_state(self, bel, key, n_samples=None, temperature=1.0):
+        shape = (n_samples,) if n_samples is not None else (1,)
+        bel = self.predict_state(bel)
+        params_sample = sample_dlr(key, bel.W, bel.Psi.ravel(), shape) + bel.mu
+        return params_sample

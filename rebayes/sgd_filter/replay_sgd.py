@@ -144,7 +144,7 @@ class FifoSGD(Rebayes):
         return bel_init
 
     def predict_obs(self, bel, X):
-        yhat = bel.apply_fn(bel.params, X)
+        yhat = self.apply_fn(bel.params, X)
         return yhat
 
     def predict_state(self, bel):
@@ -178,11 +178,11 @@ class FifoSGD(Rebayes):
 
 
     @partial(jax.jit, static_argnums=(0,4))
-    def pred_obs_mc(self, key, bel, x, shape=None):
+    def pred_obs_mc(self, bel, key, x, n_samples=None):
         """
         Sample observations from the posterior predictive distribution.
         """
-        shape = shape or (1,)
+        shape = (n_samples,)
         nsamples = np.prod(shape)
         # Belief posterior predictive.
         bel = self.predict_state(bel)
