@@ -404,6 +404,7 @@ def load_split_mnist_dataset(
     
     return dataset
 
+
 Datasets = {
     'stationary-mnist': load_mnist_dataset,
     'permuted-mnist': load_permuted_mnist_dataset,
