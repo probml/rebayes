@@ -1,24 +1,46 @@
-from typing import Sequence
 from functools import partial
-import optax
+from typing import Sequence
+
+import flax.linen as nn
 import jax
+from jax import jacrev, jit
+from jax.experimental import host_callback
+from jax.flatten_util import ravel_pytree
 import jax.numpy as jnp
 import jax.random as jr
-from jax import jit
-import flax.linen as nn
-from jax.flatten_util import ravel_pytree
-from jax.experimental import host_callback
-from jax import jacrev
 import numpy as np
-
+import optax
 
 from dynamax.generalized_gaussian_ssm.models import ParamsGGSSM
 
-# constant is stddev of standard normal truncated to (-2, 2)
+
+# .8796... is stddev of standard normal truncated to (-2, 2)
 TRUNCATED_STD = 20.0 / np.array(.87962566103423978)
 _jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
 
-### MLP
+
+# ------------------------------------------------------------------------------
+# NN Models
+
+class CNN(nn.Module):
+    output_dim: int = 10
+    activation: nn.Module = nn.relu
+    
+    @nn.compact
+    def __call__(self, x):
+        x = nn.Conv(features=32, kernel_size=(3, 3))(x)
+        x = self.activation(x)
+        x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
+        x = nn.Conv(features=64, kernel_size=(3, 3))(x)
+        x = self.activation(x)
+        x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
+        x = x.reshape((x.shape[0], -1))  # flatten
+        x = nn.Dense(features=128)(x)
+        x = self.activation(x)
+        x = nn.Dense(features=self.output_dim)(x)
+        
+        return x
+    
 
 class MLP(nn.Module):
     features: Sequence[int]
@@ -30,7 +52,9 @@ class MLP(nn.Module):
         for feat in self.features[:-1]:
             x = self.activation(nn.Dense(feat)(x))
         x = nn.Dense(self.features[-1])(x)
+        
         return x
+    
 
 def scaling_factor(model_dims, bias_weight_cov_ratio):
     """This is the factor that is used to scale the
@@ -49,8 +73,9 @@ def scaling_factor(model_dims, bias_weight_cov_ratio):
 
     return factors    
 
+
 def get_mlp_flattened_params(model_dims, key=0, activation=nn.relu, rescale=False, 
-                             zero_ll=False, bias_weight_cov_ratio=TRUNCATED_STD):
+                             bias_weight_cov_ratio=TRUNCATED_STD):
     """Generate MLP model, initialize it using dummy input, and
     return the model, its flattened initial parameters, function
     to unflatten parameters, and apply function for the model.
@@ -79,11 +104,6 @@ def get_mlp_flattened_params(model_dims, key=0, activation=nn.relu, rescale=Fals
     params = model.init(key, dummy_input)
     flat_params, unflatten_fn = ravel_pytree(params)
     
-    if zero_ll:
-        # Zero out the final layer weights
-        final_layer_n_params = features[-1] * features[-2] if len(features) > 1 else features[-1]
-        flat_params = flat_params.at[-final_layer_n_params:].set(0.0)
-    
     scaling = scaling_factor(model_dims, bias_weight_cov_ratio) if rescale else 1.0
     flat_params = flat_params / scaling
     rec_fn = lambda x: unflatten_fn(x * scaling)
@@ -96,7 +116,67 @@ def get_mlp_flattened_params(model_dims, key=0, activation=nn.relu, rescale=Fals
     return model, flat_params, rec_fn, apply_fn
 
 
-### EKF
+def init_model(key=0, type='cnn', features=(400, 400, 10), classification=True, rescale=False):
+    if isinstance(key, int):
+        key = jr.PRNGKey(key)
+    input_dim = [1, 28, 28, 1]
+    model_dim = [input_dim, *features]
+    if type == 'cnn':
+        if classification:
+            model = CNN()
+        else:
+            model = CNN(output_dim=1)
+        params = model.init(key, jnp.ones(input_dim))['params']
+        flat_params, unflatten_fn = ravel_pytree(params)
+        apply_fn = lambda w, x: model.apply({'params': unflatten_fn(w)}, x).ravel()
+
+        emission_mean_function = apply_fn
+    elif type == 'mlp':
+        model, flat_params, _, apply_fn = \
+            get_mlp_flattened_params(model_dim, key, rescale=rescale, zero_ll=zero_ll,
+                                     bias_weight_cov_ratio=bias_weight_cov_ratio)
+            
+    else:
+        raise ValueError(f'Unknown model type: {type}')
+    
+    model_dict = {
+        'model': model,
+        'flat_params': flat_params,
+        'apply_fn': apply_fn,
+    }
+    
+    if classification:
+        if features[-1] == 1:
+            # Binary classification
+            sigmoid_fn = lambda w, x: jnp.clip(jax.nn.sigmoid(apply_fn(w, x)), 1e-4, 1-1e-4).ravel()
+            emission_mean_function = lambda w, x: sigmoid_fn(w, x)
+            emission_cov_function = lambda w, x: sigmoid_fn(w, x) * (1 - sigmoid_fn(w, x))
+        else:
+            # Multiclass classification
+            emission_mean_function=lambda w, x: jax.nn.softmax(apply_fn(w, x))
+            def emission_cov_function(w, x):
+                ps = emission_mean_function(w, x)
+                return jnp.diag(ps) - jnp.outer(ps, ps) + 1e-3 * jnp.eye(len(ps)) # Add diagonal to avoid singularity
+            
+            def replay_emission_cov_function(w, w_lin, x):
+                m_Y = lambda w: emission_mean_function(w, x)
+                H = _jacrev_2d(m_Y, w_lin)
+                ps = jnp.atleast_1d(m_Y(w_lin)) + H @ (w - w_lin)
+                return jnp.diag(ps) - jnp.outer(ps, ps) + 1e-3 * jnp.eye(len(ps)) # Add diagonal to avoid singularity
+            model_dict["replay_emission_cov_function"] = replay_emission_cov_function
+        model_dict['emission_mean_function'] = emission_mean_function
+        model_dict['emission_cov_function'] = emission_cov_function
+    else:
+        # Regression
+        emission_mean_function = apply_fn
+        model_dict['emission_mean_function'] = emission_mean_function
+    
+    return model_dict
+
+
+# ------------------------------------------------------------------------------
+# EKF
+
 def initialize_params(flat_params, predict_fn):
     state_dim = flat_params.size
     fcekf_params = ParamsGGSSM(
@@ -114,7 +194,8 @@ def initialize_params(flat_params, predict_fn):
     return fcekf_params, callback
 
 
-### SGD
+# ------------------------------------------------------------------------------
+# SGD
 
 def fit_optax(params, optimizer, input, output, loss_fn, num_epochs, return_history=False):
     opt_state = optimizer.init(params)
@@ -139,17 +220,21 @@ def fit_optax(params, optimizer, input, output, loss_fn, num_epochs, return_hist
         return jnp.array(params_history)
     return params
 
+
 # Generic loss function
 def loss_optax(params, x, y, loss_fn, apply_fn):
     y, y_hat = jnp.atleast_1d(y), apply_fn(params, x)
     loss_value = loss_fn(y, y_hat)
     return loss_value.mean()
 
+
 # Define SGD optimizer
 sgd_optimizer = optax.sgd(learning_rate=1e-2)
 
+
 def tree_to_cpu(tree):
     return jax.tree_map(np.array, tree)
+
 
 def get_subtree(tree, key):
     return jax.tree_map(lambda x: x[key], tree, is_leaf=lambda x: key in x)
@@ -178,10 +263,9 @@ def eval_runs(key, num_runs_pc, agent, model, train, test, eval_callback, test_k
         )
 
         return output
-
-
     outputs = evalf(keys)
     outputs = jax.tree_map(lambda x: x.reshape(num_sims, -1), outputs)
+    
     return outputs
 
 
