@@ -413,10 +413,39 @@ def load_split_mnist_dataset(
     return dataset
 
 
+# For experiments --------------------------------------------------------------
+
+pmnist_kwargs = {
+    'n_tasks': 5,
+    'ntrain_per_task': 300,
+    'nval_per_task': 1,
+    'ntest_per_task': 1_000,
+}
+smnist_kwargs = {
+    'ntrain_per_task': 300,
+    'nval_per_task': 1,
+    'ntest_per_task': 500,
+}
+
 Datasets = {
-    'stationary-mnist': partial(load_mnist_dataset, ntrain=500, nval=1_000,),
-    'permuted-mnist': load_permuted_mnist_dataset,
-    'rotated-mnist': load_rotated_mnist_dataset,
-    'rotated-permuted-mnist': load_rotated_permuted_mnist_dataset,
-    'split-mnist': load_split_mnist_dataset,
+    'stationary-mnist': {
+        "load_fn": partial(load_mnist_dataset, ntrain=500, nval=1_000,),
+        "configs": {}
+    },
+    'permuted-mnist': {
+        "load_fn": partial(load_permuted_mnist_dataset, **pmnist_kwargs),
+        "configs": pmnist_kwargs,
+    },
+    'rotated-mnist': {
+        "load_fn": load_rotated_mnist_dataset,
+        "configs": {}
+    },
+    'rotated-permuted-mnist': {
+        "load_fn": load_rotated_permuted_mnist_dataset,
+        "configs": {}
+    },
+    'split-mnist': {
+        "load_fn": partial(load_split_mnist_dataset, **smnist_kwargs),
+        "configs": smnist_kwargs,
+    }
 }
