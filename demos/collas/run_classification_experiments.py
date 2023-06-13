@@ -4,8 +4,8 @@ import json
 import os
 from typing import Callable
 from pathlib import Path
+import pickle
 
-import flax.linen as nn
 import jax.random as jr
 import optax
 
@@ -194,8 +194,8 @@ def evaluate_and_store_result(
     result = eval_fn(model_init_fn, dataset_load_fn, optimizer_dict,
                      eval_callback, n_iter, key, **kwargs)
     # Store result
-    with open(Path(output_path, f"{agent_name}.json"), "w") as f:
-        json.dump(result, f)
+    with open(Path(output_path, f"{agent_name}.pkl"), "wb") as f:
+        pickle.dump(result, f)
     
     return result
 
@@ -204,7 +204,8 @@ def main(cl_args):
     # Set output path
     output_path = os.environ.get("REBAYES_OUTPUT")
     if output_path is None:
-        output_path = Path("classification", "output", cl_args.problem)
+        output_path = Path("classification", "output", cl_args.problem,
+                           cl_args.dataset, cl_args.model)
         output_path.mkdir(parents=True, exist_ok=True)
     
     # Set config path
@@ -254,6 +255,7 @@ def main(cl_args):
     
     # Evaluate agents
     for agent_name, hparams in agent_hparams.items():
+        print(f"Evaluating {agent_name}...")
         agent_kwargs = agents[agent_name]
         agent_kwargs.pop("pbounds")
         optimizer_dict = hparam_tune.build_estimator(model_init_fn, hparams,

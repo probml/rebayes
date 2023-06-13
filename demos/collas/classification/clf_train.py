@@ -9,7 +9,6 @@ import jax
 from jax import lax
 import jax.numpy as jnp
 import jax.random as jr
-import optax
 from jax_tqdm import scan_tqdm
 from tqdm import trange
 import jax_dataloader.core as jdl
@@ -27,7 +26,6 @@ def eval_agent_stationary(
 ) -> dict:
     if isinstance(key, int):
         key = jr.PRNGKey(key)
-    key, subkey = jr.split(key)
     dataset = dataset_load_fn()
     model = model_init_fn(0)
     agent, init_cov = optimizer_dict["agent"], optimizer_dict["init_cov"]
@@ -36,8 +34,8 @@ def eval_agent_stationary(
                    "apply_fn": model["apply_fn"], "key": key}
     
     @scan_tqdm(n_iter)
-    def _step(_, key):
-        keys = jr.split(key)
+    def _step(_, i):
+        keys = jr.split(jr.PRNGKey(i))
         dataset = dataset_load_fn(key=keys[0])
         X_train, y_train = dataset["train"]
         
@@ -49,8 +47,7 @@ def eval_agent_stationary(
 
     carry = None
     start_time = time()
-    keys = jr.split(subkey, n_iter)
-    _, result = jax.block_until_ready(lax.scan(_step, carry, keys))
+    _, result = jax.block_until_ready(lax.scan(_step, carry, jnp.arange(n_iter)))
     runtime = time() - start_time
     result["runtime"] = runtime
 
