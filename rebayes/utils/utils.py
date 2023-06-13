@@ -116,6 +116,64 @@ def get_mlp_flattened_params(model_dims, key=0, activation=nn.relu, rescale=Fals
     return model, flat_params, rec_fn, apply_fn
 
 
+def init_model(key=0, type='cnn', features=(400, 400, 10), classification=True, rescale=False):
+    if isinstance(key, int):
+        key = jr.PRNGKey(key)
+    input_dim = [1, 28, 28, 1]
+    model_dim = [input_dim, *features]
+    if type == 'cnn':
+        if classification:
+            model = CNN()
+        else:
+            model = CNN(output_dim=1)
+        params = model.init(key, jnp.ones(input_dim))['params']
+        flat_params, unflatten_fn = ravel_pytree(params)
+        apply_fn = lambda w, x: model.apply({'params': unflatten_fn(w)}, x).ravel()
+
+        emission_mean_function = apply_fn
+    elif type == 'mlp':
+        model, flat_params, _, apply_fn = \
+            get_mlp_flattened_params(model_dim, key, rescale=rescale, zero_ll=zero_ll,
+                                     bias_weight_cov_ratio=bias_weight_cov_ratio)
+            
+    else:
+        raise ValueError(f'Unknown model type: {type}')
+    
+    model_dict = {
+        'model': model,
+        'flat_params': flat_params,
+        'apply_fn': apply_fn,
+    }
+    
+    if classification:
+        if features[-1] == 1:
+            # Binary classification
+            sigmoid_fn = lambda w, x: jnp.clip(jax.nn.sigmoid(apply_fn(w, x)), 1e-4, 1-1e-4).ravel()
+            emission_mean_function = lambda w, x: sigmoid_fn(w, x)
+            emission_cov_function = lambda w, x: sigmoid_fn(w, x) * (1 - sigmoid_fn(w, x))
+        else:
+            # Multiclass classification
+            emission_mean_function=lambda w, x: jax.nn.softmax(apply_fn(w, x))
+            def emission_cov_function(w, x):
+                ps = emission_mean_function(w, x)
+                return jnp.diag(ps) - jnp.outer(ps, ps) + 1e-3 * jnp.eye(len(ps)) # Add diagonal to avoid singularity
+            
+            def replay_emission_cov_function(w, w_lin, x):
+                m_Y = lambda w: emission_mean_function(w, x)
+                H = _jacrev_2d(m_Y, w_lin)
+                ps = jnp.atleast_1d(m_Y(w_lin)) + H @ (w - w_lin)
+                return jnp.diag(ps) - jnp.outer(ps, ps) + 1e-3 * jnp.eye(len(ps)) # Add diagonal to avoid singularity
+            model_dict["replay_emission_cov_function"] = replay_emission_cov_function
+        model_dict['emission_mean_function'] = emission_mean_function
+        model_dict['emission_cov_function'] = emission_cov_function
+    else:
+        # Regression
+        emission_mean_function = apply_fn
+        model_dict['emission_mean_function'] = emission_mean_function
+    
+    return model_dict
+
+
 # ------------------------------------------------------------------------------
 # EKF
 
