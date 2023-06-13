@@ -2,10 +2,16 @@
 Custom callbacks
 """
 
-import jax
-import distrax
-import jax.numpy as jnp
+from functools import partial
 
+import jax
+import jax.numpy as jnp
+import distrax
+import optax
+
+
+# ------------------------------------------------------------------------------
+# Regression
 
 def cb_clf_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, lagn=20, store_fro=True, **kwargs):
     """
@@ -115,3 +121,29 @@ def cb_reg_mc(bel, pred_obs, t, X, y, bel_pred, apply_fn, steps=10, **kwargs):
     }
 
     return res
+
+# ------------------------------------------------------------------------------
+# Classification
+
+@partial(jax.jit, static_argnums=(1,4,))
+def clf_evaluate_function(flat_params, apply_fn, X_test, y_test, loss_fn):
+    def evaluate(label, image):
+        image = image.reshape((1, 28, 28, 1))
+        logits = apply_fn(flat_params, image).ravel()
+        loss = loss_fn(logits, label)
+        
+        return loss
+    evals = jax.vmap(evaluate, (0, 0))(y_test, X_test)
+    
+    return evals.mean()
+    
+
+def cb_clf_eval(bel, *args, evaluate_fn, nan_val=-1e8, **kwargs):
+    X, y, apply_fn = kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
+    eval = evaluate_fn(bel.mean, apply_fn, X, y)
+    if isinstance(eval, dict):
+        eval = {k: jnp.where(jnp.isnan(v), nan_val, v) for k, v in eval.items()}
+    else:
+        eval = jnp.where(jnp.isnan(eval), nan_val, eval)
+    
+    return eval
