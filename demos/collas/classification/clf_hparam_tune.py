@@ -76,12 +76,12 @@ def bbf_lofi(
         if callback_at_end:
             bel, _ = estimator.scan(flat_params, initial_covariance, 
                                     X_train, y_train, progress_bar=False)
-            metric = callback(bel, **test_cb_kwargs)
+            metric = callback(bel, **test_cb_kwargs).values()
         else:
             _, metric = estimator.scan(flat_params, initial_covariance, 
                                        X_train, y_train, progress_bar=False, 
                                        callback=callback, **test_cb_kwargs)
-            metric = metric.mean()
+            metric = metric.values().mean()
         result.append(metric)
     result = jnp.array(result).mean()
     
@@ -140,12 +140,12 @@ def bbf_ekf(
         if callback_at_end:
             bel, _ = estimator.scan(flat_params, initial_covariance, 
                                     X_train, y_train, progress_bar=False)
-            metric = callback(bel, **test_cb_kwargs)
+            metric = callback(bel, **test_cb_kwargs).values()
         else:
             _, metric = estimator.scan(flat_params, initial_covariance, 
                                        X_train, y_train, progress_bar=False, 
                                        callback=callback, **test_cb_kwargs)
-            metric = metric.mean()
+            metric = metric.values().mean()
         result.append(metric)
     result = jnp.array(result).mean()
         
@@ -216,12 +216,12 @@ def bbf_rsgd(
         if callback_at_end:
             bel, _ = estimator.scan(flat_params, None, X_train, y_train, 
                                     progress_bar=False)
-            metric = callback(bel, **test_cb_kwargs)
+            metric = callback(bel, **test_cb_kwargs).values()
         else:
             _, metric = estimator.scan(flat_params, None, X_train, y_train, 
                                        progress_bar=False, callback=callback, 
                                        **test_cb_kwargs)
-            metric = metric.mean()
+            metric = metric.values().mean()
         result.append(metric)
     result = jnp.array(result).mean()
     
@@ -311,11 +311,11 @@ def get_best_params(optimizer, method):
     return hparams
 
 
-def build_estimator(model_dict, hparams, method, **kwargs):
-    init_mean, apply_fn, emission_mean_fn, emission_cov_fn = \
-        model_dict["flat_params"], model_dict["apply_fn"], \
-            model_dict["emission_mean_function"], \
-                model_dict["emission_cov_function"]
+def build_estimator(init_fn, hparams, method, **kwargs):
+    model_dict = init_fn(key=0)
+    apply_fn, emission_mean_fn, emission_cov_fn = \
+        model_dict["apply_fn"], model_dict["emission_mean_function"], \
+            model_dict["emission_cov_function"]
     hparams = hparams.copy()
     if "ekf" in method:
         init_covariance = hparams.pop("initial_covariance")
@@ -326,7 +326,6 @@ def build_estimator(model_dict, hparams, method, **kwargs):
             method=method,
             **hparams,
         )
-        estimator = (estimator, init_mean, init_covariance)
     elif "lofi" in method:
         if "lofi_method" in kwargs:
             if kwargs["lofi_method"] == "diagonal":
@@ -346,8 +345,7 @@ def build_estimator(model_dict, hparams, method, **kwargs):
             **hparams,
             **kwargs,
         )
-        estimator = (estimator, init_mean, init_covariance)
-    elif "sgd" in method:
+    elif "sgd" in method or "adam" in method:
         if "optimizer" in kwargs:
             if kwargs["optimizer"] == "sgd":
                 opt = optax.sgd
@@ -376,7 +374,13 @@ def build_estimator(model_dict, hparams, method, **kwargs):
             dim_output=kwargs["dim_output"],
             n_inner=1,
         )
+        init_covariance = None
     else:
         raise ValueError("method must be either 'ekf', 'lofi' or 'sgd'")
+
+    result = {
+        "agent": estimator,
+        "init_cov": init_covariance,
+    }
         
-    return estimator
+    return result
