@@ -117,6 +117,7 @@ def tune_and_store_hyperparameters(
     dataset_load_fn: Callable,
     agents: dict,
     val_callback: Callable,
+    verbose: int = 2,
     n_explore: int = 20,
     n_exploit: int = 25,
 ) -> dict:
@@ -128,6 +129,7 @@ def tune_and_store_hyperparameters(
         dataset_load_fn (Callable): Dataset loading function.
         agents (dict): Dictionary of agent parameters.
         val_callback (Callable): Tuning objective.
+        verbosity (int, optional): Verbosity level for Bayesian optimization.
         n_explore (int, optional): Number of random exploration steps
             for Bayesian optimization. Defaults to 20.
         n_exploit (int, optional): Number of exploitation steps for
@@ -137,7 +139,7 @@ def tune_and_store_hyperparameters(
         hparams (dict): Dictionary of tuned hyperparameters.
     """
     hparam_path.mkdir(parents=True, exist_ok=True)
-    dataset, *_ = dataset_load_fn()
+    dataset = dataset_load_fn()
     
     hparams = {}
     for agent_name, agent_params in agents.items():
@@ -145,7 +147,7 @@ def tune_and_store_hyperparameters(
         pbounds = agent_params.pop("pbounds")
         optimizer = hparam_tune.create_optimizer(
             model_init_fn, pbounds, dataset["train"], dataset["val"],
-            val_callback, agent_name, verbose=2, callback_at_end=False,
+            val_callback, agent_name, verbose=verbose, callback_at_end=False,
             **agent_params
         )
         optimizer.maximize(init_points=n_explore, n_iter=n_exploit)
@@ -239,7 +241,8 @@ def main(cl_args):
         agent_hparams = \
             tune_and_store_hyperparameters(hparam_path, model_init_fn, 
                                            dataset_load_fn, agents,
-                                           eval_metric["val"])
+                                           eval_metric["val"], 
+                                           cl_args.verbose)
     else:
         agent_hparams = {}
         for agent_name in agents:
@@ -257,7 +260,8 @@ def main(cl_args):
     for agent_name, hparams in agent_hparams.items():
         print(f"Evaluating {agent_name}...")
         agent_kwargs = agents[agent_name]
-        agent_kwargs.pop("pbounds")
+        if "pbounds" in agent_kwargs:
+            agent_kwargs.pop("pbounds")
         optimizer_dict = hparam_tune.build_estimator(model_init_fn, hparams,
                                                      agent_name, **agent_kwargs)
         _ = evaluate_and_store_result(output_path, model_init_fn,
@@ -283,6 +287,10 @@ if __name__ == "__main__":
     
     # Tune the hyperparameters of the agents
     parser.add_argument("--tune", action="store_true")
+    
+    # Set the verbosity of the Bayesopt procedure
+    parser.add_argument("--verbose", type=int, default=2,
+                        choices=[0, 1, 2])
     
     # List of ranks to use for the agents
     parser.add_argument("--ranks", type=_check_positive_int, nargs="+",
