@@ -207,7 +207,7 @@ def main(cl_args):
     # Set output path
     output_path = os.environ.get("REBAYES_OUTPUT")
     if output_path is None:
-        output_path = Path("classification", "output", cl_args.problem,
+        output_path = Path("classification", "outputs", cl_args.problem,
                            cl_args.dataset, cl_args.model)
     Path(output_path).mkdir(parents=True, exist_ok=True)
     
