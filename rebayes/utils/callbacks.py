@@ -152,11 +152,15 @@ def cb_clf_eval(bel, *args, evaluate_fn, nan_val=-1e8, **kwargs):
     return eval
 
 
-def cb_clf_osa(bel, y_pred, t, X, y, bel_pred, evaluate_fn, nan_val=-1e8, **kwargs):
+def cb_clf_osa(bel, y_pred, t, X, y, bel_pred, evaluate_fn, nan_val=-1e8, 
+               label="loss", **kwargs):
     eval = evaluate_fn(y_pred, y)
     eval = jnp.where(jnp.isnan(eval), nan_val, eval)
+    result = {
+        label: eval.mean()
+    }
     
-    return eval
+    return result
 
 
 def cb_clf_discrete_tasks(bel, pred_obs, t, x, y, bel_pred, task_idx, 
