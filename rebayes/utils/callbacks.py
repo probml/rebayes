@@ -163,7 +163,7 @@ def cb_clf_osa(bel, y_pred, t, X, y, bel_pred, evaluate_fn, nan_val=-1e8,
     return result
 
 
-def cb_clf_discrete_tasks(bel, pred_obs, t, x, y, bel_pred, task_idx, 
+def cb_clf_discrete_tasks(bel, pred_obs, t, x, y, bel_pred, i,
                           nll_loss_fn=None, miscl_loss_fn=None, **kwargs):
     if nll_loss_fn is None:
         nll_loss_fn = lambda logits, label: \
@@ -183,8 +183,7 @@ def cb_clf_discrete_tasks(bel, pred_obs, t, x, y, bel_pred, task_idx,
     X_test, y_test, apply_fn = kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
     ntest_per_batch = kwargs["ntest_per_batch"]
     
-    prev_test_batch, curr_test_batch = \
-        task_idx*ntest_per_batch, (task_idx+1)*ntest_per_batch
+    prev_test_batch, curr_test_batch = i*ntest_per_batch, (i+1)*ntest_per_batch
     curr_X_test, curr_y_test = \
         X_test[prev_test_batch:curr_test_batch], y_test[prev_test_batch:curr_test_batch]
     cum_X_test, cum_y_test = X_test[:curr_test_batch], y_test[:curr_test_batch]
