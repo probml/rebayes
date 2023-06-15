@@ -2,10 +2,16 @@
 Custom callbacks
 """
 
-import jax
-import distrax
-import jax.numpy as jnp
+from functools import partial
 
+import jax
+import jax.numpy as jnp
+import distrax
+import optax
+
+
+# ------------------------------------------------------------------------------
+# Regression
 
 def cb_clf_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, lagn=20, store_fro=True, **kwargs):
     """
@@ -115,3 +121,111 @@ def cb_reg_mc(bel, pred_obs, t, X, y, bel_pred, apply_fn, steps=10, **kwargs):
     }
 
     return res
+
+# ------------------------------------------------------------------------------
+# Classification
+
+@partial(jax.jit, static_argnums=(1,4,5))
+def clf_evaluate_function(flat_params, apply_fn, X_test, y_test, loss_fn, label="loss"):
+    def evaluate(label, image):
+        image = image.reshape((1, 28, 28, 1))
+        logits = apply_fn(flat_params, image).ravel()
+        loss = loss_fn(logits, label)
+        
+        return loss
+    evals = jax.vmap(evaluate, (0, 0))(y_test, X_test)
+    result = {
+        label: evals.mean()
+    }
+    
+    return result
+    
+
+def cb_clf_eval(bel, *args, evaluate_fn, nan_val=-1e8, **kwargs):
+    X, y, apply_fn = kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
+    eval = evaluate_fn(bel.mean, apply_fn, X, y)
+    if isinstance(eval, dict):
+        eval = {k: jnp.where(jnp.isnan(v), nan_val, v) for k, v in eval.items()}
+    else:
+        eval = jnp.where(jnp.isnan(eval), nan_val, eval)
+    
+    return eval
+
+
+def cb_clf_osa(bel, y_pred, t, X, y, bel_pred, evaluate_fn, nan_val=-1e8, 
+               label="loss", **kwargs):
+    eval = evaluate_fn(y_pred, y)
+    eval = jnp.where(jnp.isnan(eval), nan_val, eval)
+    result = {
+        label: eval.mean()
+    }
+    
+    return result
+
+
+def cb_clf_discrete_tasks(bel, pred_obs, t, x, y, bel_pred, i,
+                          nll_loss_fn=None, miscl_loss_fn=None, **kwargs):
+    if nll_loss_fn is None:
+        nll_loss_fn = lambda logits, label: \
+            optax.softmax_cross_entropy_with_integer_labels(logits, label).mean()
+    if miscl_loss_fn is None:
+        miscl_loss_fn = lambda logits, label: jnp.mean(logits.argmax(axis=-1) != label)
+    
+    nll_evaluate_fn = partial(
+        clf_evaluate_function,
+        loss_fn=nll_loss_fn,
+    )
+    miscl_evaluate_fn = partial(
+        clf_evaluate_function,
+        loss_fn=miscl_loss_fn,
+    )
+    
+    X_test, y_test, apply_fn = kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
+    ntest_per_batch = kwargs["ntest_per_batch"]
+    
+    prev_test_batch, curr_test_batch = i*ntest_per_batch, (i+1)*ntest_per_batch
+    curr_X_test, curr_y_test = \
+        X_test[prev_test_batch:curr_test_batch], y_test[prev_test_batch:curr_test_batch]
+    cum_X_test, cum_y_test = X_test[:curr_test_batch], y_test[:curr_test_batch]
+    
+    overall_nll_result = nll_evaluate_fn(bel.mean, apply_fn, cum_X_test, cum_y_test, label="overall")
+    current_nll_result = nll_evaluate_fn(bel.mean, apply_fn, curr_X_test, curr_y_test, label="current")
+    task1_nll_result = nll_evaluate_fn(bel.mean, apply_fn, X_test[:ntest_per_batch], y_test[:ntest_per_batch],
+                                       label="task1")
+        
+    nll_result = {**overall_nll_result, **current_nll_result, **task1_nll_result,}
+    
+    overall_miscl_result = miscl_evaluate_fn(bel.mean, apply_fn, cum_X_test, cum_y_test, label="overall")
+    current_miscl_result = miscl_evaluate_fn(bel.mean, apply_fn, curr_X_test, curr_y_test, label="current")
+    task1_miscl_result = miscl_evaluate_fn(bel.mean, apply_fn, X_test[:ntest_per_batch], y_test[:ntest_per_batch],
+                                           label="task1")
+    miscl_result = {**overall_miscl_result, **current_miscl_result, **task1_miscl_result,}
+    
+    result = {
+        "nll": nll_result,
+        "miscl": miscl_result
+    }
+    
+    return result
+
+
+# Evaluation functions
+nll_softmax = lambda logits, labels, int_labels: \
+    optax.softmax_cross_entropy_with_integer_labels(logits, labels) if int_labels \
+    else optax.softmax_cross_entropy(logits, labels)
+ll_softmax = lambda logits, labels, int_labels: -nll_softmax(logits, labels, int_labels)
+softmax_ll_il_clf_eval_fn = partial(clf_evaluate_function, label="ll",
+                                    loss_fn=partial(ll_softmax, int_labels=True),)
+softmax_nll_il_clf_eval_fn = partial(clf_evaluate_function, label="nll",
+                                     loss_fn=partial(nll_softmax, int_labels=True))
+
+miscl_softmax = lambda logits, labels: \
+    (logits.argmax(axis=-1) != labels).mean()
+softmax_miscl_clf_eval_fn = partial(clf_evaluate_function, loss_fn=miscl_softmax, label="miscl")
+
+def softmax_clf_eval_fn(flat_params, apply_fn, X_test, y_test):
+    nll = softmax_nll_il_clf_eval_fn(flat_params, apply_fn, X_test, y_test)
+    miscl = softmax_miscl_clf_eval_fn(flat_params, apply_fn, X_test, y_test)
+    result = {**nll, **miscl}
+    
+    return result

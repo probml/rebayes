@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Callable, Tuple
 
 import augmax
@@ -16,6 +17,7 @@ from rebayes.datasets.data_utils import Rotate
 
 def _process_mnist(
     dataset: Tuple,
+    n: int=None,
     key: int=0,
     shuffle: bool=True,
     oh: bool=True,
@@ -29,6 +31,8 @@ def _process_mnist(
     idx = jr.permutation(key, jnp.arange(len(X))) if shuffle \
         else jnp.arange(len(X))
     X, Y = X[idx], Y[idx]
+    if n is not None:
+        X, Y = X[:n], Y[:n]
     new_args = []
     for arg in args:
         if isinstance(arg, dict):
@@ -44,6 +48,9 @@ def process_mnist_dataset(
     train: Tuple,
     val: Tuple,
     test: Tuple,
+    ntrain: int=None,
+    nval: int=None,
+    ntest: int=None,
     key: int=0,
     shuffle: bool=True,
     oh_train: bool=True,
@@ -54,9 +61,10 @@ def process_mnist_dataset(
         key = jr.PRNGKey(key)
     keys = jr.split(key, 3)
     train, val, test = \
-        (_process_mnist(dataset, key, shuffle, oh)
-         for dataset, key, oh in zip([train, val, test], keys,
-                                     [oh_train, False, False]))
+        (_process_mnist(dataset, n, key, shuffle, oh)
+         for dataset, n, key, oh in zip([train, val, test], 
+                                        [ntrain, nval, ntest],
+                                        keys, [oh_train, False, False]))
     dataset = {
         'train': train,
         'val': val,
@@ -405,10 +413,39 @@ def load_split_mnist_dataset(
     return dataset
 
 
+# For experiments --------------------------------------------------------------
+
+pmnist_kwargs = {
+    'n_tasks': 5,
+    'ntrain_per_task': 300,
+    'nval_per_task': 1,
+    'ntest_per_task': 1_000,
+}
+smnist_kwargs = {
+    'ntrain_per_task': 300,
+    'nval_per_task': 1,
+    'ntest_per_task': 500,
+}
+
 Datasets = {
-    'stationary-mnist': load_mnist_dataset,
-    'permuted-mnist': load_permuted_mnist_dataset,
-    'rotated-mnist': load_rotated_mnist_dataset,
-    'rotated-permuted-mnist': load_rotated_permuted_mnist_dataset,
-    'split-mnist': load_split_mnist_dataset,
+    'stationary-mnist': {
+        "load_fn": partial(load_mnist_dataset, ntrain=500, nval=1_000,),
+        "configs": {}
+    },
+    'permuted-mnist': {
+        "load_fn": partial(load_permuted_mnist_dataset, **pmnist_kwargs),
+        "configs": pmnist_kwargs,
+    },
+    'rotated-mnist': {
+        "load_fn": load_rotated_mnist_dataset,
+        "configs": {}
+    },
+    'rotated-permuted-mnist': {
+        "load_fn": load_rotated_permuted_mnist_dataset,
+        "configs": {}
+    },
+    'split-mnist': {
+        "load_fn": partial(load_split_mnist_dataset, **smnist_kwargs),
+        "configs": smnist_kwargs,
+    }
 }
