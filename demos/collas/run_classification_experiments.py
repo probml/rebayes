@@ -38,14 +38,14 @@ def _process_agent_args(agent_args, ranks, output_dim, problem):
     if problem == "stationary":
         filter_pbounds = {
             'log_init_cov': (-10, 0.0),
-            'log_dynamics_weights': (-90, -90),
+            'log_1m_dynamics_weights': (-90, -90),
             'log_dynamics_cov': (-90, -90),
             'log_alpha': (-30, 0),
         }
     else:
         filter_pbounds = {
             'log_init_cov': (-10, 0),
-            'log_dynamics_weights': (-30, 0),
+            'log_1m_dynamics_weights': (-30, 0),
             'log_dynamics_cov': (-30, 0),
             'log_alpha': (-30, 0),
         }
@@ -277,7 +277,7 @@ if __name__ == "__main__":
     
     # Problem type (stationary, permuted, rotated, or split)
     parser.add_argument("--problem", type=str, default="stationary",
-                        choices=["stationary", "permuted", "split"])
+                        choices=["stationary", "permuted", "rotating", "split"])
     
     # Type of dataset (mnist or f-mnist)
     parser.add_argument("--dataset", type=str, default="mnist", 

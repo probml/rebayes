@@ -19,7 +19,7 @@ tfd = tfp.distributions
 
 def bbf_lofi(
     log_init_cov,
-    log_dynamics_weights,
+    log_1m_dynamics_weights,
     log_dynamics_cov,
     log_alpha,
     # Specify before running
@@ -40,7 +40,7 @@ def bbf_lofi(
     X_train, y_train = train
     X_test, y_test = test
 
-    dynamics_weights = 1 - jnp.exp(log_dynamics_weights).item()
+    dynamics_weights = 1 - jnp.exp(log_1m_dynamics_weights).item()
     dynamics_covariance = jnp.exp(log_dynamics_cov).item()
     initial_covariance = jnp.exp(log_init_cov).item()
     alpha = jnp.exp(log_alpha).item()
@@ -93,7 +93,7 @@ def bbf_lofi(
 
 def bbf_ekf(
     log_init_cov,
-    log_dynamics_weights,
+    log_1m_dynamics_weights,
     log_dynamics_cov,
     log_alpha,
     # Specify before running
@@ -112,7 +112,7 @@ def bbf_ekf(
     X_train, y_train = train
     X_test, y_test = test
 
-    dynamics_weights = 1 - jnp.exp(log_dynamics_weights).item()
+    dynamics_weights = 1 - jnp.exp(log_1m_dynamics_weights).item()
     dynamics_covariance = jnp.exp(log_dynamics_cov).item()
     initial_covariance = jnp.exp(log_init_cov).item()
     alpha = jnp.exp(log_alpha).item()
@@ -293,7 +293,8 @@ def get_best_params(optimizer, method):
         }
     else:
         initial_covariance = jnp.exp(max_params["log_init_cov"]).item()
-        dynamics_weights = 1 - jnp.exp(max_params["log_dynamics_weights"]).item()
+        dynamics_weights = \
+            1 - jnp.exp(max_params["log_1m_dynamics_weights"]).item()
         dynamics_covariance = jnp.exp(max_params["log_dynamics_cov"]).item()
         alpha = jnp.exp(max_params["log_alpha"]).item()
         
