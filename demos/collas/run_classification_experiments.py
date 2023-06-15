@@ -208,13 +208,13 @@ def main(cl_args):
     if output_path is None:
         output_path = Path("classification", "output", cl_args.problem,
                            cl_args.dataset, cl_args.model)
-        output_path.mkdir(parents=True, exist_ok=True)
+    Path(output_path).mkdir(parents=True, exist_ok=True)
     
     # Set config path
     config_path = os.environ.get("REBAYES_CONFIG")
     if config_path is None:
         config_path = Path("classification", "configs")
-        config_path.mkdir(parents=True, exist_ok=True)
+    Path(config_path).mkdir(parents=True, exist_ok=True)
     
     # Load dataset
     dataset = mnist_data.Datasets[cl_args.problem+"-mnist"]
@@ -241,8 +241,8 @@ def main(cl_args):
         agent_hparams = \
             tune_and_store_hyperparameters(hparam_path, model_init_fn, 
                                            dataset_load_fn, agents,
-                                           eval_metric["val"], 
-                                           cl_args.verbose)
+                                           eval_metric["val"], cl_args.verbose, 
+                                           cl_args.n_explore, cl_args.n_exploit)
     else:
         agent_hparams = {}
         for agent_name in agents:
@@ -287,6 +287,12 @@ if __name__ == "__main__":
     
     # Tune the hyperparameters of the agents
     parser.add_argument("--tune", action="store_true")
+    
+    # Set the number of exploration steps
+    parser.add_argument("--n_explore", type=int, default=20)
+    
+    # Set the number of exploitation steps
+    parser.add_argument("--n_exploit", type=int, default=25)
     
     # Set the verbosity of the Bayesopt procedure
     parser.add_argument("--verbose", type=int, default=2,
