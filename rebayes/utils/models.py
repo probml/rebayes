@@ -120,7 +120,7 @@ def initialize_classification_cnn(
 def initialize_classification_mlp(
     key: int = 0,
     input_dim: Sequence[int] = (28, 28, 1),
-    hidden_dims: Sequence[int] = (100, 100,),
+    hidden_dims: Sequence[int] = (500, 500,),
     output_dim: int = 10,
     homogenize_cov: bool = False,
 ) -> dict:
