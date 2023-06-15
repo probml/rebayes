@@ -18,11 +18,13 @@ _jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
 
 
 class CNN(nn.Module):
+    input_dim: Sequence[int]
     output_dim: int
     activation: nn.Module = nn.relu
     
     @nn.compact
     def __call__(self, x):
+        x = x.reshape(self.input_dim)
         x = nn.Conv(features=32, kernel_size=(3, 3))(x)
         x = self.activation(x)
         x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
@@ -100,7 +102,7 @@ def _initialize_classification(
 
 def initialize_classification_cnn(
     key: int = 0,
-    input_dim: Sequence[int] = (28, 28, 1),
+    input_dim: Sequence[int] = (1, 28, 28, 1),
     output_dim: int = 10,
     homogenize_cov: bool = False,
 ) -> dict:
@@ -108,7 +110,7 @@ def initialize_classification_cnn(
     """
     if isinstance(key, int):
         key = jr.PRNGKey(key)
-    model = CNN(output_dim=output_dim)
+    model = CNN(input_dim=input_dim, output_dim=output_dim)
     model_dict = _initialize_classification(key, model, input_dim, 
                                             output_dim, homogenize_cov)
     
@@ -160,14 +162,14 @@ def _initialize_regression(
 
 def initialize_regression_cnn(
     key: int = 0,
-    input_dim: Sequence[int] = (28, 28, 1),
+    input_dim: Sequence[int] = (1, 28, 28, 1),
     output_dim: int = 1,
 ) -> dict:
     """Initialize a CNN for regression.
     """
     if isinstance(key, int):
         key = jr.PRNGKey(key)
-    model = CNN(output_dim=output_dim)
+    model = CNN(input_dim=input_dim, output_dim=output_dim)
     model_dict = _initialize_regression(key, model, input_dim)
     
     return model_dict
