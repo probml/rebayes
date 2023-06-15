@@ -104,7 +104,8 @@ def _eval_metric(
         result = {
             "val": partial(callbacks.cb_clf_osa,
                             evaluate_fn=partial(callbacks.ll_softmax, 
-                                                int_labels=False)),
+                                                int_labels=False),
+                            label="log_likelihood"),
             "test": callbacks.cb_clf_discrete_tasks,
         }
     
@@ -267,7 +268,8 @@ def main(cl_args):
         _ = evaluate_and_store_result(output_path, model_init_fn,
                                       dataset_load_fn, optimizer_dict,
                                       eval_metric["test"], agent_name,
-                                      cl_args.problem, **kwargs)
+                                      cl_args.problem, cl_args.n_iter,
+                                      **kwargs)
     
 
 if __name__ == "__main__":
@@ -305,6 +307,9 @@ if __name__ == "__main__":
     # List of agents to use
     parser.add_argument("--agents", type=str, nargs="+", default=AGENT_TYPES,
                         choices=AGENT_TYPES)
+    
+    # Number of random initializations for evaluation
+    parser.add_argument("--n_iter", type=int, default=20)
     
     args = parser.parse_args()
     main(args)
