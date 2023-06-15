@@ -76,12 +76,12 @@ def bbf_lofi(
         if callback_at_end:
             bel, _ = estimator.scan(flat_params, initial_covariance, 
                                     X_train, y_train, progress_bar=False)
-            metric = callback(bel, **test_cb_kwargs).values()
+            metric = jnp.array(list(callback(bel, **test_cb_kwargs).values()))
         else:
             _, metric = estimator.scan(flat_params, initial_covariance, 
                                        X_train, y_train, progress_bar=False, 
                                        callback=callback, **test_cb_kwargs)
-            metric = metric.values().mean()
+            metric = jnp.array(list(metric.values())).mean()
         result.append(metric)
     result = jnp.array(result).mean()
     
@@ -140,12 +140,12 @@ def bbf_ekf(
         if callback_at_end:
             bel, _ = estimator.scan(flat_params, initial_covariance, 
                                     X_train, y_train, progress_bar=False)
-            metric = callback(bel, **test_cb_kwargs).values()
+            metric = jnp.array(list(callback(bel, **test_cb_kwargs).values()))
         else:
             _, metric = estimator.scan(flat_params, initial_covariance, 
                                        X_train, y_train, progress_bar=False, 
                                        callback=callback, **test_cb_kwargs)
-            metric = metric.values().mean()
+            metric = jnp.array(list(metric.values())).mean()
         result.append(metric)
     result = jnp.array(result).mean()
         
@@ -216,12 +216,12 @@ def bbf_rsgd(
         if callback_at_end:
             bel, _ = estimator.scan(flat_params, None, X_train, y_train, 
                                     progress_bar=False)
-            metric = callback(bel, **test_cb_kwargs).values()
+            metric = jnp.array(list(callback(bel, **test_cb_kwargs).values()))
         else:
             _, metric = estimator.scan(flat_params, None, X_train, y_train, 
                                        progress_bar=False, callback=callback, 
                                        **test_cb_kwargs)
-            metric = metric.values().mean()
+            metric = jnp.array(list(metric.values())).mean()
         result.append(metric)
     result = jnp.array(result).mean()
     
