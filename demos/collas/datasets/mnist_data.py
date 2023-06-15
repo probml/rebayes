@@ -319,12 +319,13 @@ def load_permuted_mnist_dataset(
         key = jr.PRNGKey(key)
     dataset = load_mnist_dataset(data_dir, fashion, oh_train=False)
     identity_idx = jnp.arange(28*28)[None, :]
+    keys = jr.split(key, n_tasks)
     perm_idx = jnp.concatenate(
-        [identity_idx, jnp.array([jr.permutation(key, jnp.arange(28*28))
-                                  for _ in range(n_tasks-1)]),],
+        [identity_idx, jnp.array([jr.permutation(keys[i], jnp.arange(28*28))
+                                  for i in range(n_tasks-1)]),],
         axis=0,
     )
-    keys = jr.split(key, n_tasks)
+    keys = jr.split(keys[-1], n_tasks)
     permute_fn = lambda idx, k: \
         load_single_permuted_mnist_dataset(idx, ntrain_per_task, nval_per_task,
                                            ntest_per_task, dataset, key=k,
@@ -416,10 +417,10 @@ def load_split_mnist_dataset(
 # For experiments --------------------------------------------------------------
 
 pmnist_kwargs = {
-    'n_tasks': 5,
+    'n_tasks': 10,
     'ntrain_per_task': 300,
     'nval_per_task': 1,
-    'ntest_per_task': 1_000,
+    'ntest_per_task': 50,
 }
 smnist_kwargs = {
     'ntrain_per_task': 300,
