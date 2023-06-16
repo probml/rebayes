@@ -135,13 +135,14 @@ def _eval_metric(
                 "val": callbacks.cb_reg_nlpd_mc,
                 "test": callbacks.cb_reg_nlpd_mc,
             }
-    else: # TODO FIX
+    else: # Nonstationary
         result = {
             "val": partial(callbacks.cb_osa,
-                            evaluate_fn=partial(callbacks.ll_softmax, 
-                                                int_labels=False),
+                            evaluate_fn=partial(callbacks.ll_reg,
+                                                scale=obs_scale),
                             label="log_likelihood"),
-            "test": callbacks.cb_clf_discrete_tasks,
+            "test": partial(callbacks.cb_reg_sup,
+                            ymean=0.0, ystd=0.0,)
         }
     
     return result
