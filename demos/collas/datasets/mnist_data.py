@@ -115,7 +115,7 @@ def generate_random_angles(
     max_angle: float=180.0,
     key: int=0,
 ) -> jnp.ndarray:
-    """Generate random angles.
+    """Generate iid angles.
     """
     if isinstance(key, int):
         key = jax.random.PRNGKey(key)    
@@ -129,6 +129,8 @@ def generate_amplified_angles(
     min_angle: float=0.0,
     max_angle: float=180.0,
 ) -> jnp.ndarray:
+    """Generate angles with gradually increasing amplitude.
+    """
     t = np.linspace(0, 1.5, n_tasks)
     angles = np.exp(t) * np.sin(35 * t)
     angles /= angles.max()
@@ -141,26 +143,26 @@ def generate_amplified_angles(
 def generate_random_walk_angles(
     n_tasks: int,
     mean_angle: float=90.0,
-    std_angle: float=10.0,
-    time_const: float=1.0,
+    std_angle: float=30.0,
+    time_const: float=0.1,
     key: int=0
 ) -> jnp.ndarray:
     """Generate random walk angles using Ornstein-Uhlenbeck process.
     """
-    # TODO: Fix this
     if isinstance(key, int):
         key = jr.PRNGKey(key)
     sigma_bis = std_angle * jnp.sqrt(2. / time_const)
-    dt = jnp.sqrt(1/n_tasks)
+    dt = 1/n_tasks
 
-    def _step(carry, key):
-        next_angle = carry - (carry - mean_angle) / time_const + \
-            sigma_bis * dt * jr.normal(key,)
+    def _step(carry, args):
+        i, key = args
+        next_angle = carry - dt * (carry - mean_angle)/time_const + \
+            sigma_bis * jnp.sqrt(dt) * jr.normal(key,)
         
         return next_angle, next_angle
     
     keys = jr.split(key, n_tasks)
-    _, angles = scan(_step, mean_angle, keys)
+    _, angles = scan(_step, mean_angle, (jnp.arange(n_tasks), keys))
 
     return angles
 
