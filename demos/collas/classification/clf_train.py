@@ -22,7 +22,8 @@ def eval_agent_stationary(
     optimizer_dict: dict,
     eval_callback: Callable,
     n_iter: int=20,
-    key: int=0
+    key: int=0,
+    **kwargs
 ) -> dict:
     if isinstance(key, int):
         key = jr.PRNGKey(key)
