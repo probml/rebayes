@@ -143,6 +143,8 @@ def _initialize_regression(
     key: jnp.ndarray,
     model: nn.Module,
     input_dim: int,
+    output_dim: int,
+    emission_cov: float = 0.01,
 ) -> dict:
     """Initialize generic regression model.
     """
@@ -150,11 +152,13 @@ def _initialize_regression(
     flat_params, unflatten_fn = ravel_pytree(params)
     apply_fn = lambda w, x: model.apply({'params': unflatten_fn(w)}, x).ravel()
     emission_mean_function = apply_fn
+    emission_cov_function = lambda w, x: emission_cov * jnp.eye(output_dim)
     model_dict = {
         "model": model,
         "flat_params": flat_params,
         "apply_fn": apply_fn,
         "emission_mean_function": emission_mean_function,
+        "emission_cov_function": emission_cov_function,
     }
     
     return model_dict
@@ -164,13 +168,15 @@ def initialize_regression_cnn(
     key: int = 0,
     input_dim: Sequence[int] = (1, 28, 28, 1),
     output_dim: int = 1,
+    emission_cov: float = 0.01
 ) -> dict:
     """Initialize a CNN for regression.
     """
     if isinstance(key, int):
         key = jr.PRNGKey(key)
     model = CNN(input_dim=input_dim, output_dim=output_dim)
-    model_dict = _initialize_regression(key, model, input_dim)
+    model_dict = _initialize_regression(key, model, input_dim, 
+                                        output_dim, emission_cov)
     
     return model_dict
 
@@ -178,8 +184,9 @@ def initialize_regression_cnn(
 def initialize_regression_mlp(
     key: int = 0,
     input_dim: Sequence[int] = (28, 28, 1),
-    hidden_dims: Sequence[int] = (100, 100,),
+    hidden_dims: Sequence[int] = (500, 500,),
     output_dim: int = 1,
+    emission_cov: float = 0.01
 ) -> dict:
     """Initialize an MLP for regression.
     """
@@ -187,6 +194,7 @@ def initialize_regression_mlp(
         key = jr.PRNGKey(key)
     features = (*hidden_dims, output_dim)
     model = MLP(features=features)
-    model_dict = _initialize_regression(key, model, input_dim)
+    model_dict = _initialize_regression(key, model, input_dim,
+                                        output_dim, emission_cov)
     
     return model_dict
