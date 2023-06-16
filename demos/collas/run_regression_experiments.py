@@ -114,20 +114,27 @@ def _process_agent_args(agent_args, ranks, output_dim, problem, obs_scale):
 def _eval_metric(
     obs_scale: float,
     problem: str,
+    nll_method: str,
 ) -> dict:
     """Get evaluation metric for classification problem type.
     """
     if problem == "iid":
-        result = {
-            "val": partial(
-                callbacks.cb_eval,
-                evaluate_fn=callbacks.generate_ll_reg_eval_fn(obs_scale)
-            ),
-            "test": partial(
-                callbacks.cb_eval,
-                evaluate_fn=partial(callbacks.reg_eval_fn, scale=obs_scale)
-            )
-        }
+        if nll_method == "nll":
+            result = {
+                "val": partial(
+                    callbacks.cb_eval,
+                    evaluate_fn=callbacks.generate_ll_reg_eval_fn(obs_scale)
+                ),
+                "test": partial(
+                    callbacks.cb_eval,
+                    evaluate_fn=partial(callbacks.reg_eval_fn, scale=obs_scale)
+                )
+            }
+        else: # nlpd-mc
+            result = {
+                "val": callbacks.cb_reg_nlpd_mc,
+                "test": callbacks.cb_reg_nlpd_mc,
+            }
     else: # TODO FIX
         result = {
             "val": partial(callbacks.cb_osa,
@@ -258,7 +265,8 @@ def main(cl_args):
         target_digit=cl_args.target_digit, n=ntrain,
     )
     dataset_load_fn = partial(dataset_load_fn, dataset=base_dataset)
-    eval_metric = _eval_metric(cl_args.obs_scale, cl_args.problem)
+    eval_metric = _eval_metric(cl_args.obs_scale, cl_args.problem, 
+                               cl_args.nll_method)
     
     # Initialize model
     if cl_args.model == "cnn":
@@ -326,7 +334,7 @@ if __name__ == "__main__":
                         choices=[-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
     
     # Number of training samples
-    parser.add_argument("--ntrain", type=_check_positive_int, default=5_000)
+    parser.add_argument("--ntrain", type=_check_positive_int, default=1_000)
     
     # Type of model (mlp or cnn)
     parser.add_argument("--model", type=str, default="mlp",
