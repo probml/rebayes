@@ -229,7 +229,7 @@ def evaluate_and_store_result(
     """
     if isinstance(key, int):
         key = jr.PRNGKey(key)
-    if problem == "iid":
+    if problem == "iid" or problem == "amplified" or problem == "random-walk":
         eval_fn = train_utils.eval_agent_stationary
     else:
         eval_fn = train_utils.eval_agent_nonstationary
@@ -373,7 +373,7 @@ if __name__ == "__main__":
                         choices=AGENT_TYPES)
     
     # Number of random initializations for evaluation
-    parser.add_argument("--n_iter", type=int, default=20)
+    parser.add_argument("--n_iter", type=int, default=100)
     
     args = parser.parse_args()
     main(args)
