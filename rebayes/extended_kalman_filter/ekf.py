@@ -4,8 +4,8 @@ import chex
 from functools import partial
 import jax
 from jax import jit, vmap
-from jax import numpy as jnp
-import jax.random as jr
+from jax.flatten_util import ravel_pytree
+import jax.numpy as jnp
 from jaxtyping import Array, Float
 import tensorflow_probability.substrates.jax as tfp
 
@@ -214,3 +214,33 @@ class RebayesEKF(Rebayes):
         yhat_samples = vmap(self.emission_mean_function, (0, None))(params_sample, x)
         
         return yhat_samples
+
+
+def init_regression_agent(
+    model,
+    X_init,
+    dynamics_weights,
+    dynamics_covariance,
+    emission_cov,
+    method
+):
+    key = jax.random.PRNGKey(0)
+    _, dim_in = X_init.shape
+    pdummy = model.init(key, jnp.ones((1, dim_in)))
+    _, recfn = ravel_pytree(pdummy)
+
+    def apply_fn(flat_params, x):
+        return model.apply(recfn(flat_params), x)
+
+    agent = RebayesEKF(
+        dynamics_weights_or_function=dynamics_weights,
+        dynamics_covariance=dynamics_covariance,
+        emission_mean_function=apply_fn,
+        emission_cov_function=lambda m, x: emission_cov,
+        adaptive_emission_cov=False,
+        dynamics_covariance_inflation_factor=0.0,
+        emission_dist=lambda mean, cov: tfd.Normal(loc=mean, scale=jnp.sqrt(cov)),
+        method=method,
+    )
+
+    return agent, recfn
