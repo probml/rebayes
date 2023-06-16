@@ -6,6 +6,7 @@ from typing import Callable
 from pathlib import Path
 import pickle
 
+import jax
 import jax.numpy as jnp
 import jax.random as jr
 from jax.tree_util import tree_map
@@ -145,7 +146,7 @@ def _eval_metric(
                                                 scale=obs_scale),
                             label="log_likelihood"),
             "test": partial(callbacks.cb_reg_sup,
-                            ymean=0.0, ystd=0.0,)
+                            ymean=0.0, ystd=1.0,)
         }
     
     return result
@@ -235,6 +236,7 @@ def evaluate_and_store_result(
         eval_fn = train_utils.eval_agent_nonstationary
     result = eval_fn(model_init_fn, dataset_load_fn, optimizer_dict,
                      eval_callback, n_iter, key, **kwargs)
+    
     # Store result
     with open(Path(output_path, f"{agent_name}.pkl"), "wb") as f:
         pickle.dump(result, f)
@@ -308,6 +310,7 @@ def main(cl_args):
                                         "not found.")
     
     # Evaluate agents
+    kwargs["scale"] = cl_args.obs_scale
     for agent_name, hparams in agent_hparams.items():
         print(f"Evaluating {agent_name}...")
         agent_kwargs = agents[agent_name]
@@ -315,6 +318,7 @@ def main(cl_args):
             agent_kwargs.pop("pbounds")
         optimizer_dict = hparam_tune.build_estimator(model_init_fn, hparams,
                                                      agent_name, **agent_kwargs)
+        
         _ = evaluate_and_store_result(output_path, model_init_fn,
                                       dataset_load_fn, optimizer_dict,
                                       eval_metric["test"], agent_name,
