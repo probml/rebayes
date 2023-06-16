@@ -32,7 +32,7 @@ def eval_agent_stationary(
     agent, init_cov = optimizer_dict["agent"], optimizer_dict["init_cov"]
     X_test, y_test = dataset["test"]
     test_kwargs = {"agent": agent, "X_test": X_test, "y_test": y_test, 
-                   "apply_fn": model["apply_fn"], "key": key}
+                   "apply_fn": model["apply_fn"], "key": key, **kwargs}
     
     @scan_tqdm(n_iter)
     def _step(_, i):
