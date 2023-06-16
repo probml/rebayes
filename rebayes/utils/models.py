@@ -144,7 +144,7 @@ def _initialize_regression(
     model: nn.Module,
     input_dim: int,
     output_dim: int,
-    emission_cov: float = 0.01,
+    emission_cov: float = 1.0,
 ) -> dict:
     """Initialize generic regression model.
     """
@@ -168,7 +168,7 @@ def initialize_regression_cnn(
     key: int = 0,
     input_dim: Sequence[int] = (1, 28, 28, 1),
     output_dim: int = 1,
-    emission_cov: float = 0.01
+    emission_cov: float = 1.0
 ) -> dict:
     """Initialize a CNN for regression.
     """
@@ -186,7 +186,7 @@ def initialize_regression_mlp(
     input_dim: Sequence[int] = (28, 28, 1),
     hidden_dims: Sequence[int] = (500, 500,),
     output_dim: int = 1,
-    emission_cov: float = 0.01
+    emission_cov: float = 1.0
 ) -> dict:
     """Initialize an MLP for regression.
     """
