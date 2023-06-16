@@ -106,7 +106,7 @@ def _eval_metric(
         result = {
             "val": partial(
                 callbacks.cb_eval,
-                evaluate_fn=callbacks.generate_ll_reg_eval_fn(scale=obs_noise)
+                evaluate_fn=callbacks.nrmse_reg_eval_fn
             ),
             "test": partial(
                 callbacks.cb_eval,

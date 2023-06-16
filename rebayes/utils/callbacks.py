@@ -172,6 +172,9 @@ generate_ll_reg_eval_fn = lambda scale: \
     partial(evaluate_function, label="ll", loss_fn=partial(ll_reg, scale=scale))
 generate_nll_reg_eval_fn = lambda scale: \
     partial(evaluate_function, label="nll", loss_fn=partial(nll_reg, scale=scale))
+rmse_reg = lambda pred_obs, y: jnp.sqrt(jnp.mean(jnp.power(pred_obs - y, 2)))
+nrmse_reg = lambda pred_obs, y: -rmse_reg(pred_obs, y)
+nrmse_reg_eval_fn = partial(evaluate_function, label="nrmse", loss_fn=nrmse_reg)
 
 # ------------------------------------------------------------------------------
 # Classification
