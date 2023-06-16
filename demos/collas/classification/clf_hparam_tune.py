@@ -1,10 +1,7 @@
 from functools import partial
 
-import jax
 import jax.numpy as jnp
 import jax.random as jr
-from rebayes import base
-from jax.flatten_util import ravel_pytree
 from jax import vmap, jit
 from bayes_opt import BayesianOptimization
 import optax
@@ -65,8 +62,8 @@ def bbf_lofi(
         emission_dist=lambda mean, cov: tfd.Categorical(probs=mean),
     )
     
-    test_cb_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test, 
-                      "apply_fn": model_dict["apply_fn"], "key": jr.PRNGKey(0), 
+    test_cb_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test,
+                      "apply_fn": model_dict["apply_fn"], "key": jr.PRNGKey(0),
                       **kwargs}
 
     result = []
