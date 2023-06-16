@@ -280,14 +280,14 @@ class FifoSGDLaplaceDiag(FifoSGD):
         yhat_samples = jax.vmap(bel.apply_fn, (0, None))(params_sample, x)
         return yhat_samples
 
-    @partial(jax.jit, static_argnames=("self", "n_samples", "glm_predictive"))
-    def nlpd_mc(self, bel, key, x, y, n_samples=30, glm_predictive=False):
+    @partial(jax.jit, static_argnames=("self", "n_samples"))
+    def nlpd_mc(self, bel, key, x, y, n_samples=30):
         """
         Compute the negative log predictive density (nlpd) as a
         Monte Carlo (MC) estimate.
         """
         x = jnp.atleast_2d(x)
-        y = jnp.atleast_2d(y)
+        y = jnp.atleast_1d(y)
         # 1. Sample params
         params_sample = self._sample_posterior_params(key, bel, nsamples=n_samples)
         # 2. Compute vectorised nlpd (vnlpd)
