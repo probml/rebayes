@@ -280,7 +280,7 @@ if __name__ == "__main__":
                         choices=["stationary", "permuted", "rotating", "split"])
     
     # Type of dataset (mnist or f-mnist)
-    parser.add_argument("--dataset", type=str, default="mnist", 
+    parser.add_argument("--dataset", type=str, default="f-mnist", 
                         choices=["mnist", "f-mnist"])
     
     # Type of model (mlp or cnn)
