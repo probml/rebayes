@@ -34,9 +34,9 @@ def _check_positive_float(value):
     return fvalue
 
 
-def _process_agent_args(agent_args, ranks, output_dim, problem, obs_noise):
+def _process_agent_args(agent_args, ranks, output_dim, problem, obs_scale):
     agents = {}
-    sgd_loss_fn = partial(callbacks.nll_reg, scale=obs_noise)
+    sgd_loss_fn = partial(callbacks.nll_reg, scale=obs_scale)
     
     # Bounds for tuning
     sgd_pbounds = {
@@ -97,7 +97,7 @@ def _process_agent_args(agent_args, ranks, output_dim, problem, obs_noise):
 
 
 def _eval_metric(
-    obs_noise: float,
+    obs_scale: float,
     problem: str,
 ) -> dict:
     """Get evaluation metric for classification problem type.
@@ -106,11 +106,11 @@ def _eval_metric(
         result = {
             "val": partial(
                 callbacks.cb_eval,
-                evaluate_fn=callbacks.generate_ll_reg_eval_fn(obs_noise)
+                evaluate_fn=callbacks.generate_ll_reg_eval_fn(obs_scale)
             ),
             "test": partial(
                 callbacks.cb_eval,
-                evaluate_fn=callbacks.reg_eval_fn
+                evaluate_fn=partial(callbacks.reg_eval_fn, scale=obs_scale)
             )
         }
     else: # TODO FIX
@@ -233,24 +233,25 @@ def main(cl_args):
     # Load dataset
     dataset = mnist_data.Datasets["rotated-mnist"]
     dataset_load_fn, kwargs = dataset.values()
-    target_digit = None if cl_args.target_digit == -1 else cl_args.target_digit
-    dataset_load_fn = partial(dataset_load_fn, 
-                              fashion=cl_args.dataset=="f-mnist",
-                              target_digit=target_digit)
-    eval_metric = _eval_metric(cl_args.obs_noise, cl_args.problem)
+    base_dataset = mnist_data.load_target_digit_dataset(
+        fashion=cl_args.dataset=="f-mnist",
+        target_digit=cl_args.target_digit
+    )
+    dataset_load_fn = partial(dataset_load_fn, dataset=base_dataset)
+    eval_metric = _eval_metric(cl_args.obs_scale, cl_args.problem)
     
     # Initialize model
     if cl_args.model == "cnn":
         model_init_fn = partial(models.initialize_regression_cnn, 
-                                emission_cov=cl_args.obs_noise)
+                                emission_cov=cl_args.obs_scale)
     else: # cl_args.model == "mlp"
         model_init_fn = partial(models.initialize_regression_mlp, 
-                                emission_cov=cl_args.obs_noise)
+                                emission_cov=cl_args.obs_scale)
     
     # Set up agents
     output_dim = 1
     agents = _process_agent_args(cl_args.agents, cl_args.ranks, output_dim,
-                                 cl_args.problem, cl_args.obs_noise)
+                                 cl_args.problem, cl_args.obs_scale)
     
     # Set up hyperparameter tuning
     hparam_path = Path(config_path, cl_args.problem, 
@@ -309,7 +310,7 @@ if __name__ == "__main__":
                         choices=["mlp", "cnn"])
     
     # Observation noise
-    parser.add_argument("--obs_noise", type=_check_positive_float, default=15.0)
+    parser.add_argument("--obs_scale", type=_check_positive_float, default=15.0)
     
     # Negative log likelihood evaluation method
     parser.add_argument("--nll_method", type=str, default="nll", 
