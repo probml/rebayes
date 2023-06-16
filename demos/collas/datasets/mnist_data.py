@@ -163,6 +163,7 @@ def generate_rotated_images(
     angle_fn: Callable=None,
     min_angle: float=0.0,
     max_angle: float=180.0,
+    include_labels: bool=True,
 ) -> Tuple[jnp.ndarray, jnp.ndarray]:
     """Generate rotated images.
     """
@@ -176,8 +177,10 @@ def generate_rotated_images(
         labels = labels[labels == target_digit][:n]
     angles = angle_fn(len(imgs), min_angle, max_angle, key)
     imgs_rot = vmap(rotate_mnist)(imgs, angles)
+    if include_labels:
+        return imgs_rot, angles, labels
     
-    return imgs_rot, angles, labels
+    return imgs_rot, angles
 
 
 def load_rotated_mnist_dataset(
@@ -192,6 +195,7 @@ def load_rotated_mnist_dataset(
     ntrain: int=None,
     nval: int=None,
     ntest: int=None,
+    include_labels: bool=True,
     **process_kwargs,
 ) -> dict:
     """Load rotated MNIST dataset.
@@ -202,10 +206,12 @@ def load_rotated_mnist_dataset(
         dataset = load_mnist_dataset(data_dir, fashion, oh_train=False)
     train, val, test = \
         (generate_rotated_images(*dataset[k], n, key_, target_digit, angle_fn,
-                                 min_angle, max_angle) 
+                                 min_angle, max_angle, include_labels) 
          for k, n, key_ in zip(['train', 'val', 'test'], [ntrain, nval, ntest],
                                jr.split(key, 3)))
-    dataset = process_mnist_dataset(train, val, test, **process_kwargs)
+    oh_train = True if include_labels else False
+    dataset = process_mnist_dataset(train, val, test, oh_train=oh_train,
+                                    **process_kwargs)
     
     return dataset
     
@@ -416,6 +422,10 @@ def load_split_mnist_dataset(
 
 # For experiments --------------------------------------------------------------
 
+mnist_kwargs = {
+    "ntrain": 500,
+    "nval": 1_000,
+}
 pmnist_kwargs = {
     'n_tasks': 10,
     'ntrain_per_task': 300,
@@ -427,19 +437,24 @@ smnist_kwargs = {
     'nval_per_task': 1,
     'ntest_per_task': 500,
 }
+rmnist_kwargs = {
+    "ntrain": 5_000,
+    "nval": 100,
+}
 
 Datasets = {
     'stationary-mnist': {
-        "load_fn": partial(load_mnist_dataset, ntrain=500, nval=1_000,),
-        "configs": {}
+        "load_fn": partial(load_mnist_dataset, **mnist_kwargs),
+        "configs": mnist_kwargs,
     },
     'permuted-mnist': {
         "load_fn": partial(load_permuted_mnist_dataset, **pmnist_kwargs),
         "configs": pmnist_kwargs,
     },
     'rotated-mnist': {
-        "load_fn": load_rotated_mnist_dataset,
-        "configs": {}
+        "load_fn": partial(load_rotated_mnist_dataset, include_labels=False,
+                           **rmnist_kwargs),
+        "configs": rmnist_kwargs,
     },
     'rotated-permuted-mnist': {
         "load_fn": load_rotated_permuted_mnist_dataset,
