@@ -100,9 +100,10 @@ def eval_agent_nonstationary(
         )
         curr_result = jax.tree_map(lambda *xs: jnp.concatenate(xs), *curr_result)
         if result is None:
-            result = curr_result
+            result = jax.tree_map(lambda xs: jnp.array([xs]), curr_result)
         else:
-            result = jax.tree_map(lambda x, y: jnp.array([*x, *y]), result, curr_result)
+            result = jax.tree_map(lambda x, y: jnp.array([*x, y]), 
+                                  result, curr_result)
     runtime = time() - start_time
     result["runtime"] = runtime
     
