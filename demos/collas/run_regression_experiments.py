@@ -8,6 +8,7 @@ import pickle
 
 import jax.numpy as jnp
 import jax.random as jr
+from jax.tree_util import tree_map
 
 import demos.collas.datasets.mnist_data as mnist_data
 import rebayes.utils.models as models
@@ -132,7 +133,9 @@ def _eval_metric(
             }
         else: # nlpd-mc
             result = {
-                "val": callbacks.cb_reg_nlpd_mc,
+                "val": lambda *args, **kwargs: tree_map(
+                    lambda x: -x, callbacks.cb_reg_nlpd_mc(*args, **kwargs)
+                ),
                 "test": callbacks.cb_reg_nlpd_mc,
             }
     else: # TODO FIX
