@@ -174,7 +174,15 @@ generate_nll_reg_eval_fn = lambda scale: \
     partial(evaluate_function, label="nll", loss_fn=partial(nll_reg, scale=scale))
 rmse_reg = lambda pred_obs, y: jnp.sqrt(jnp.mean(jnp.power(pred_obs - y, 2)))
 nrmse_reg = lambda pred_obs, y: -rmse_reg(pred_obs, y)
+rmse_reg_eval_fn = partial(evaluate_function, label="rmse", loss_fn=rmse_reg)
 nrmse_reg_eval_fn = partial(evaluate_function, label="nrmse", loss_fn=nrmse_reg)
+
+def reg_eval_fn(flat_params, apply_fn, X_test, y_test, scale):
+    nll = generate_nll_reg_eval_fn(scale)(flat_params, apply_fn, X_test, y_test)
+    rmse = rmse_reg_eval_fn(flat_params, apply_fn, X_test, y_test)
+    result = {**nll, **rmse}
+    
+    return result
 
 # ------------------------------------------------------------------------------
 # Classification
