@@ -94,13 +94,31 @@ def cb_clf_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, lagn=20, store_fro=Tr
     return res
 
 
-def cb_reg_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, ymean, ystd, steps=10, **kwargs):
+def cb_reg_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, ymean, ystd, steps=10, 
+               only_window_eval=False, **kwargs):
     """
     Callback for a regression task with a supervised loss function.
     """
     X_test, y_test = kwargs["X_test"], kwargs["y_test"]
-
+    
     slice_ix = jnp.arange(0, steps) + t - steps // 2
+    
+    if only_window_eval:
+        X_window = jnp.take(X_test, slice_ix, axis=0)
+        y_window = jnp.take(y_test, slice_ix, axis=0)
+        
+        # eval on window
+        yhat_window = jax.vmap(apply_fn, (None, 0))(bel_pred.mean, X_test).squeeze()
+        y_window = y_window * ystd + ymean
+        yhat_window = yhat_window.ravel() * ystd + ymean
+        
+        err_window = jnp.sqrt(jnp.power(y_window - yhat_window, 2).mean())
+        
+        res_window = {
+            "window-metric": err_window
+        }
+        
+        return res_window
 
     # eval on all tasks test set
     yhat_test = jax.vmap(apply_fn, (None, 0))(bel_pred.mean, X_test).squeeze()

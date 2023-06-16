@@ -117,6 +117,7 @@ def _eval_metric(
     obs_scale: float,
     problem: str,
     nll_method: str,
+    window: bool,
 ) -> dict:
     """Get evaluation metric for classification problem type.
     """
@@ -146,7 +147,8 @@ def _eval_metric(
                                                 scale=obs_scale),
                             label="log_likelihood"),
             "test": partial(callbacks.cb_reg_sup,
-                            ymean=0.0, ystd=1.0,)
+                            ymean=0.0, ystd=1.0, 
+                            only_window_eval=window)
         }
     
     return result
@@ -272,7 +274,7 @@ def main(cl_args):
     )
     dataset_load_fn = partial(dataset_load_fn, dataset=base_dataset)
     eval_metric = _eval_metric(cl_args.obs_scale, cl_args.problem, 
-                               cl_args.nll_method)
+                               cl_args.nll_method, cl_args.window)
     
     # Initialize model
     if cl_args.model == "cnn":
@@ -378,6 +380,9 @@ if __name__ == "__main__":
     
     # Number of random initializations for evaluation
     parser.add_argument("--n_iter", type=int, default=100)
+    
+    # Evaluate on the window only
+    parser.add_argument("--window", action="store_true")
     
     args = parser.parse_args()
     main(args)
