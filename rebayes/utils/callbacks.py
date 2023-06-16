@@ -103,7 +103,7 @@ def cb_reg_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, ymean, ystd, steps=10
     slice_ix = jnp.arange(0, steps) + t - steps // 2
 
     # eval on all tasks test set
-    yhat_test = apply_fn(bel_pred.mean, X_test).squeeze()
+    yhat_test = jax.vmap(apply_fn, (None, 0))(bel_pred.mean, X_test).squeeze()
 
     # De-normalise target variables
     y_test = y_test * ystd + ymean
