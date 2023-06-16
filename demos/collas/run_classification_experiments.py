@@ -95,14 +95,14 @@ def _eval_metric(
     """
     if problem == "stationary":
         result = {
-            "val": partial(callbacks.cb_clf_eval,
+            "val": partial(callbacks.cb_eval,
                             evaluate_fn=callbacks.softmax_ll_il_clf_eval_fn),
-            "test": partial(callbacks.cb_clf_eval,
+            "test": partial(callbacks.cb_eval,
                             evaluate_fn=callbacks.softmax_clf_eval_fn)
         }
     else:
         result = {
-            "val": partial(callbacks.cb_clf_osa,
+            "val": partial(callbacks.cb_osa,
                             evaluate_fn=partial(callbacks.ll_softmax, 
                                                 int_labels=False),
                             label="log_likelihood"),
