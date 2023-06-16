@@ -5,6 +5,7 @@ import augmax
 import numpy as np
 import jax
 from jax import vmap
+from jax.lax import scan
 import jax.numpy as jnp
 import jax.random as jr
 from jax.tree_util import tree_map
@@ -114,12 +115,55 @@ def generate_random_angles(
     max_angle: float=180.0,
     key: int=0,
 ) -> jnp.ndarray:
-    """Generate random angles.
+    """Generate iid angles.
     """
     if isinstance(key, int):
         key = jax.random.PRNGKey(key)    
     angles = jr.uniform(key, (n_tasks,), minval=min_angle, maxval=max_angle)
     
+    return angles
+
+
+def generate_amplified_angles(
+    n_tasks: int,
+    min_angle: float=0.0,
+    max_angle: float=180.0,
+) -> jnp.ndarray:
+    """Generate angles with gradually increasing amplitude.
+    """
+    t = np.linspace(0, 1.5, n_tasks)
+    angles = np.exp(t) * np.sin(35 * t)
+    angles /= angles.max()
+    angles = (angles + 1) / 2 * (max_angle - min_angle) + \
+        min_angle + np.random.randn(n_tasks) * 2
+        
+    return angles
+
+
+def generate_random_walk_angles(
+    n_tasks: int,
+    mean_angle: float=90.0,
+    std_angle: float=30.0,
+    time_const: float=0.1,
+    key: int=0
+) -> jnp.ndarray:
+    """Generate random walk angles using Ornstein-Uhlenbeck process.
+    """
+    if isinstance(key, int):
+        key = jr.PRNGKey(key)
+    sigma_bis = std_angle * jnp.sqrt(2. / time_const)
+    dt = 1/n_tasks
+
+    def _step(carry, args):
+        i, key = args
+        next_angle = carry - dt * (carry - mean_angle)/time_const + \
+            sigma_bis * jnp.sqrt(dt) * jr.normal(key,)
+        
+        return next_angle, next_angle
+    
+    keys = jr.split(key, n_tasks)
+    _, angles = scan(_step, mean_angle, (jnp.arange(n_tasks), keys))
+
     return angles
 
 
@@ -157,6 +201,7 @@ def process_angles(
 def _filter_target_digit(
     dataset: Tuple,
     target_digit: int,
+    n: int=None,
 ) -> Tuple:
     """Filter dataset for a target digit.
     """
@@ -166,12 +211,14 @@ def _filter_target_digit(
     X, *args, Y = dataset
     idx = Y == target_digit
     X, Y = X[idx], Y[idx]
+    if n is not None:
+        X, Y = X[:n], Y[:n]
     new_args = []
     for arg in args:
         if isinstance(arg, dict):
-            arg = tree_map(lambda x: x[idx], arg)
+            arg = tree_map(lambda x: x[idx][:n], arg)
         else:
-            arg = arg[idx]
+            arg = arg[idx][:n]
         new_args.append(arg)
             
     return X, *new_args, Y
@@ -210,6 +257,7 @@ def load_target_digit_dataset(
     data_dir: str="/tmp/data",
     fashion: bool=False,
     target_digit: int=0,
+    n: int=None, 
 ):
     """Generate rotated MNIST dataset for a target digit.
     """
@@ -465,6 +513,23 @@ def load_split_mnist_dataset(
 
 # For experiments --------------------------------------------------------------
 
+def generate_rmnist_experiment(
+    ntrain: int,
+    angle_fn: Callable,
+):
+    kwargs = {
+        "ntrain": ntrain,
+        "nval": 500,
+    }
+    dataset = {
+        "load_fn": partial(load_rotated_mnist_dataset, include_labels=False,
+                           angle_fn=angle_fn, **kwargs),
+        "configs": kwargs,
+    }
+    
+    return dataset
+
+
 mnist_kwargs = {
     "ntrain": 500,
     "nval": 1_000,
@@ -480,10 +545,6 @@ smnist_kwargs = {
     'nval_per_task': 1,
     'ntest_per_task': 500,
 }
-rmnist_kwargs = {
-    "ntrain": 5_000,
-    "nval": 100,
-}
 
 Datasets = {
     'stationary-mnist': {
@@ -493,11 +554,6 @@ Datasets = {
     'permuted-mnist': {
         "load_fn": partial(load_permuted_mnist_dataset, **pmnist_kwargs),
         "configs": pmnist_kwargs,
-    },
-    'rotated-mnist': {
-        "load_fn": partial(load_rotated_mnist_dataset, include_labels=False,
-                           **rmnist_kwargs),
-        "configs": rmnist_kwargs,
     },
     'rotated-permuted-mnist': {
         "load_fn": load_rotated_permuted_mnist_dataset,

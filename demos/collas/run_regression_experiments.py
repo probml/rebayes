@@ -34,6 +34,21 @@ def _check_positive_float(value):
     return fvalue
 
 
+def _process_angle_fn(problem):
+    match problem:
+        case "iid":
+            angle_fn = mnist_data.generate_random_angles
+        case "amplified":
+            angle_fn = mnist_data.generate_amplified_angles
+        case "random_walk":
+            angle_fn = mnist_data.generate_random_walk_angles
+        case other:
+            # TODO: Implement permuted rotating regression
+            angle_fn = None
+    
+    return angle_fn
+
+
 def _process_agent_args(agent_args, ranks, output_dim, problem, obs_scale):
     agents = {}
     sgd_loss_fn = partial(callbacks.nll_reg, scale=obs_scale)
@@ -219,8 +234,9 @@ def evaluate_and_store_result(
 def main(cl_args):
     # Set output path
     output_path = os.environ.get("REBAYES_OUTPUT")
+    problem_name = cl_args.problem + "-" + str(cl_args.ntrain)
     if output_path is None:
-        output_path = Path("regression", "outputs", cl_args.problem,
+        output_path = Path("regression", "outputs", problem_name,
                            cl_args.dataset, cl_args.model)
     Path(output_path).mkdir(parents=True, exist_ok=True)
     
@@ -231,11 +247,15 @@ def main(cl_args):
     Path(config_path).mkdir(parents=True, exist_ok=True)
     
     # Load dataset
-    dataset = mnist_data.Datasets["rotated-mnist"]
+    angle_fn = _process_angle_fn(cl_args.problem)
+    dataset = mnist_data.generate_rmnist_experiment(cl_args.ntrain, angle_fn)
     dataset_load_fn, kwargs = dataset.values()
+    ntrain = None
+    if kwargs is not None and "ntrain" in kwargs:
+        ntrain = kwargs["ntrain"]
     base_dataset = mnist_data.load_target_digit_dataset(
         fashion=cl_args.dataset=="f-mnist",
-        target_digit=cl_args.target_digit
+        target_digit=cl_args.target_digit, n=ntrain,
     )
     dataset_load_fn = partial(dataset_load_fn, dataset=base_dataset)
     eval_metric = _eval_metric(cl_args.obs_scale, cl_args.problem)
@@ -254,7 +274,7 @@ def main(cl_args):
                                  cl_args.problem, cl_args.obs_scale)
     
     # Set up hyperparameter tuning
-    hparam_path = Path(config_path, cl_args.problem, 
+    hparam_path = Path(config_path, problem_name,
                        cl_args.dataset, cl_args.model)
     if cl_args.tune:
         agent_hparams = \
@@ -295,7 +315,7 @@ if __name__ == "__main__":
     
     # Problem type (stationary, permuted, rotated, or split)
     parser.add_argument("--problem", type=str, default="iid",
-                        choices=["iid", "gradual", "random-walk", "permuted"])
+                        choices=["iid", "amplified", "random-walk", "permuted"])
     
     # Type of dataset (mnist or f-mnist)
     parser.add_argument("--dataset", type=str, default="f-mnist", 
@@ -304,6 +324,9 @@ if __name__ == "__main__":
     # Target digit
     parser.add_argument("--target_digit", type=int, default=2,
                         choices=[-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+    
+    # Number of training samples
+    parser.add_argument("--ntrain", type=_check_positive_int, default=5_000)
     
     # Type of model (mlp or cnn)
     parser.add_argument("--model", type=str, default="mlp",
