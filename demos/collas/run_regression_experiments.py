@@ -297,7 +297,7 @@ if __name__ == "__main__":
                         choices=["iid", "gradual", "random-walk", "permuted"])
     
     # Type of dataset (mnist or f-mnist)
-    parser.add_argument("--dataset", type=str, default="mnist", 
+    parser.add_argument("--dataset", type=str, default="f-mnist", 
                         choices=["mnist", "f-mnist"])
     
     # Target digit
@@ -309,16 +309,16 @@ if __name__ == "__main__":
                         choices=["mlp", "cnn"])
     
     # Observation noise
-    parser.add_argument("--obs_noise", type=_check_positive_float, default=0.01)
+    parser.add_argument("--obs_noise", type=_check_positive_float, default=15.0)
     
     # Tune the hyperparameters of the agents
     parser.add_argument("--tune", action="store_true")
     
     # Set the number of exploration steps
-    parser.add_argument("--n_explore", type=int, default=20)
+    parser.add_argument("--n_explore", type=int, default=10)
     
     # Set the number of exploitation steps
-    parser.add_argument("--n_exploit", type=int, default=25)
+    parser.add_argument("--n_exploit", type=int, default=15)
     
     # Set the verbosity of the Bayesopt procedure
     parser.add_argument("--verbose", type=int, default=2,
