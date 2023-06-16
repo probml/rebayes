@@ -452,12 +452,12 @@ class RebayesLoFiDiagonal(RebayesLoFi):
 
 
 def init_regression_agent(
-        model,
-        X_init,
-        dynamics_weights,
-        dynamics_covariance,
-        emission_cov,
-        memory_size
+    model,
+    X_init,
+    dynamics_weights,
+    dynamics_covariance,
+    emission_cov,
+    memory_size
 ):
     key = jax.random.PRNGKey(0)
     _, dim_in = X_init.shape
