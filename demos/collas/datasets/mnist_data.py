@@ -132,11 +132,13 @@ def generate_amplified_angles(
 ) -> jnp.ndarray:
     """Generate angles with gradually increasing amplitude.
     """
-    t = np.linspace(0, 1.5, n_tasks)
-    angles = np.exp(t) * np.sin(35 * t)
+    if isinstance(key, int):
+        key = jr.PRNGKey(key)
+    t = jnp.linspace(0, 1.5, n_tasks)
+    angles = jnp.exp(t) * jnp.sin(35 * t)
     angles /= angles.max()
     angles = (angles + 1) / 2 * (max_angle - min_angle) + \
-        min_angle + np.random.randn(n_tasks) * 2
+        min_angle + jr.normal(key=key, shape=(n_tasks,)) * 2
         
     return angles
 
