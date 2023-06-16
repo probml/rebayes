@@ -128,6 +128,7 @@ def generate_amplified_angles(
     n_tasks: int,
     min_angle: float=0.0,
     max_angle: float=180.0,
+    key: int=0,
 ) -> jnp.ndarray:
     """Generate angles with gradually increasing amplitude.
     """
@@ -142,15 +143,17 @@ def generate_amplified_angles(
 
 def generate_random_walk_angles(
     n_tasks: int,
-    mean_angle: float=90.0,
-    std_angle: float=30.0,
-    time_const: float=0.1,
+    min_angle: float=0.0,
+    max_angle: float=180.0,
     key: int=0
 ) -> jnp.ndarray:
     """Generate random walk angles using Ornstein-Uhlenbeck process.
     """
     if isinstance(key, int):
         key = jr.PRNGKey(key)
+    mean_angle = (min_angle+max_angle)/2
+    std_angle = mean_angle/3
+    time_const = 0.1
     sigma_bis = std_angle * jnp.sqrt(2. / time_const)
     dt = 1/n_tasks
 
