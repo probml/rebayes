@@ -203,7 +203,7 @@ def evaluate_and_store_result(
     """
     if isinstance(key, int):
         key = jr.PRNGKey(key)
-    if problem == "stationary":
+    if problem == "iid":
         eval_fn = train_utils.eval_agent_stationary
     else:
         eval_fn = train_utils.eval_agent_nonstationary
