@@ -163,7 +163,7 @@ class Rebayes(ABC):
             R = self.obs_cov(bel, x)
             log_likelihood = self.emission_dist(mean, R).log_prob(y)
             
-            return log_likelihood.sum()
+            return log_likelihood.mean()
 
         # Compute vectorised nlpd
         lpd = vmap(vmap(llfn, (None, 0, 0)), (0, None, None))(params_sample, x, y)
