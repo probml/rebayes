@@ -6,8 +6,8 @@ from typing import Callable
 from pathlib import Path
 import pickle
 
+import jax.numpy as jnp
 import jax.random as jr
-import optax
 
 import demos.collas.datasets.mnist_data as mnist_data
 import rebayes.utils.models as models
@@ -34,13 +34,13 @@ def _check_positive_float(value):
     return fvalue
 
 
-def _process_agent_args(agent_args, ranks, output_dim, problem):
+def _process_agent_args(agent_args, ranks, output_dim, problem, obs_noise):
     agents = {}
-    sgd_loss_fn = optax.softmax_cross_entropy if output_dim >= 2 \
-        else optax.sigmoid_binary_cross_entropy
+    sgd_loss_fn = partial(callbacks.nll_reg, scale=obs_noise)
     
     # Bounds for tuning
     sgd_pbounds = {
+        "log_init_cov": (-10.0, 0.0),
         "log_learning_rate": (-10.0, 0.0),
     }
     if problem == "iid":
@@ -106,7 +106,7 @@ def _eval_metric(
         result = {
             "val": partial(
                 callbacks.cb_eval,
-                evaluate_fn=callbacks.nrmse_reg_eval_fn
+                evaluate_fn=callbacks.generate_ll_reg_eval_fn(obs_noise)
             ),
             "test": partial(
                 callbacks.cb_eval,
@@ -162,7 +162,7 @@ def tune_and_store_hyperparameters(
         optimizer = hparam_tune.create_optimizer(
             model_init_fn, pbounds, dataset["train"], dataset["val"],
             val_callback, agent_name, verbose=verbose, callback_at_end=False,
-            **agent_params
+            classification=False, **agent_params
         )
         optimizer.maximize(init_points=n_explore, n_iter=n_exploit)
         best_hparams = hparam_tune.get_best_params(optimizer, agent_name)
@@ -250,7 +250,7 @@ def main(cl_args):
     # Set up agents
     output_dim = 1
     agents = _process_agent_args(cl_args.agents, cl_args.ranks, output_dim,
-                                 cl_args.problem)
+                                 cl_args.problem, cl_args.obs_noise)
     
     # Set up hyperparameter tuning
     hparam_path = Path(config_path, cl_args.problem, 
@@ -310,6 +310,10 @@ if __name__ == "__main__":
     
     # Observation noise
     parser.add_argument("--obs_noise", type=_check_positive_float, default=15.0)
+    
+    # Negative log likelihood evaluation method
+    parser.add_argument("--nll_method", type=str, default="nll", 
+                        choices=["nll", "nlpd-mc"])
     
     # Tune the hyperparameters of the agents
     parser.add_argument("--tune", action="store_true")
