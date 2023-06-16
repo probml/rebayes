@@ -110,7 +110,7 @@ def _eval_metric(
             ),
             "test": partial(
                 callbacks.cb_eval,
-                evaluate_fn=callbacks.softmax_clf_eval_fn # TODO FIX
+                evaluate_fn=callbacks.reg_eval_fn
             )
         }
     else: # TODO FIX
