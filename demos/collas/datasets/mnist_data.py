@@ -263,7 +263,7 @@ def load_target_digit_dataset(
     """
     dataset = load_mnist_dataset(data_dir, fashion, oh_train=False)
     train, val, test = \
-        (_filter_target_digit(dataset[split], target_digit) 
+        (_filter_target_digit(dataset[split], target_digit, n=n) 
          for split in ['train', 'val', 'test'])
     dataset = {
         'train': train,
