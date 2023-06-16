@@ -152,6 +152,29 @@ def process_angles(
         "angles_mean": angles_mean,
         "angles_std": angles_std,
     }
+    
+
+def _filter_target_digit(
+    dataset: Tuple,
+    target_digit: int,
+) -> Tuple:
+    """Filter dataset for a target digit.
+    """
+    if target_digit == -1:
+        return dataset
+    
+    X, *args, Y = dataset
+    idx = Y == target_digit
+    X, Y = X[idx], Y[idx]
+    new_args = []
+    for arg in args:
+        if isinstance(arg, dict):
+            arg = tree_map(lambda x: x[idx], arg)
+        else:
+            arg = arg[idx]
+        new_args.append(arg)
+            
+    return X, *new_args, Y
 
 
 def generate_rotated_images(
@@ -181,6 +204,26 @@ def generate_rotated_images(
         return imgs_rot, angles, labels
     
     return imgs_rot, angles
+
+
+def load_target_digit_dataset(
+    data_dir: str="/tmp/data",
+    fashion: bool=False,
+    target_digit: int=0,
+):
+    """Generate rotated MNIST dataset for a target digit.
+    """
+    dataset = load_mnist_dataset(data_dir, fashion, oh_train=False)
+    train, val, test = \
+        (_filter_target_digit(dataset[split], target_digit) 
+         for split in ['train', 'val', 'test'])
+    dataset = {
+        'train': train,
+        'val': val,
+        'test': test,
+    }
+    
+    return dataset
 
 
 def load_rotated_mnist_dataset(
