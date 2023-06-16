@@ -170,7 +170,7 @@ def cb_reg_nlpd_mc(bel, pred_obs, t, X, y, bel_pred, nan_val=-1e8, **kwargs):
     X_test, y_test, apply_fn, agent = \
         kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"], kwargs["agent"]
     key = jax.random.fold_in(kwargs["key"], t)
-    nlpd = agent.nlpd_mc(bel, key, X_test, y_test).mean()
+    nlpd = agent.nlpd_mc(bel, key, X_test[:, jnp.newaxis, :], y_test).mean()
     nlpd = {
         "nlpd": jnp.where(jnp.isnan(nlpd), nan_val, nlpd)
     }
