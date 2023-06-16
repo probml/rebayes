@@ -166,7 +166,7 @@ def cb_reg_mc(bel, pred_obs, t, X, y, bel_pred, apply_fn, steps=10, **kwargs):
 
 
 # Evaluation functions
-ll_reg = lambda pred_obs, y, scale: distrax.Normal(pred_obs, 1.).log_prob(y).mean()
+ll_reg = lambda pred_obs, y, scale: distrax.Normal(pred_obs, scale).log_prob(y).mean()
 nll_reg = lambda pred_obs, y, scale: -ll_reg(pred_obs, y, scale)
 generate_ll_reg_eval_fn = lambda scale: \
     partial(evaluate_function, label="ll", loss_fn=partial(ll_reg, scale=scale))
