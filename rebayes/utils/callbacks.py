@@ -11,6 +11,48 @@ import optax
 
 
 # ------------------------------------------------------------------------------
+# Common Callbacks
+
+@partial(jax.jit, static_argnums=(1,4,5))
+def evaluate_function(flat_params, apply_fn, X_test, y_test, loss_fn, 
+                      label="loss", **kwargs):
+    def evaluate(label, image):
+        image = image.reshape((1, 28, 28, 1))
+        logits = apply_fn(flat_params, image).ravel()
+        loss = loss_fn(logits, label, **kwargs)
+        
+        return loss
+    evals = jax.vmap(evaluate, (0, 0))(y_test, X_test)
+    result = {
+        label: evals.mean()
+    }
+    
+    return result
+    
+
+def cb_eval(bel, *args, evaluate_fn, nan_val=-1e8, **kwargs):
+    X, y, apply_fn = kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
+    eval = evaluate_fn(bel.mean, apply_fn, X, y)
+    if isinstance(eval, dict):
+        eval = {k: jnp.where(jnp.isnan(v), nan_val, v) for k, v in eval.items()}
+    else:
+        eval = jnp.where(jnp.isnan(eval), nan_val, eval)
+    
+    return eval
+
+
+def cb_osa(bel, y_pred, t, X, y, bel_pred, evaluate_fn, nan_val=-1e8, 
+           label="loss", **kwargs):
+    eval = evaluate_fn(y_pred, y)
+    eval = jnp.where(jnp.isnan(eval), nan_val, eval)
+    result = {
+        label: eval.mean()
+    }
+    
+    return result
+
+
+# ------------------------------------------------------------------------------
 # Regression
 
 def cb_clf_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, lagn=20, store_fro=True, **kwargs):
@@ -122,45 +164,17 @@ def cb_reg_mc(bel, pred_obs, t, X, y, bel_pred, apply_fn, steps=10, **kwargs):
 
     return res
 
+
+# Evaluation functions
+ll_reg = lambda pred_obs, y, scale: distrax.Normal(pred_obs, 1.).log_prob(y).mean()
+nll_reg = lambda pred_obs, y, scale: -ll_reg(pred_obs, y, scale)
+generate_ll_reg_eval_fn = lambda scale: \
+    partial(evaluate_function, label="ll", loss_fn=partial(ll_reg, scale=scale))
+generate_nll_reg_eval_fn = lambda scale: \
+    partial(evaluate_function, label="nll", loss_fn=partial(nll_reg, scale=scale))
+
 # ------------------------------------------------------------------------------
 # Classification
-
-@partial(jax.jit, static_argnums=(1,4,5))
-def clf_evaluate_function(flat_params, apply_fn, X_test, y_test, loss_fn, label="loss"):
-    def evaluate(label, image):
-        image = image.reshape((1, 28, 28, 1))
-        logits = apply_fn(flat_params, image).ravel()
-        loss = loss_fn(logits, label)
-        
-        return loss
-    evals = jax.vmap(evaluate, (0, 0))(y_test, X_test)
-    result = {
-        label: evals.mean()
-    }
-    
-    return result
-    
-
-def cb_clf_eval(bel, *args, evaluate_fn, nan_val=-1e8, **kwargs):
-    X, y, apply_fn = kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
-    eval = evaluate_fn(bel.mean, apply_fn, X, y)
-    if isinstance(eval, dict):
-        eval = {k: jnp.where(jnp.isnan(v), nan_val, v) for k, v in eval.items()}
-    else:
-        eval = jnp.where(jnp.isnan(eval), nan_val, eval)
-    
-    return eval
-
-
-def cb_clf_osa(bel, y_pred, t, X, y, bel_pred, evaluate_fn, nan_val=-1e8, 
-               label="loss", **kwargs):
-    eval = evaluate_fn(y_pred, y)
-    eval = jnp.where(jnp.isnan(eval), nan_val, eval)
-    result = {
-        label: eval.mean()
-    }
-    
-    return result
 
 
 def cb_clf_discrete_tasks(bel, pred_obs, t, x, y, bel_pred, i,
@@ -172,11 +186,11 @@ def cb_clf_discrete_tasks(bel, pred_obs, t, x, y, bel_pred, i,
         miscl_loss_fn = lambda logits, label: jnp.mean(logits.argmax(axis=-1) != label)
     
     nll_evaluate_fn = partial(
-        clf_evaluate_function,
+        evaluate_function,
         loss_fn=nll_loss_fn,
     )
     miscl_evaluate_fn = partial(
-        clf_evaluate_function,
+        evaluate_function,
         loss_fn=miscl_loss_fn,
     )
     
@@ -214,14 +228,14 @@ nll_softmax = lambda logits, labels, int_labels: \
     optax.softmax_cross_entropy_with_integer_labels(logits, labels) if int_labels \
     else optax.softmax_cross_entropy(logits, labels)
 ll_softmax = lambda logits, labels, int_labels: -nll_softmax(logits, labels, int_labels)
-softmax_ll_il_clf_eval_fn = partial(clf_evaluate_function, label="ll",
+softmax_ll_il_clf_eval_fn = partial(evaluate_function, label="ll",
                                     loss_fn=partial(ll_softmax, int_labels=True),)
-softmax_nll_il_clf_eval_fn = partial(clf_evaluate_function, label="nll",
+softmax_nll_il_clf_eval_fn = partial(evaluate_function, label="nll",
                                      loss_fn=partial(nll_softmax, int_labels=True))
 
 miscl_softmax = lambda logits, labels: \
     (logits.argmax(axis=-1) != labels).mean()
-softmax_miscl_clf_eval_fn = partial(clf_evaluate_function, loss_fn=miscl_softmax, label="miscl")
+softmax_miscl_clf_eval_fn = partial(evaluate_function, loss_fn=miscl_softmax, label="miscl")
 
 def softmax_clf_eval_fn(flat_params, apply_fn, X_test, y_test):
     nll = softmax_nll_il_clf_eval_fn(flat_params, apply_fn, X_test, y_test)
