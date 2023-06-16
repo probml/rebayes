@@ -45,7 +45,6 @@ class MLP(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        x = x.ravel()
         for feat in self.features[:-1]:
             x = self.activation(nn.Dense(feat)(x))
         x = nn.Dense(self.features[-1])(x)
@@ -142,7 +141,7 @@ def initialize_classification_mlp(
 def _initialize_regression(
     key: jnp.ndarray,
     model: nn.Module,
-    input_dim: int,
+    input_dim: Sequence[int],
     output_dim: int,
     emission_cov: float = 1.0,
 ) -> dict:
@@ -183,7 +182,7 @@ def initialize_regression_cnn(
 
 def initialize_regression_mlp(
     key: int = 0,
-    input_dim: Sequence[int] = (28, 28, 1),
+    input_dim: Sequence[int] = (1, 28, 28, 1),
     hidden_dims: Sequence[int] = (500, 500,),
     output_dim: int = 1,
     emission_cov: float = 1.0
