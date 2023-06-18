@@ -208,7 +208,7 @@ def main(cl_args):
     output_path = os.environ.get("REBAYES_OUTPUT")
     problem_str = cl_args.problem
     if cl_args.problem == "stationary":
-        problem_str += str(cl_args.ntrain)
+        problem_str += "-" + str(cl_args.ntrain)
     if output_path is None:
         output_path = Path("classification", "outputs", problem_str,
                            cl_args.dataset, cl_args.model)
