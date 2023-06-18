@@ -206,8 +206,11 @@ def evaluate_and_store_result(
 def main(cl_args):
     # Set output path
     output_path = os.environ.get("REBAYES_OUTPUT")
+    problem_str = cl_args.problem
+    if cl_args.problem == "stationary":
+        problem_str += str(cl_args.ntrain)
     if output_path is None:
-        output_path = Path("classification", "outputs", cl_args.problem,
+        output_path = Path("classification", "outputs", problem_str,
                            cl_args.dataset, cl_args.model)
     Path(output_path).mkdir(parents=True, exist_ok=True)
     
@@ -219,7 +222,10 @@ def main(cl_args):
     
     # Load dataset
     dataset = mnist_data.Datasets[cl_args.problem+"-mnist"]
-    dataset_load_fn, kwargs = dataset.values()
+    if cl_args.problem == "stationary":
+        dataset_load_fn, kwargs = dataset(ntrain=cl_args.ntrain).values()
+    else:
+        dataset_load_fn, kwargs = dataset().values()
     dataset_load_fn = partial(dataset_load_fn, 
                               fashion=cl_args.dataset=="f-mnist")
     eval_metric = _eval_metric(cl_args.problem)
@@ -236,7 +242,7 @@ def main(cl_args):
                                  cl_args.problem)
     
     # Set up hyperparameter tuning
-    hparam_path = Path(config_path, cl_args.problem, 
+    hparam_path = Path(config_path, problem_str,
                        cl_args.dataset, cl_args.model)
     if cl_args.tune:
         agent_hparams = \
@@ -283,6 +289,9 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, default="f-mnist", 
                         choices=["mnist", "f-mnist"])
     
+    # Number of training examples
+    parser.add_argument("--ntrain", type=_check_positive_int, default=1_000)
+    
     # Type of model (mlp or cnn)
     parser.add_argument("--model", type=str, default="mlp",
                         choices=["mlp", "cnn"])
@@ -291,10 +300,10 @@ if __name__ == "__main__":
     parser.add_argument("--tune", action="store_true")
     
     # Set the number of exploration steps
-    parser.add_argument("--n_explore", type=int, default=20)
+    parser.add_argument("--n_explore", type=_check_positive_int, default=20)
     
     # Set the number of exploitation steps
-    parser.add_argument("--n_exploit", type=int, default=25)
+    parser.add_argument("--n_exploit", type=_check_positive_int, default=25)
     
     # Set the verbosity of the Bayesopt procedure
     parser.add_argument("--verbose", type=int, default=2,
