@@ -14,7 +14,7 @@ from jax.tree_util import tree_map
 import demos.collas.datasets.mnist_data as mnist_data
 import rebayes.utils.models as models
 import rebayes.utils.callbacks as callbacks
-import demos.collas.classification.clf_hparam_tune as hparam_tune
+import demos.collas.hparam_tune as hparam_tune
 import demos.collas.classification.clf_train as train_utils
 
 AGENT_TYPES = ["lofi", "fdekf", "vdekf", "sgd-rb", "adam-rb"]
@@ -252,7 +252,7 @@ def main(cl_args):
     problem_name = cl_args.problem + "-" + str(cl_args.ntrain)
     if output_path is None:
         output_path = Path("regression", "outputs", problem_name,
-                           cl_args.dataset, cl_args.model)
+                           cl_args.dataset, cl_args.model, cl_args.nll_method)
     Path(output_path).mkdir(parents=True, exist_ok=True)
     
     # Set config path
@@ -279,10 +279,10 @@ def main(cl_args):
     # Initialize model
     if cl_args.model == "cnn":
         model_init_fn = partial(models.initialize_regression_cnn, 
-                                emission_cov=cl_args.obs_scale)
+                                emission_cov=cl_args.obs_scale**2)
     else: # cl_args.model == "mlp"
         model_init_fn = partial(models.initialize_regression_mlp, 
-                                emission_cov=cl_args.obs_scale)
+                                emission_cov=cl_args.obs_scale**2)
     
     # Set up agents
     output_dim = 1
@@ -290,8 +290,8 @@ def main(cl_args):
                                  cl_args.problem, cl_args.obs_scale)
     
     # Set up hyperparameter tuning
-    hparam_path = Path(config_path, problem_name,
-                       cl_args.dataset, cl_args.model)
+    hparam_path = Path(config_path, problem_name, cl_args.dataset, 
+                       cl_args.model, cl_args.nll_method)
     if cl_args.tune:
         agent_hparams = \
             tune_and_store_hyperparameters(hparam_path, model_init_fn, 
@@ -319,8 +319,9 @@ def main(cl_args):
         if "pbounds" in agent_kwargs:
             agent_kwargs.pop("pbounds")
         optimizer_dict = hparam_tune.build_estimator(model_init_fn, hparams,
-                                                     agent_name, **agent_kwargs)
-        
+                                                     agent_name, 
+                                                     classification=False,
+                                                     **agent_kwargs)
         _ = evaluate_and_store_result(output_path, model_init_fn,
                                       dataset_load_fn, optimizer_dict,
                                       eval_metric["test"], agent_name,
