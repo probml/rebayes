@@ -12,7 +12,7 @@ import optax
 import demos.collas.datasets.mnist_data as mnist_data
 import rebayes.utils.models as models
 import rebayes.utils.callbacks as callbacks
-import demos.collas.classification.clf_hparam_tune as hparam_tune
+import demos.collas.hparam_tune as hparam_tune
 import demos.collas.classification.clf_train as train_utils
 
 AGENT_TYPES = ["lofi", "fdekf", "vdekf", "sgd-rb", "adam-rb"]
