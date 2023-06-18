@@ -29,6 +29,7 @@ def bbf_lofi(
     lofi_method = "diagonal",
     callback_at_end=True,
     n_seeds=5,
+    classification=True,
     **kwargs,
 ):
     """
@@ -51,6 +52,9 @@ def bbf_lofi(
     
     model_dict = init_fn(key=0)
     
+    emission_dist = lambda mean, cov: tfd.Categorical(probs=mean) \
+        if classification else tfd.Normal(loc=mean, scale=jnp.sqrt(cov))
+    
     estimator = lofi_estimator(
         dynamics_weights=dynamics_weights,
         dynamics_covariance=dynamics_covariance,
@@ -59,7 +63,7 @@ def bbf_lofi(
         dynamics_covariance_inflation_factor=alpha,
         memory_size=memory_size,
         inflation=inflation,
-        emission_dist=lambda mean, cov: tfd.Categorical(probs=mean),
+        emission_dist=emission_dist,
     )
     
     test_cb_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test,
@@ -101,6 +105,7 @@ def bbf_ekf(
     method="fdekf",
     callback_at_end=True,
     n_seeds=5,
+    classification=True,
     **kwargs,
 ):
     """
@@ -115,14 +120,15 @@ def bbf_ekf(
     alpha = jnp.exp(log_alpha).item()
 
     model_dict = init_fn(key=0)
-    
+    emission_dist = lambda mean, cov: tfd.Categorical(probs=mean) \
+        if classification else tfd.Normal(loc=mean, scale=jnp.sqrt(cov))
     estimator = ekf.RebayesEKF(
         dynamics_weights_or_function=dynamics_weights,
         dynamics_covariance=dynamics_covariance,
         emission_mean_function=model_dict["emission_mean_function"],
         emission_cov_function=model_dict["emission_cov_function"],
         dynamics_covariance_inflation_factor=alpha,
-        emission_dist=lambda mean, cov: tfd.Categorical(probs=mean),
+        emission_dist=emission_dist,
         method=method,
     )
 
@@ -301,7 +307,7 @@ def bbf_rsgd_laplace(
             metric = jnp.array(list(callback(bel, **test_cb_kwargs).values()))
         else:
             _, metric = estimator.scan(flat_params, initial_covariance, X_train, 
-                                       y_train, progress_bar=False, 
+                                       y_train, progress_bar=False,
                                        callback=callback, **test_cb_kwargs)
             metric = jnp.array(list(metric.values())).mean()
         result.append(metric)
@@ -353,6 +359,7 @@ def create_optimizer(
             callback_at_end=callback_at_end,
             n_seeds=n_seeds,
             method=method,
+            classification=classification,
             **kwargs
         )
 
@@ -396,18 +403,20 @@ def get_best_params(optimizer, method):
     return hparams
 
 
-def build_estimator(init_fn, hparams, method, **kwargs):
+def build_estimator(init_fn, hparams, method, classification=True, **kwargs):
     model_dict = init_fn(key=0)
     apply_fn, emission_mean_fn, emission_cov_fn = \
         model_dict["apply_fn"], model_dict["emission_mean_function"], \
             model_dict["emission_cov_function"]
     hparams = hparams.copy()
+    emission_dist = lambda mean, cov: tfd.Categorical(probs=mean) \
+        if classification else tfd.Normal(loc=mean, scale=jnp.sqrt(cov))
     if "ekf" in method:
         init_covariance = hparams.pop("initial_covariance")
         estimator = ekf.RebayesEKF(
             emission_mean_function=emission_mean_fn,
             emission_cov_function=emission_cov_fn,
-            emission_dist=lambda mean, cov: tfd.Categorical(probs=mean),
+            emission_dist=emission_dist,
             method=method,
             **hparams,
         )
@@ -426,7 +435,7 @@ def build_estimator(init_fn, hparams, method, **kwargs):
         estimator = estimator(
             emission_mean_function=emission_mean_fn,
             emission_cov_function=emission_cov_fn,
-            emission_dist=lambda mean, cov: tfd.Categorical(probs=mean),
+            emission_dist=emission_dist,
             **hparams,
             **kwargs,
         )
