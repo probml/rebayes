@@ -34,8 +34,8 @@ def eval_agent_stationary(
         keys = jr.split(jr.PRNGKey(i))
         dataset = dataset_load_fn(key=keys[0])
         model = model_init_fn(keys[1])
-        X_train, y_train = dataset["train"]
-        X_test, y_test = dataset["test"]
+        X_train, *_, y_train = dataset["train"]
+        X_test, *_, y_test = dataset["test"]
         test_kwargs = {"agent": agent, "X_test": X_test, "y_test": y_test, 
                        "apply_fn": model["apply_fn"], "key": key, **kwargs}
         

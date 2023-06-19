@@ -35,8 +35,8 @@ def bbf_lofi(
     """
     Black-box function for Bayesian optimization.
     """
-    X_train, y_train = train
-    X_test, y_test = test
+    X_train, *_, y_train = train
+    X_test, *_, y_test = test
 
     dynamics_weights = 1 - jnp.exp(log_1m_dynamics_weights).item()
     dynamics_covariance = jnp.exp(log_dynamics_cov).item()
@@ -111,8 +111,8 @@ def bbf_ekf(
     """
     Black-box function for Bayesian optimization.
     """
-    X_train, y_train = train
-    X_test, y_test = test
+    X_train, *_, y_train = train
+    X_test, *_, y_test = test
 
     dynamics_weights = 1 - jnp.exp(log_1m_dynamics_weights).item()
     dynamics_covariance = jnp.exp(log_dynamics_cov).item()
@@ -174,8 +174,8 @@ def bbf_rsgd(
     n_seeds=5,
     **kwargs,
 ):
-    X_train, y_train = train
-    X_test, y_test = test
+    X_train, *_, y_train = train
+    X_test, *_, y_test = test
     
     if optimizer == "sgd":
         opt = optax.sgd
