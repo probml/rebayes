@@ -604,7 +604,8 @@ clf_datasets = {
     'stationary-mnist': generate_mnist_experiment,
     'permuted-mnist': generate_pmnist_experiment,
     'rotated-mnist': partial(generate_rmnist_experiment,
-                             angle_fn=generate_random_walk_angles,
+                             angle_fn=partial(generate_random_walk_angles,
+                                              max_angle=30.0),
                              include_labels=True),
     'split-mnist': {
         "load_fn": partial(load_split_mnist_dataset, **smnist_kwargs),
