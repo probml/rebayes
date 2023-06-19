@@ -120,10 +120,8 @@ def _eval_metric(
         }
     elif problem == "rotated":
         result = {
-            "val": partial(callbacks.cb_osa,
-                           evaluate_fn=partial(callbacks.ll_softmax,
-                                               int_labels=False),
-                           label="log_likelihood"),
+            "val": partial(callbacks.cb_eval,
+                           evaluate_fn=callbacks.softmax_ll_il_clf_eval_fn),
             "test": callbacks.cb_clf_window_test,
         }
     elif problem == "split":
@@ -237,7 +235,7 @@ def main(cl_args):
     # Set output path
     output_path = os.environ.get("REBAYES_OUTPUT")
     problem_str = cl_args.problem
-    if cl_args.problem == "stationary":
+    if cl_args.problem == "stationary" or cl_args.problem == "rotated":
         problem_str += "-" + str(cl_args.ntrain)
     if output_path is None:
         output_path = Path("classification", "outputs", problem_str,
@@ -322,7 +320,7 @@ if __name__ == "__main__":
                         choices=["mnist", "f-mnist"])
     
     # Number of training examples
-    parser.add_argument("--ntrain", type=_check_positive_int, default=1_000)
+    parser.add_argument("--ntrain", type=_check_positive_int, default=2_000)
     
     # Type of model (mlp or cnn)
     parser.add_argument("--model", type=str, default="mlp",
