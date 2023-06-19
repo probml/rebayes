@@ -302,12 +302,12 @@ def load_rotated_mnist_dataset(
         dataset = load_mnist_dataset(data_dir, fashion, oh_train=False)
     train, val, test = \
         (generate_rotated_images(*dataset[k], n, key_, target_digit, angle_fn,
-                                 min_angle, max_angle, include_labels) 
+                                 min_angle, max_angle, include_labels)
          for k, n, key_ in zip(['train', 'val', 'test'], [ntrain, nval, ntest],
                                jr.split(key, 3)))
     oh_train = True if include_labels else False
     dataset = process_mnist_dataset(train, val, test, oh_train=oh_train,
-                                    **process_kwargs)
+                                    shuffle=False, **process_kwargs)
     
     return dataset
     
