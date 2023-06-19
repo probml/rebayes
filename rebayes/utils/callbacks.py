@@ -52,6 +52,13 @@ def cb_osa(bel, y_pred, t, X, y, bel_pred, evaluate_fn, nan_val=-1e8,
     return result
 
 
+def cb_mc_osa(bel, y_pred, t, X, y, bel_pred, evaluate_fn, nan_val=-1e8,
+              label="loss", **kwargs):
+    agent = kwargs["agent"]
+    key = jax.random.fold_in(kwargs["key"], t)
+    nlpd = agent.nlpd_mc(bel_pred, key, )
+
+
 # ------------------------------------------------------------------------------
 # Regression
 
@@ -265,6 +272,29 @@ def cb_clf_discrete_tasks(bel, pred_obs, t, x, y, bel_pred, i,
     return result
 
 
+def cb_clf_window_test(bel, pred_obs, t, X, y, bel_pred, steps=10, **kwargs):
+    nll_loss_fn = lambda logits, label: \
+        optax.softmax_cross_entropy_with_integer_labels(logits, label).mean()
+    miscl_loss_fn = lambda logits, label: jnp.mean(logits.argmax(axis=-1) != label)
+    
+    X_test, y_test, apply_fn = kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
+    slice_ix = jnp.arange(0, steps) + t - steps // 2
+    X_window, y_window = jnp.take(X_test, slice_ix, axis=0), jnp.take(y_test, slice_ix, axis=0)
+    
+    # Eval on window
+    nll_evaluate_fn = partial(evaluate_function, loss_fn=nll_loss_fn)
+    miscl_evalute_fn = partial(evaluate_function, loss_fn=miscl_loss_fn)
+    window_nll_result = nll_evaluate_fn(bel.mean, apply_fn, X_window, y_window, label="window-nll")
+    window_miscl_result = miscl_evalute_fn(bel.mean, apply_fn, X_window, y_window, label="window-miscl")
+    
+    result = {
+        **window_nll_result,
+        **window_miscl_result,
+    }
+    
+    return result
+
+
 # Evaluation functions
 nll_softmax = lambda logits, labels, int_labels: \
     optax.softmax_cross_entropy_with_integer_labels(logits, labels) if int_labels \
@@ -285,3 +315,7 @@ def softmax_clf_eval_fn(flat_params, apply_fn, X_test, y_test):
     result = {**nll, **miscl}
     
     return result
+
+nll_binary = lambda logits, labels: optax.sigmoid_binary_cross_entropy(logits, labels)
+ll_binary = lambda logits, labels: -nll_binary(logits, labels)
+miscl_binary = lambda logits, labels: jnp.mean((logits > 0.0) != labels)
