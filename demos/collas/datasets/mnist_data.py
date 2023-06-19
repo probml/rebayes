@@ -460,7 +460,7 @@ def load_permuted_mnist_dataset(
     return dataset
 
 
-# Rotating Permuted MNIST ------------------------------------------------------
+# Rotated Permuted MNIST -------------------------------------------------------
 
 def load_rotated_permuted_mnist_dataset(
     n_tasks: int,
@@ -577,12 +577,13 @@ def generate_pmnist_experiment(
 def generate_rmnist_experiment(
     ntrain: int,
     angle_fn: Callable,
+    include_labels=False,
 ):
     kwargs = {
         "ntrain": ntrain,
         "nval": 500,
     }
-    load_fn = partial(load_rotated_mnist_dataset, include_labels=False,
+    load_fn = partial(load_rotated_mnist_dataset, include_labels=include_labels,
                       angle_fn=angle_fn, **kwargs)
     if angle_fn in (generate_amplified_angles, generate_random_walk_angles):
         load_fn = partial(load_fn, match_train_test_angles=True)
@@ -593,30 +594,18 @@ def generate_rmnist_experiment(
     
     return dataset
 
-
-mnist_kwargs = {
-    "ntrain": 500,
-    "nval": 1_000,
-}
-pmnist_kwargs = {
-    'n_tasks': 10,
-    'ntrain_per_task': 300,
-    'nval_per_task': 1,
-    'ntest_per_task': 50,
-}
 smnist_kwargs = {
     'ntrain_per_task': 300,
     'nval_per_task': 1,
     'ntest_per_task': 500,
 }
 
-Datasets = {
+clf_datasets = {
     'stationary-mnist': generate_mnist_experiment,
     'permuted-mnist': generate_pmnist_experiment,
-    'rotated-permuted-mnist': {
-        "load_fn": load_rotated_permuted_mnist_dataset,
-        "configs": {}
-    },
+    'rotated-mnist': partial(generate_rmnist_experiment,
+                             angle_fn=generate_random_walk_angles,
+                             include_labels=True),
     'split-mnist': {
         "load_fn": partial(load_split_mnist_dataset, **smnist_kwargs),
         "configs": smnist_kwargs,
