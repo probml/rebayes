@@ -27,20 +27,18 @@ def eval_agent_stationary(
 ) -> dict:
     if isinstance(key, int):
         key = jr.PRNGKey(key)
-    dataset = dataset_load_fn()
-    model = model_init_fn(0)
     agent, init_cov = optimizer_dict["agent"], optimizer_dict["init_cov"]
-    X_test, y_test = dataset["test"]
-    test_kwargs = {"agent": agent, "X_test": X_test, "y_test": y_test, 
-                   "apply_fn": model["apply_fn"], "key": key, **kwargs}
     
     @scan_tqdm(n_iter)
     def _step(_, i):
         keys = jr.split(jr.PRNGKey(i))
         dataset = dataset_load_fn(key=keys[0])
-        X_train, y_train = dataset["train"]
-        
         model = model_init_fn(keys[1])
+        X_train, y_train = dataset["train"]
+        X_test, y_test = dataset["test"]
+        test_kwargs = {"agent": agent, "X_test": X_test, "y_test": y_test, 
+                       "apply_fn": model["apply_fn"], "key": key, **kwargs}
+        
         _, result = agent.scan(model["flat_params"], init_cov, X_train, y_train,
                                callback=eval_callback, **test_kwargs)
         
