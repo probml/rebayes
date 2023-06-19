@@ -110,7 +110,7 @@ def _eval_metric(
             "test": partial(callbacks.cb_eval,
                             evaluate_fn=callbacks.softmax_clf_eval_fn)
         }
-    else:
+    elif problem == "permuted":
         result = {
             "val": partial(callbacks.cb_osa,
                             evaluate_fn=partial(callbacks.ll_softmax, 
@@ -118,6 +118,25 @@ def _eval_metric(
                             label="log_likelihood"),
             "test": callbacks.cb_clf_discrete_tasks,
         }
+    elif problem == "rotated":
+        result = {
+            "val": partial(callbacks.cb_osa,
+                           evaluate_fn=partial(callbacks.ll_softmax,
+                                               int_labels=False),
+                           label="log_likelihood"),
+            "test": callbacks.cb_clf_window_test,
+        }
+    elif problem == "split":
+        result = {
+            "val": partial(callbacks.cb_osa,
+                           evaluate_fn=partial(callbacks.ll_binary),
+                            label="log_likelihood"),
+            "test": partial(callbacks.cb_clf_discrete_tasks,
+                            nll_loss_fn = callbacks.nll_binary,
+                            miscl_loss_fn = callbacks.miscl_binary),
+        }
+    else:
+        raise ValueError(f"Problem type {problem} not recognized.")
     
     return result
 
@@ -201,7 +220,7 @@ def evaluate_and_store_result(
     """
     if isinstance(key, int):
         key = jr.PRNGKey(key)
-    if problem == "stationary":
+    if problem == "stationary" or problem == "rotated":
         eval_fn = train_utils.eval_agent_stationary
     else:
         eval_fn = train_utils.eval_agent_nonstationary
@@ -232,8 +251,8 @@ def main(cl_args):
     Path(config_path).mkdir(parents=True, exist_ok=True)
     
     # Load dataset
-    dataset = mnist_data.Datasets[cl_args.problem+"-mnist"]
-    if cl_args.problem == "stationary":
+    dataset = mnist_data.clf_datasets[cl_args.problem+"-mnist"]
+    if cl_args.problem == "stationary" or cl_args.problem == "rotated":
         dataset_load_fn, kwargs = dataset(ntrain=cl_args.ntrain).values()
     else:
         dataset_load_fn, kwargs = dataset().values()
@@ -296,7 +315,7 @@ if __name__ == "__main__":
     
     # Problem type (stationary, permuted, rotated, or split)
     parser.add_argument("--problem", type=str, default="stationary",
-                        choices=["stationary", "permuted", "rotating", "split"])
+                        choices=["stationary", "permuted", "rotated", "split"])
     
     # Type of dataset (mnist or f-mnist)
     parser.add_argument("--dataset", type=str, default="f-mnist", 
