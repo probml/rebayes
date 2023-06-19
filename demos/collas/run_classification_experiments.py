@@ -26,7 +26,7 @@ def _check_positive_int(value):
     return ivalue
 
 
-def _process_agent_args(agent_args, ranks, output_dim, problem):
+def _process_agent_args(agent_args, lofi_cov_type, ranks, output_dim, problem):
     agents = {}
     sgd_loss_fn = optax.softmax_cross_entropy if output_dim >= 2 \
         else optax.sigmoid_binary_cross_entropy
@@ -52,14 +52,24 @@ def _process_agent_args(agent_args, ranks, output_dim, problem):
     
     # Create agents
     if "lofi" in agent_args:
-        agents.update({
-            f'lofi-{rank}': {
-                'memory_size': rank,
-                'inflation': "hybrid",
-                'lofi_method': "diagonal",
-                'pbounds': filter_pbounds,
-            } for rank in ranks
-        })
+        if lofi_cov_type == "diagonal" or lofi_cov_type == "both":
+            agents.update({
+                f'lofi-{rank}': {
+                    'memory_size': rank,
+                    'inflation': "hybrid",
+                    'lofi_method': "diagonal",
+                    'pbounds': filter_pbounds,
+                } for rank in ranks
+            })
+        if lofi_cov_type == "spherical" or lofi_cov_type == "both":
+            agents.update({
+                f'lofi-sph-{rank}': {
+                    'memory_size': rank,
+                    'inflation': "hybrid",
+                    'lofi_method': "spherical",
+                    'pbounds': filter_pbounds,
+                } for rank in ranks
+            })
     if "fdekf" in agent_args:
         agents["fdekf"] = {'pbounds': filter_pbounds}
     if "vdekf" in agent_args:
@@ -239,8 +249,8 @@ def main(cl_args):
     
     # Set up agents
     output_dim = 2 if cl_args.problem == "split" else 10
-    agents = _process_agent_args(cl_args.agents, cl_args.ranks, output_dim,
-                                 cl_args.problem)
+    agents = _process_agent_args(cl_args.agents, cl_args.lofi_cov_type,
+                                 cl_args.ranks, output_dim, cl_args.problem)
     
     # Set up hyperparameter tuning
     hparam_path = Path(config_path, problem_str,
@@ -319,6 +329,10 @@ if __name__ == "__main__":
     # List of agents to use
     parser.add_argument("--agents", type=str, nargs="+", default=AGENT_TYPES,
                         choices=AGENT_TYPES)
+    
+    # LOFI covariance type
+    parser.add_argument("--lofi_cov_type", type=str, default="diagonal",
+                        choices=["diagonal", "spherical", "both"])
     
     # Number of random initializations for evaluation
     parser.add_argument("--n_iter", type=int, default=20)
