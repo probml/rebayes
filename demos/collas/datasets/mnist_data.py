@@ -248,16 +248,16 @@ def generate_rotated_images(
         key = jr.PRNGKey(key)
     if angle_fn is None:
         angle_fn = generate_random_angles
+    if target_digit is not None:
+        imgs = imgs[labels == target_digit]
+        labels = labels[labels == target_digit]
     n = len(imgs) if n is None else min(n, len(imgs))
     if angles is None:
         angles = angle_fn(n, min_angle, max_angle, key)
-    if target_digit is not None:
-        imgs = imgs[labels == target_digit]
-        imgs = jnp.concatenate([imgs]*(len(angles)//len(imgs)+1), axis=0)
-        imgs = imgs[:len(angles)]
-        labels = labels[labels == target_digit]
-        labels = jnp.concatenate([labels]*(len(angles)//len(labels)+1), axis=0)
-        labels = labels[:len(angles)]
+    imgs = jnp.concatenate([imgs]*(len(angles)//len(imgs)+1), axis=0)
+    imgs = imgs[:len(angles)]
+    labels = jnp.concatenate([labels]*(len(angles)//len(labels)+1), axis=0)
+    labels = labels[:len(angles)]
     imgs_rot = vmap(rotate_mnist)(imgs, angles)
     if include_labels:
         return imgs_rot, angles, labels
