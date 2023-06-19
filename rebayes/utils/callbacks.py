@@ -272,7 +272,7 @@ def cb_clf_discrete_tasks(bel, pred_obs, t, x, y, bel_pred, i,
     return result
 
 
-def cb_clf_window_test(bel, pred_obs, t, X, y, bel_pred, steps=10, **kwargs):
+def cb_clf_window_test(bel, pred_obs, t, X, y, bel_pred, steps=100, **kwargs):
     nll_loss_fn = lambda logits, label: \
         optax.softmax_cross_entropy_with_integer_labels(logits, label).mean()
     miscl_loss_fn = lambda logits, label: jnp.mean(logits.argmax(axis=-1) != label)
