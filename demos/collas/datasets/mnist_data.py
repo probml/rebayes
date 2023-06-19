@@ -577,7 +577,6 @@ def generate_pmnist_experiment(
 def generate_rmnist_experiment(
     ntrain: int,
     angle_fn: Callable,
-    problem: str="iid"
 ):
     kwargs = {
         "ntrain": ntrain,
@@ -585,7 +584,7 @@ def generate_rmnist_experiment(
     }
     load_fn = partial(load_rotated_mnist_dataset, include_labels=False,
                       angle_fn=angle_fn, **kwargs)
-    if problem == "amplified" or problem == "random-walk":
+    if angle_fn in (generate_amplified_angles, generate_random_walk_angles):
         load_fn = partial(load_fn, match_train_test_angles=True)
     dataset = {
         "load_fn": load_fn,
