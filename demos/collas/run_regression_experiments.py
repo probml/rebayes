@@ -192,7 +192,8 @@ def tune_and_store_hyperparameters(
             classification=False, **agent_params
         )
         optimizer.maximize(init_points=n_explore, n_iter=n_exploit)
-        best_hparams = hparam_tune.get_best_params(optimizer, agent_name)
+        best_hparams = hparam_tune.get_best_params(optimizer, agent_name,
+                                                   classification=False)
         # Store as json
         with open(Path(hparam_path, f"{agent_name}.json"), "w") as f:
             json.dump(best_hparams, f)

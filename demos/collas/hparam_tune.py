@@ -158,82 +158,6 @@ def bbf_ekf(
     return result
 
 
-# def bbf_rsgd(
-#     log_learning_rate,
-#     # Specify before running
-#     init_fn,
-#     train,
-#     test,
-#     callback,
-#     loss_fn,
-#     buffer_size,
-#     dim_output,
-#     callback_at_end=True,
-#     optimizer="sgd",
-#     n_seeds=5,
-#     **kwargs,
-# ):
-#     """
-#     Black-box function for Bayesian optimization.
-#     """
-#     X_train, y_train = train
-#     X_test, y_test = test
-    
-#     if optimizer == "sgd":
-#         opt = optax.sgd
-#     elif optimizer == "adam":
-#         opt = optax.adam
-#     else:
-#         raise ValueError("optimizer must be either 'sgd' or 'adam'")
-    
-#     tx = opt(learning_rate=jnp.exp(log_learning_rate).item())
-    
-#     model_dict = init_fn(key=0)
-    
-#     @partial(jit, static_argnames=("applyfn",))
-#     def lossfn_fifo(params, counter, X, y, applyfn):
-#         logits = vmap(applyfn, (None, 0))(params, X).ravel()
-#         nll = loss_fn(logits, y.ravel())
-#         nll = nll.sum()
-#         loss = (nll * counter).sum() / counter.sum()
-#         return loss
-    
-#     estimator = rsgd.FifoSGD(
-#         lossfn_fifo,
-#         apply_fn=model_dict["apply_fn"],
-#         tx=tx,
-#         buffer_size=buffer_size,
-#         dim_features=[1, 28, 28, 1],
-#         dim_output=dim_output,
-#         n_inner=1,
-#     )
-    
-#     test_cb_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test, 
-#                       "apply_fn": model_dict["apply_fn"], "key": jr.PRNGKey(0), 
-#                       **kwargs}
-    
-#     result = []
-#     for i in range(n_seeds):
-#         model_dict = init_fn(key=i)
-#         flat_params = model_dict["flat_params"]
-#         if callback_at_end:
-#             bel, _ = estimator.scan(flat_params, None, X_train, y_train, 
-#                                     progress_bar=False)
-#             metric = jnp.array(list(callback(bel, **test_cb_kwargs).values()))
-#         else:
-#             _, metric = estimator.scan(flat_params, None, X_train, y_train, 
-#                                        progress_bar=False, callback=callback, 
-#                                        **test_cb_kwargs)
-#             metric = jnp.array(list(metric.values())).mean()
-#         result.append(metric)
-#     result = jnp.array(result).mean()
-    
-#     if jnp.isnan(result) or jnp.isinf(result):
-#         result = -1e6
-        
-#     return result
-
-
 def bbf_rsgd(
     log_init_cov,
     log_learning_rate,
@@ -342,6 +266,11 @@ def create_optimizer(
             callback_at_end=callback_at_end,
             **kwargs # Must include loss_fn, buffer_size, dim_output
         )
+        if classification:
+            bbf_partial = partial(
+                bbf_partial,
+                log_init_cov=0.0
+            )
     else:
         if "ekf" in method:
             bbf = bbf_ekf
@@ -371,17 +300,18 @@ def create_optimizer(
     return optimizer
 
 
-def get_best_params(optimizer, method):
+def get_best_params(optimizer, method, classification=True):
     max_params = optimizer.max["params"].copy()
-    initial_covariance = jnp.exp(max_params["log_init_cov"]).item()
     if "sgd" in method or "adam" in method:
         learning_rate = jnp.exp(max_params["log_learning_rate"]).item()
-        
         hparams = {
-            "initial_covariance": initial_covariance,
             "learning_rate": learning_rate,
         }
+        if not classification:
+            initial_covariance = jnp.exp(max_params["log_init_cov"]).item()
+            hparams["initial_covariance"] = initial_covariance
     else:
+        initial_covariance = jnp.exp(max_params["log_init_cov"]).item()
         dynamics_weights = \
             1 - jnp.exp(max_params["log_1m_dynamics_weights"]).item()
         dynamics_covariance = jnp.exp(max_params["log_dynamics_cov"]).item()
@@ -474,7 +404,9 @@ def build_estimator(init_fn, hparams, method, classification=True, **kwargs):
             dim_output=kwargs["dim_output"],
             n_inner=1,
         )
-        init_covariance = hparams.pop("initial_covariance")
+        init_covariance = 0.0
+        if "initial_covariance" in hparams:
+            init_covariance = hparams.pop("initial_covariance")
     else:
         raise ValueError("method must be either 'ekf', 'lofi' or 'sgd'")
 

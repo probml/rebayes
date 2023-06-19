@@ -33,7 +33,6 @@ def _process_agent_args(agent_args, ranks, output_dim, problem):
     
     # Bounds for tuning
     sgd_pbounds = {
-        "log_init_cov": (-10.0, -10.0),
         "log_learning_rate": (-10.0, 0.0),
     }
     if problem == "stationary":
@@ -150,10 +149,11 @@ def tune_and_store_hyperparameters(
         optimizer = hparam_tune.create_optimizer(
             model_init_fn, pbounds, dataset["train"], dataset["val"],
             val_callback, agent_name, verbose=verbose, callback_at_end=False,
-            **agent_params
+            classification=True, **agent_params
         )
         optimizer.maximize(init_points=n_explore, n_iter=n_exploit)
-        best_hparams = hparam_tune.get_best_params(optimizer, agent_name)
+        best_hparams = hparam_tune.get_best_params(optimizer, agent_name, 
+                                                   classification=True)
         # Store as json
         with open(Path(hparam_path, f"{agent_name}.json"), "w") as f:
             json.dump(best_hparams, f)
@@ -271,7 +271,9 @@ def main(cl_args):
         if "pbounds" in agent_kwargs:
             agent_kwargs.pop("pbounds")
         optimizer_dict = hparam_tune.build_estimator(model_init_fn, hparams,
-                                                     agent_name, **agent_kwargs)
+                                                     agent_name, 
+                                                     classification=True, 
+                                                     **agent_kwargs)
         _ = evaluate_and_store_result(output_path, model_init_fn,
                                       dataset_load_fn, optimizer_dict,
                                       eval_metric["test"], agent_name,
