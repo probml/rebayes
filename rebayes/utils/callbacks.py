@@ -108,7 +108,7 @@ def cb_reg_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, ymean, ystd, steps=10
         y_window = jnp.take(y_test, slice_ix, axis=0)
         
         # eval on window
-        yhat_window = jax.vmap(apply_fn, (None, 0))(bel_pred.mean, X_test).squeeze()
+        yhat_window = jax.vmap(apply_fn, (None, 0))(bel_pred.mean, X_window).squeeze()
         y_window = y_window * ystd + ymean
         yhat_window = yhat_window.ravel() * ystd + ymean
         
