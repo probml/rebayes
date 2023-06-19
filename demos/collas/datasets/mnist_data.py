@@ -147,7 +147,8 @@ def generate_random_walk_angles(
     n_tasks: int,
     min_angle: float=0.0,
     max_angle: float=180.0,
-    key: int=0
+    key: int=0,
+    theta: float=1.0,
 ) -> jnp.ndarray:
     """Generate random walk angles using Ornstein-Uhlenbeck process.
     """
@@ -155,14 +156,13 @@ def generate_random_walk_angles(
         key = jr.PRNGKey(key)
     mean_angle = (min_angle+max_angle)/2
     std_angle = mean_angle/3
-    time_const = 0.1
-    sigma_bis = std_angle * jnp.sqrt(2. / time_const)
     dt = 1/n_tasks
 
     def _step(carry, args):
+        prev_angle = carry
         i, key = args
-        next_angle = carry - dt * (carry - mean_angle)/time_const + \
-            sigma_bis * jnp.sqrt(dt) * jr.normal(key,)
+        next_angle = prev_angle + theta * dt * (mean_angle - prev_angle) + \
+            std_angle * jnp.sqrt(2 * dt * theta) * jr.normal(key,)
         
         return next_angle, next_angle
     
