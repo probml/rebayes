@@ -33,6 +33,7 @@ def _process_agent_args(agent_args, ranks, output_dim, problem):
     
     # Bounds for tuning
     sgd_pbounds = {
+        "log_init_cov": (-10.0, -10.0),
         "log_learning_rate": (-10.0, 0.0),
     }
     if problem == "stationary":

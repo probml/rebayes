@@ -6,8 +6,6 @@ from typing import Callable
 from pathlib import Path
 import pickle
 
-import jax
-import jax.numpy as jnp
 import jax.random as jr
 from jax.tree_util import tree_map
 
@@ -345,7 +343,7 @@ if __name__ == "__main__":
                         choices=[-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
     
     # Number of training samples
-    parser.add_argument("--ntrain", type=_check_positive_int, default=1_000)
+    parser.add_argument("--ntrain", type=_check_positive_int, default=2_000)
     
     # Type of model (mlp or cnn)
     parser.add_argument("--model", type=str, default="mlp",
