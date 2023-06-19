@@ -120,8 +120,10 @@ def _eval_metric(
         }
     elif problem == "rotated":
         result = {
-            "val": partial(callbacks.cb_eval,
-                           evaluate_fn=callbacks.softmax_ll_il_clf_eval_fn),
+            "val": partial(callbacks.cb_osa,
+                           evaluate_fn=partial(callbacks.ll_softmax,
+                                               int_labels=False),
+                           label="log_likelihood"),
             "test": callbacks.cb_clf_window_test,
         }
     elif problem == "split":
