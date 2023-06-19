@@ -404,7 +404,7 @@ def build_estimator(init_fn, hparams, method, classification=True, **kwargs):
             dim_output=kwargs["dim_output"],
             n_inner=1,
         )
-        init_covariance = 0.0
+        init_covariance = 1.0
         if "initial_covariance" in hparams:
             init_covariance = hparams.pop("initial_covariance")
     else:
