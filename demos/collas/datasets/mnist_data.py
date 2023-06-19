@@ -240,6 +240,7 @@ def generate_rotated_images(
     min_angle: float=0.0,
     max_angle: float=180.0,
     include_labels: bool=True,
+    angles: jnp.ndarray=None,
 ) -> Tuple[jnp.ndarray, jnp.ndarray]:
     """Generate rotated images.
     """
@@ -248,10 +249,15 @@ def generate_rotated_images(
     if angle_fn is None:
         angle_fn = generate_random_angles
     n = len(imgs) if n is None else min(n, len(imgs))
+    if angles is None:
+        angles = angle_fn(n, min_angle, max_angle, key)
     if target_digit is not None:
-        imgs = imgs[labels == target_digit][:n]
-        labels = labels[labels == target_digit][:n]
-    angles = angle_fn(len(imgs), min_angle, max_angle, key)
+        imgs = imgs[labels == target_digit]
+        imgs = jnp.concatenate([imgs]*(len(angles)//len(imgs)+1), axis=0)
+        imgs = imgs[:len(angles)]
+        labels = labels[labels == target_digit]
+        labels = jnp.concatenate([labels]*(len(angles)//len(labels)+1), axis=0)
+        labels = labels[:len(angles)]
     imgs_rot = vmap(rotate_mnist)(imgs, angles)
     if include_labels:
         return imgs_rot, angles, labels
@@ -293,6 +299,8 @@ def load_rotated_mnist_dataset(
     nval: int=None,
     ntest: int=None,
     include_labels: bool=True,
+    match_train_test_angles: bool=False,
+    angle_std = 5.0,
     **process_kwargs,
 ) -> dict:
     """Load rotated MNIST dataset.
@@ -301,11 +309,23 @@ def load_rotated_mnist_dataset(
         key = jr.PRNGKey(key)
     if dataset is None:
         dataset = load_mnist_dataset(data_dir, fashion, oh_train=False)
-    train, val, test = \
+    *keys, subkey = jr.split(key, 3)
+    train, val = \
         (generate_rotated_images(*dataset[k], n, key_, target_digit, angle_fn,
-                                 min_angle, max_angle, include_labels)
-         for k, n, key_ in zip(['train', 'val', 'test'], [ntrain, nval, ntest],
-                               jr.split(key, 3)))
+                                min_angle, max_angle, include_labels)
+        for k, n, key_ in zip(['train', 'val'], [ntrain, nval], keys))
+    if match_train_test_angles:
+        keys = jr.split(subkey, 2)
+        train_angles = train[1]
+        test_angles = train_angles + \
+            jr.normal(keys[0], train_angles.shape) * angle_std
+        test = generate_rotated_images(*dataset['test'], ntest, keys[1],
+                                       target_digit, angle_fn, min_angle,
+                                       max_angle, include_labels, test_angles)
+    else:
+        test = generate_rotated_images(*dataset['test'], ntest, subkey,
+                                       target_digit, angle_fn, min_angle,
+                                       max_angle, include_labels)
     oh_train = True if include_labels else False
     dataset = process_mnist_dataset(train, val, test, oh_train=oh_train,
                                     shuffle=False, **process_kwargs)
@@ -557,14 +577,18 @@ def generate_pmnist_experiment(
 def generate_rmnist_experiment(
     ntrain: int,
     angle_fn: Callable,
+    problem: str="iid"
 ):
     kwargs = {
         "ntrain": ntrain,
         "nval": 500,
     }
+    load_fn = partial(load_rotated_mnist_dataset, include_labels=False,
+                      angle_fn=angle_fn, **kwargs)
+    if problem == "amplified" or problem == "random-walk":
+        load_fn = partial(load_fn, match_train_test_angles=True)
     dataset = {
-        "load_fn": partial(load_rotated_mnist_dataset, include_labels=False,
-                           angle_fn=angle_fn, **kwargs),
+        "load_fn": load_fn,
         "configs": kwargs,
     }
     
