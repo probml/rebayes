@@ -373,14 +373,15 @@ def create_optimizer(
 
 def get_best_params(optimizer, method):
     max_params = optimizer.max["params"].copy()
+    initial_covariance = jnp.exp(max_params["log_init_cov"]).item()
     if "sgd" in method or "adam" in method:
         learning_rate = jnp.exp(max_params["log_learning_rate"]).item()
         
         hparams = {
+            "initial_covariance": initial_covariance,
             "learning_rate": learning_rate,
         }
     else:
-        initial_covariance = jnp.exp(max_params["log_init_cov"]).item()
         dynamics_weights = \
             1 - jnp.exp(max_params["log_1m_dynamics_weights"]).item()
         dynamics_covariance = jnp.exp(max_params["log_dynamics_cov"]).item()
@@ -473,7 +474,7 @@ def build_estimator(init_fn, hparams, method, classification=True, **kwargs):
             dim_output=kwargs["dim_output"],
             n_inner=1,
         )
-        init_covariance = hparams.pop("init_covariance")
+        init_covariance = hparams.pop("initial_covariance")
     else:
         raise ValueError("method must be either 'ekf', 'lofi' or 'sgd'")
 
