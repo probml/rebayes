@@ -577,14 +577,15 @@ def generate_pmnist_experiment(
 def generate_rmnist_experiment(
     ntrain: int,
     angle_fn: Callable,
-    include_labels=False,
+    include_labels: bool=False,
+    max_angle: float=180.0
 ):
     kwargs = {
         "ntrain": ntrain,
         "nval": 500,
     }
     load_fn = partial(load_rotated_mnist_dataset, include_labels=include_labels,
-                      angle_fn=angle_fn, **kwargs)
+                      angle_fn=angle_fn, max_angle=max_angle, **kwargs)
     if angle_fn in (generate_amplified_angles, generate_random_walk_angles):
         load_fn = partial(load_fn, match_train_test_angles=True)
     dataset = {
@@ -604,9 +605,8 @@ clf_datasets = {
     'stationary-mnist': generate_mnist_experiment,
     'permuted-mnist': generate_pmnist_experiment,
     'rotated-mnist': partial(generate_rmnist_experiment,
-                             angle_fn=partial(generate_random_walk_angles,
-                                              max_angle=30.0),
-                             include_labels=True),
+                             angle_fn=generate_random_walk_angles,
+                             include_labels=True, max_angle=30.0),
     'split-mnist': {
         "load_fn": partial(load_split_mnist_dataset, **smnist_kwargs),
         "configs": smnist_kwargs,
