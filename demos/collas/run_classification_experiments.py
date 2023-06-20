@@ -265,9 +265,10 @@ def main(cl_args):
         model_init_fn = models.initialize_classification_cnn
     else: # cl_args.model == "mlp"
         model_init_fn = models.initialize_classification_mlp
+    output_dim = 1 if cl_args.problem == "split" else 10
+    model_init_fn = partial(model_init_fn, output_dim=output_dim) 
     
     # Set up agents
-    output_dim = 1 if cl_args.problem == "split" else 10
     agents = _process_agent_args(cl_args.agents, cl_args.lofi_cov_type,
                                  cl_args.ranks, output_dim, cl_args.problem)
     
