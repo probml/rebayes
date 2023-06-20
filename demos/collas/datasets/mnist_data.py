@@ -599,6 +599,24 @@ def generate_rmnist_experiment(
     return dataset
 
 
+def generate_split_mnist_experiment(
+    ntrain_per_task: int=300,
+    nval_per_task: int=1,
+    ntest_per_task: int=500,
+):
+    kwargs = {
+        "ntrain_per_task": ntrain_per_task,
+        "nval_per_task": nval_per_task,
+        "ntest_per_task": ntest_per_task,
+    }
+    dataset = {
+        "load_fn": partial(load_split_mnist_dataset, **kwargs),
+        "configs": kwargs,
+    }
+    
+    return dataset
+
+
 def generate_rotated_permuted_mnist_experiment(
     n_tasks: int=10,
     ntrain_per_task: int=300,
@@ -638,10 +656,7 @@ clf_datasets = {
     'rotated-mnist': partial(generate_rmnist_experiment,
                              angle_fn=generate_random_walk_angles,
                              include_labels=True, max_angle=90.0),
-    'split-mnist': {
-        "load_fn": partial(load_split_mnist_dataset, **smnist_kwargs),
-        "configs": smnist_kwargs,
-    }
+    'split-mnist': generate_split_mnist_experiment,
 }
 
 
