@@ -34,21 +34,6 @@ def _check_positive_float(value):
     return fvalue
 
 
-def _process_angle_fn(problem):
-    match problem:
-        case "iid":
-            angle_fn = mnist_data.generate_random_angles
-        case "amplified":
-            angle_fn = mnist_data.generate_amplified_angles
-        case "random_walk":
-            angle_fn = mnist_data.generate_random_walk_angles
-        case other:
-            # TODO: Implement permuted rotating regression
-            angle_fn = None
-    
-    return angle_fn
-
-
 def _process_agent_args(agent_args, ranks, output_dim, problem, obs_scale):
     agents = {}
     sgd_loss_fn = partial(callbacks.nll_reg, scale=obs_scale)
@@ -138,15 +123,18 @@ def _eval_metric(
                 "test": callbacks.cb_reg_nlpd_mc,
             }
     else: # Nonstationary
-        result = {
-            "val": partial(callbacks.cb_osa,
-                            evaluate_fn=partial(callbacks.ll_reg,
-                                                scale=obs_scale),
-                            label="log_likelihood"),
-            "test": partial(callbacks.cb_reg_sup,
-                            ymean=0.0, ystd=1.0, 
-                            only_window_eval=True)
-        }
+        if nll_method == "nll":
+            result = {
+                "val": partial(callbacks.cb_osa,
+                                evaluate_fn=partial(callbacks.ll_reg,
+                                                    scale=obs_scale),
+                                label="log_likelihood"),
+                "test": partial(callbacks.cb_reg_sup,
+                                ymean=0.0, ystd=1.0, 
+                                only_window_eval=True)
+            }
+        else:
+            pass # TODO
     
     return result
 
@@ -232,7 +220,7 @@ def evaluate_and_store_result(
         key = jr.PRNGKey(key)
     if problem == "iid" or problem == "amplified" or problem == "random-walk":
         eval_fn = train_utils.eval_agent_stationary
-    else:
+    else: # Permuted regression
         eval_fn = train_utils.eval_agent_nonstationary
     result = eval_fn(model_init_fn, dataset_load_fn, optimizer_dict,
                      eval_callback, n_iter, key, **kwargs)
@@ -247,7 +235,9 @@ def evaluate_and_store_result(
 def main(cl_args):
     # Set output path
     output_path = os.environ.get("REBAYES_OUTPUT")
-    problem_name = cl_args.problem + "-" + str(cl_args.ntrain)
+    problem_name = cl_args.problem
+    if cl_args.problem != "permuted":
+        problem_name += "-" + str(cl_args.ntrain)
     if output_path is None:
         output_path = Path("regression", "outputs", problem_name,
                            cl_args.dataset, cl_args.model, cl_args.nll_method)
@@ -260,8 +250,11 @@ def main(cl_args):
     Path(config_path).mkdir(parents=True, exist_ok=True)
     
     # Load dataset
-    angle_fn = _process_angle_fn(cl_args.problem)
-    dataset = mnist_data.generate_rmnist_experiment(cl_args.ntrain, angle_fn)
+    dataset = mnist_data.reg_datasets[f"{cl_args.problem}-mnist"]
+    if cl_args.problem == "permuted":
+        dataset = dataset()
+    else:
+        dataset = dataset(cl_args.ntrain)
     dataset_load_fn, kwargs = dataset.values()
     ntrain = None
     if kwargs is not None and "ntrain" in kwargs:

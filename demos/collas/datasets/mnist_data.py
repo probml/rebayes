@@ -431,6 +431,7 @@ def load_permuted_mnist_dataset(
     ntrain_per_task: int,
     nval_per_task: int,
     ntest_per_task: int,
+    dataset: dict=None,
     data_dir: str="/tmp/data",
     fashion: bool=False,
     key: int=0,
@@ -440,7 +441,8 @@ def load_permuted_mnist_dataset(
     """
     if isinstance(key, int):
         key = jr.PRNGKey(key)
-    dataset = load_mnist_dataset(data_dir, fashion, oh_train=False)
+    if dataset is None:
+        dataset = load_mnist_dataset(data_dir, fashion, oh_train=False)
     identity_idx = jnp.arange(28*28)[None, :]
     keys = jr.split(key, n_tasks)
     perm_idx = jnp.concatenate(
@@ -467,6 +469,7 @@ def load_rotated_permuted_mnist_dataset(
     ntrain_per_task: int,
     nval_per_task: int,
     ntest_per_task: int,
+    dataset: dict=None,
     data_dir: str="/tmp/data",
     fashion: bool=False,
     key: int=0,
@@ -479,14 +482,14 @@ def load_rotated_permuted_mnist_dataset(
     keys = jr.split(key, 2)
     permuted_dataset = \
         load_permuted_mnist_dataset(n_tasks, ntrain_per_task, nval_per_task, 
-                                    ntest_per_task, data_dir, fashion, keys[0],
-                                    oh_train=False)
+                                    ntest_per_task, dataset, data_dir, fashion, 
+                                    keys[0], oh_train=False)
     dataset = load_rotated_mnist_dataset(
         permuted_dataset, angle_fn=angle_fn, min_angle=min_angle, 
-        max_angle=max_angle, key=keys[1], shuffle=False,
+        max_angle=max_angle, key=keys[1], include_labels=False,
     )
     
-    return permuted_dataset, dataset
+    return dataset
 
 
 # Split MNIST ------------------------------------------------------------------
@@ -558,7 +561,7 @@ def generate_pmnist_experiment(
     n_tasks: int=10,
     ntrain_per_task: int=300,
     nval_per_task: int=1,
-    ntest_per_task: int=50,
+    ntest_per_task: int=500,
 ):
     kwargs = {
         "n_tasks": n_tasks,
@@ -595,11 +598,39 @@ def generate_rmnist_experiment(
     
     return dataset
 
+
+def generate_rotated_permuted_mnist_experiment(
+    n_tasks: int=10,
+    ntrain_per_task: int=300,
+    nval_per_task: int=1,
+    ntest_per_task: int=500,
+    angle_fn: Callable=None,
+    min_angle: float=0.0,
+    max_angle: float=180.0,
+):
+    kwargs = {
+        "n_tasks": n_tasks,
+        "ntrain_per_task": ntrain_per_task,
+        "nval_per_task": nval_per_task,
+        "ntest_per_task": ntest_per_task,
+        "angle_fn": angle_fn,
+        "min_angle": min_angle,
+        "max_angle": max_angle,
+    }
+    dataset = {
+        "load_fn": partial(load_rotated_permuted_mnist_dataset, **kwargs),
+        "configs": kwargs,
+    }
+    
+    return dataset
+
+
 smnist_kwargs = {
     'ntrain_per_task': 300,
     'nval_per_task': 1,
     'ntest_per_task': 500,
 }
+
 
 clf_datasets = {
     'stationary-mnist': generate_mnist_experiment,
@@ -611,4 +642,16 @@ clf_datasets = {
         "load_fn": partial(load_split_mnist_dataset, **smnist_kwargs),
         "configs": smnist_kwargs,
     }
+}
+
+
+reg_datasets = {
+    "iid-mnist": partial(generate_rmnist_experiment,
+                         angle_fn=generate_random_angles),
+    "amplified-mnist": partial(generate_rmnist_experiment,
+                               angle_fn=generate_amplified_angles), 
+    "random-walk-mnist": partial(generate_rmnist_experiment,
+                                 angle_fn=generate_random_walk_angles),
+    "permuted-mnist": partial(generate_rotated_permuted_mnist_experiment,
+                              angle_fn=generate_random_angles),
 }
