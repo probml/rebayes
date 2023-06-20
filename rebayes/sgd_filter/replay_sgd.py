@@ -204,7 +204,7 @@ class FifoSGDLaplaceDiag(FifoSGD):
         self.prior_precision = prior_precision
         self.log_likelihood = log_likelihood
 
-    def init_bel(self, params, initial_covariance, X, y):
+    def init_bel(self, params, initial_covariance, X=None, y=None):
         if self.apply_fn is None:
             raise ValueError("Must provide apply_fn")
         bel_init = FifoTrainStateLaplaceDiag.create(
