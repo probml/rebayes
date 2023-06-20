@@ -203,6 +203,51 @@ def cb_reg_nlpd_mc(bel, pred_obs, t, X, y, bel_pred, nan_val=-1e8, **kwargs):
     return nlpd
 
 
+def cb_reg_discrete_tasks(bel, pred_obs, t, x, y, bel_pred, i, scale,
+                          nll_loss_fn=None, rmse_loss_fn=None, **kwargs):
+    if nll_loss_fn is None:
+        nll_loss_fn = lambda pred_obs, y: nll_reg(pred_obs, y, scale).mean()
+    if rmse_loss_fn is None:
+        rmse_loss_fn = rmse_reg
+    
+    nll_evaluate_fn = partial(
+        evaluate_function,
+        loss_fn=nll_loss_fn,
+    )
+    rmse_evaluate_fn = partial(
+        evaluate_function,
+        loss_fn=rmse_loss_fn,
+    )
+    
+    X_test, y_test, apply_fn = kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
+    ntest_per_batch = kwargs["ntest_per_batch"]
+    
+    prev_test_batch, curr_test_batch = i*ntest_per_batch, (i+1)*ntest_per_batch
+    curr_X_test, curr_y_test = \
+        X_test[prev_test_batch:curr_test_batch], y_test[prev_test_batch:curr_test_batch]
+    cum_X_test, cum_y_test = X_test[:curr_test_batch], y_test[:curr_test_batch]
+    
+    overall_nll_result = nll_evaluate_fn(bel.mean, apply_fn, cum_X_test, cum_y_test, label="overall")
+    current_nll_result = nll_evaluate_fn(bel.mean, apply_fn, curr_X_test, curr_y_test, label="current")
+    task1_nll_result = nll_evaluate_fn(bel.mean, apply_fn, X_test[:ntest_per_batch], y_test[:ntest_per_batch],
+                                       label="task1")
+        
+    nll_result = {**overall_nll_result, **current_nll_result, **task1_nll_result,}
+    
+    overall_rmse_result = rmse_evaluate_fn(bel.mean, apply_fn, cum_X_test, cum_y_test, label="overall")
+    current_rmse_result = rmse_evaluate_fn(bel.mean, apply_fn, curr_X_test, curr_y_test, label="current")
+    task1_rmse_result = rmse_evaluate_fn(bel.mean, apply_fn, X_test[:ntest_per_batch], y_test[:ntest_per_batch],
+                                           label="task1")
+    rmse_result = {**overall_rmse_result, **current_rmse_result, **task1_rmse_result,}
+    
+    result = {
+        "nll": nll_result,
+        "rmse": rmse_result
+    }
+    
+    return result
+
+
 # Evaluation functions
 ll_reg = lambda pred_obs, y, scale: distrax.Normal(pred_obs, scale).log_prob(y).mean()
 nll_reg = lambda pred_obs, y, scale: -ll_reg(pred_obs, y, scale)

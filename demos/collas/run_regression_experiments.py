@@ -122,7 +122,16 @@ def _eval_metric(
                 ),
                 "test": callbacks.cb_reg_nlpd_mc,
             }
-    else: # Nonstationary
+    elif problem == "permuted":
+        result = {
+            "val": partial(callbacks.cb_osa,
+                            evaluate_fn=partial(callbacks.ll_reg,
+                                                scale=obs_scale),
+                            label="log_likelihood"),
+            "test": partial(callbacks.cb_reg_discrete_tasks,
+                            scale=obs_scale)
+        }
+    else: # Non-iid rotations
         if nll_method == "nll":
             result = {
                 "val": partial(callbacks.cb_osa,
