@@ -281,7 +281,7 @@ class FifoSGDLaplaceDiag(FifoSGD):
         return yhat_samples
 
     @partial(jax.jit, static_argnames=("self", "n_samples"))
-    def nlpd_mc(self, bel, key, x, y, n_samples=30):
+    def nlpd_mc(self, bel, key, x, y, n_samples=30, temperature=1.0):
         """
         Compute the negative log predictive density (nlpd) as a
         Monte Carlo (MC) estimate.
