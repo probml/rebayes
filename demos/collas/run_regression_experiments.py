@@ -100,6 +100,7 @@ def _eval_metric(
     obs_scale: float,
     problem: str,
     nll_method: str,
+    temperature: float,
 ) -> dict:
     """Get evaluation metric for classification problem type.
     """
@@ -118,9 +119,12 @@ def _eval_metric(
         else: # nlpd-mc
             result = {
                 "val": lambda *args, **kwargs: tree_map(
-                    lambda x: -x, callbacks.cb_reg_nlpd_mc(*args, **kwargs)
+                    lambda x: -x, partial(
+                        callbacks.cb_reg_nlpd_mc, temperature=temperature
+                    )(*args, **kwargs)
                 ),
-                "test": callbacks.cb_reg_nlpd_mc,
+                "test": partial(callbacks.cb_reg_nlpd_mc,
+                                temperature=temperature),
             }
     elif problem == "permuted":
         result = {
@@ -157,6 +161,7 @@ def tune_and_store_hyperparameters(
     verbose: int = 2,
     n_explore: int = 20,
     n_exploit: int = 25,
+    temperature: float = 1.0,
 ) -> dict:
     """Tune and store hyperparameters.
 
@@ -171,6 +176,7 @@ def tune_and_store_hyperparameters(
             for Bayesian optimization. Defaults to 20.
         n_exploit (int, optional): Number of exploitation steps for
             Bayesian optimization. Defaults to 25.
+        temperature (float, optional): Temperature for NLPD-MC sampling.
 
     Returns:
         hparams (dict): Dictionary of tuned hyperparameters.
@@ -208,6 +214,7 @@ def evaluate_and_store_result(
     problem: str,
     n_iter: int=20,
     key: int=0,
+    temperature: float=1.0,
     **kwargs: dict,
 ) -> dict:
     """Evaluate and store results.
@@ -221,6 +228,7 @@ def evaluate_and_store_result(
         problem (str): Problem type.
         n_iter (int, optional): Number of random initializations. Defaults to 20.
         key (int, optional): Random seed. Defaults to 0.
+        temperature (float, optional): Temperature for NLPD-MC sampling.
 
     Returns:
         result (dict): Dictionary of results.
@@ -235,7 +243,9 @@ def evaluate_and_store_result(
                      eval_callback, n_iter, key, **kwargs)
     
     # Store result
-    with open(Path(output_path, f"{agent_name}.pkl"), "wb") as f:
+    if temperature != 1.0:
+        agent_filepath = f"{agent_name}-temp{temperature}"
+    with open(Path(output_path, f"{agent_filepath}.pkl"), "wb") as f:
         pickle.dump(result, f)
     
     return result
@@ -274,7 +284,7 @@ def main(cl_args):
     )
     dataset_load_fn = partial(dataset_load_fn, dataset=base_dataset)
     eval_metric = _eval_metric(cl_args.obs_scale, cl_args.problem, 
-                               cl_args.nll_method)
+                               cl_args.nll_method, cl_args.temp)
     
     # Initialize model
     if cl_args.model == "cnn":
@@ -297,7 +307,8 @@ def main(cl_args):
             tune_and_store_hyperparameters(hparam_path, model_init_fn, 
                                            dataset_load_fn, agents,
                                            eval_metric["val"], cl_args.verbose, 
-                                           cl_args.n_explore, cl_args.n_exploit)
+                                           cl_args.n_explore, cl_args.n_exploit,
+                                           cl_args.temp)
     else:
         agent_hparams = {}
         for agent_name in agents:
@@ -326,7 +337,7 @@ def main(cl_args):
                                       dataset_load_fn, optimizer_dict,
                                       eval_metric["test"], agent_name,
                                       cl_args.problem, cl_args.n_iter,
-                                      **kwargs)
+                                      temperature=cl_args.temp, **kwargs)
     
 
 if __name__ == "__main__":
@@ -357,6 +368,9 @@ if __name__ == "__main__":
     # Negative log likelihood evaluation method
     parser.add_argument("--nll_method", type=str, default="nll", 
                         choices=["nll", "nlpd-mc"])
+    
+    # Temperature for NLPD-MC sampling
+    parser.add_argument("--temp", type=_check_positive_float, default=1.0)
     
     # Tune the hyperparameters of the agents
     parser.add_argument("--tune", action="store_true")
