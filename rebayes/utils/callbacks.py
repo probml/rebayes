@@ -62,14 +62,14 @@ def cb_mc_osa(bel, y_pred, t, X, y, bel_pred, nan_val=-1e8,
     y = jnp.atleast_1d(y)
     if linearize:
         lpd = agent.evaluate_log_prob(bel_pred, X, y, aleatoric_factor)
-        nlpd = -lpd
     else:
         nlpd = agent.nlpd_mc(bel_pred, key, X, y, temperature=temperature)
-    nlpd = {
-        "nlpd": jnp.where(jnp.isnan(nlpd), nan_val, nlpd.mean())
+        lpd = -nlpd
+    lpd = {
+        "lpd": jnp.where(jnp.isnan(lpd), nan_val, lpd.mean())
     }
     
-    return nlpd
+    return lpd
 
 
 # ------------------------------------------------------------------------------
