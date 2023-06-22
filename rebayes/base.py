@@ -80,7 +80,8 @@ class Rebayes(ABC):
     def predict_obs_cov(
         self,
         bel: Belief,
-        X: Float[Array, "input_dim"]
+        X: Float[Array, "input_dim"],
+        aleatoric_factor: float = 1.0,
     ) -> Union[Float[Array, "output_dim output_dim"], Any]: 
         """Return Cov(y(t) | X(t), D(1:t-1))"""
         return None
@@ -106,12 +107,19 @@ class Rebayes(ABC):
         self,
         bel: Belief,
         X: Float[Array, "input_dim"],
-        y: Float[Array, "obs_dim"]
+        y: Float[Array, "obs_dim"],
+        aleatoric_factor: float = 1.0,
     ) -> float:
         """Return log p(y(t) | X(t), D(1:t-1))"""
-        pred_obs_mean, pred_obs_cov = self.predict_obs(bel, X), self.predict_obs_cov(bel, X)
-        emission_dist = self.emission_dist(pred_obs_mean, pred_obs_cov)
-        log_prob = emission_dist.log_prob(y)
+        X = jnp.atleast_2d(X)
+        y = jnp.atleast_1d(y)
+        
+        def llfn(x, y):
+            m = self.predict_obs(bel, x)
+            V = self.predict_obs_cov(bel, x, aleatoric_factor)
+            return self.emission_dist(m, V).log_prob(y)
+        
+        log_prob = vmap(llfn)(X, y)
         
         return log_prob
 
