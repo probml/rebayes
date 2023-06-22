@@ -208,6 +208,7 @@ def bbf_rsgd(
         lossfn_fifo,
         loglikelihood_fifo,
         apply_fn=model_dict["apply_fn"],
+        emission_cov_function=model_dict["emission_cov_function"],
         tx=tx,
         buffer_size=buffer_size,
         dim_features=[1, 28, 28, 1],

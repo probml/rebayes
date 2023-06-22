@@ -195,12 +195,15 @@ class FifoSGD(Rebayes):
 # TODO: replace log_likelihood with TFP distribution
 # TODO: deprecate log_likelihood
 class FifoSGDLaplaceDiag(FifoSGD):
-    def __init__(self, lossfn, log_likelihood, apply_fn=None, emission_dist=None,
-                 tx=None, buffer_size=None, dim_features=None, 
-                 dim_output=None, n_inner=1, prior_precision=1.0):
+    def __init__(self, lossfn, log_likelihood, apply_fn=None, emission_cov_function=None,
+                 adaptive_emission_covariance=False, emission_dist=None, tx=None, 
+                 buffer_size=None, dim_features=None, dim_output=None, n_inner=1, 
+                 prior_precision=1.0):
         super().__init__(lossfn, apply_fn, tx, buffer_size, dim_features, dim_output, n_inner)
         self.emission_dist = emission_dist if emission_dist is not None \
             else lambda mean, cov: MVN(loc=mean, scale_tril=jnp.linalg.cholesky(cov))
+        self.emission_cov_function = emission_cov_function
+        self.adaptive_emission_covariance = adaptive_emission_covariance
         self.prior_precision = prior_precision
         self.log_likelihood = log_likelihood
 
@@ -234,6 +237,17 @@ class FifoSGDLaplaceDiag(FifoSGD):
         precision = bel.precision
         Fdiag = jax.tree_map(lambda g, p: -(g ** 2).sum(axis=0) - p, grads, precision)
         return Fdiag
+    
+    @partial(jax.jit, static_argnums=(0,))
+    def predict_obs_cov(self, bel, X, aleatoric_factor=1.0):
+        m_Y = lambda z: self.apply_fn(z, X)
+        H = _jacrev_2d(m_Y, bel.mean)
+        cov = jax.tree_map(lambda x: 1/x, bel.precision)
+        P, _ = ravel_pytree(cov)
+        V_epi = (P * H) @ H.T
+        R = self.obs_cov(bel, X) * aleatoric_factor
+        Sigma_obs = V_epi + R
+        return Sigma_obs
 
     @partial(jax.jit, static_argnums=(0,))
     def update_state(self, bel, Xt, yt):
