@@ -114,13 +114,13 @@ def cb_clf_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, lagn=20, store_fro=Tr
     return res
 
 
-def cb_reg_mc_window(bel, pred_obs, t, X, y, bel_pred, apply_fn, steps=10, 
+def cb_reg_mc_window(bel, pred_obs, t, X, y, bel_pred, apply_fn, steps=200,
                      temperature=1.0, linearize=False, aleatoric_factor=1.0,
                      **kwargs):
     agent, X_test, y_test = kwargs["agent"], kwargs["X_test"], kwargs["y_test"]
     slice_ix = jnp.arange(0, steps) + t - steps // 2
-    X_window = jnp.take(X_test, slice_ix, axis=0)
-    y_window = jnp.take(y_test, slice_ix, axis=0)
+    X_window = jnp.take(X_test, slice_ix, axis=0, mode="clip")
+    y_window = jnp.take(y_test, slice_ix, axis=0, mode="clip")
     if linearize:
         lpd = agent.evaluate_log_prob(bel_pred, X_window, y_window, aleatoric_factor)
         nlpd = -lpd.mean()
@@ -134,7 +134,7 @@ def cb_reg_mc_window(bel, pred_obs, t, X, y, bel_pred, apply_fn, steps=10,
     return nlpd
 
 
-def cb_reg_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, ymean, ystd, steps=10, 
+def cb_reg_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, ymean, ystd, steps=200, 
                only_window_eval=False, **kwargs):
     """
     Callback for a regression task with a supervised loss function.
@@ -144,8 +144,8 @@ def cb_reg_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, ymean, ystd, steps=10
     slice_ix = jnp.arange(0, steps) + t - steps // 2
     
     if only_window_eval:
-        X_window = jnp.take(X_test, slice_ix, axis=0)
-        y_window = jnp.take(y_test, slice_ix, axis=0)
+        X_window = jnp.take(X_test, slice_ix, axis=0, mode="clip")
+        y_window = jnp.take(y_test, slice_ix, axis=0, mode="clip")
         
         # eval on window
         yhat_window = jax.vmap(apply_fn, (None, 0))(bel_pred.mean, X_window).squeeze()
@@ -190,7 +190,7 @@ def cb_reg_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, ymean, ystd, steps=10
     return res
 
 
-def cb_reg_mc(bel, pred_obs, t, X, y, bel_pred, apply_fn, steps=10, **kwargs):
+def cb_reg_mc(bel, pred_obs, t, X, y, bel_pred, apply_fn, steps=200, **kwargs):
     agent = kwargs["agent"]
     scale = kwargs["scale"]
     X_test, y_test = kwargs["X_test"], kwargs["y_test"]
@@ -364,7 +364,8 @@ def cb_clf_window_test(bel, pred_obs, t, X, y, bel_pred, steps=200, **kwargs):
     
     X_test, y_test, apply_fn = kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"]
     slice_ix = jnp.arange(0, steps) + t - steps // 2
-    X_window, y_window = jnp.take(X_test, slice_ix, axis=0), jnp.take(y_test, slice_ix, axis=0)
+    X_window, y_window = jnp.take(X_test, slice_ix, axis=0, mode="clip"), \
+        jnp.take(y_test, slice_ix, axis=0, mode="clip")
     
     # Eval on window
     nll_evaluate_fn = partial(evaluate_function, loss_fn=nll_loss_fn)
