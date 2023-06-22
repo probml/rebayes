@@ -191,7 +191,8 @@ class RebayesLoFiSpherical(RebayesLoFi):
     def predict_obs_cov(
         self,
         bel: LoFiBel,
-        x: Float[Array, "input_dim"]
+        x: Float[Array, "input_dim"],
+        aleatoric_factor: float = 1.0,
     ) -> Union[Float[Array, "output_dim output_dim"], Any]:
         m, U, Lambda, eta = \
             bel.mean, bel.basis, bel.svs, bel.eta
@@ -199,7 +200,7 @@ class RebayesLoFiSpherical(RebayesLoFi):
         H = core._jacrev_2d(m_Y, m)
         G = (Lambda**2) / (eta * (eta + Lambda**2))
         V_epi = H @ H.T/eta - (G * (H@U)) @ (H@U).T
-        R = self.obs_cov(bel, x)
+        R = self.obs_cov(bel, x) * aleatoric_factor
         Sigma_obs = V_epi + R
 
         return Sigma_obs
@@ -250,7 +251,8 @@ class RebayesLoFiSpherical(RebayesLoFi):
         P, *_ = bel.mean.shape
         diag = bel.eta * jnp.ones((P,))
         shape = (n_samples,)
-        params_sample = sample_dlr(key, bel.basis, diag, temperature, shape) + bel.mean
+        params_sample = sample_dlr(key, bel.basis, diag, temperature, shape) + \
+            bel.mean
         
         return params_sample
 
@@ -368,7 +370,8 @@ class RebayesLoFiDiagonal(RebayesLoFi):
     def predict_obs_cov(
         self,
         bel: LoFiBel,
-        x: Float[Array, "input_dim"]
+        x: Float[Array, "input_dim"],
+        aleatoric_factor: float = 1.0,
     ) -> Union[Float[Array, "output_dim output_dim"], Any]:
         m, U, Lambda, Ups = \
             bel.mean, bel.basis, bel.svs, bel.Ups
@@ -377,9 +380,9 @@ class RebayesLoFiDiagonal(RebayesLoFi):
         _, L = U.shape
         W = U * Lambda
         G = jnp.linalg.pinv(jnp.eye(L) +  W.T @ (W/Ups))
-        HW = H/Ups @ W
-        V_epi = H @ H.T/Ups - (HW @ G) @ (HW).T
-        R = self.obs_cov(bel, x)
+        HW = (H.T/Ups).T @ W
+        V_epi = H @ (H.T/Ups) - (HW @ G) @ (HW).T
+        R = self.obs_cov(bel, x) * aleatoric_factor
         Sigma_obs = V_epi + R
 
         return Sigma_obs
