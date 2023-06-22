@@ -151,8 +151,16 @@ def _eval_metric(
                                 ymean=0.0, ystd=1.0, 
                                 only_window_eval=True)
             }
-        else:
-            pass # TODO
+        else: # nlpd-mc
+            result = {
+                "val": partial(callbacks.cb_mc_osa,
+                               temperature=temperature, linearize=linearize,
+                               aleatoric_factor=aleatoric_factor,
+                               label="log_likelihood"),
+                "test": partial(callbacks.cb_reg_mc_window,
+                                temperature=temperature, linearize=linearize,
+                                aleatoric_factor=aleatoric_factor,)
+            }
     
     return result
 
