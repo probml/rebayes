@@ -53,11 +53,23 @@ def cb_osa(bel, y_pred, t, X, y, bel_pred, evaluate_fn, nan_val=-1e8,
     return result
 
 
-def cb_mc_osa(bel, y_pred, t, X, y, bel_pred, evaluate_fn, nan_val=-1e8,
+def cb_mc_osa(bel, y_pred, t, X, y, bel_pred, nan_val=-1e8,
+              temperature=1.0, linearize=False, aleatoric_factor=1.0, 
               label="loss", **kwargs):
     agent = kwargs["agent"]
     key = jax.random.fold_in(kwargs["key"], t)
-    nlpd = agent.nlpd_mc(bel_pred, key, )
+    X = jnp.atleast_2d(X)[None, None, :]
+    y = jnp.atleast_1d(y)
+    if linearize:
+        lpd = agent.evaluate_log_prob(bel_pred, X, y, aleatoric_factor)
+        nlpd = -lpd
+    else:
+        nlpd = agent.nlpd_mc(bel_pred, key, X, y, temperature=temperature)
+    nlpd = {
+        "nlpd": jnp.where(jnp.isnan(nlpd), nan_val, nlpd.mean())
+    }
+    
+    return nlpd
 
 
 # ------------------------------------------------------------------------------
@@ -100,6 +112,26 @@ def cb_clf_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, lagn=20, store_fro=Tr
         "params_magnitude": params_magnitude
     }
     return res
+
+
+def cb_reg_mc_window(bel, pred_obs, t, X, y, bel_pred, apply_fn, steps=10, 
+                     temperature=1.0, linearize=False, aleatoric_factor=1.0,
+                     **kwargs):
+    agent, X_test, y_test = kwargs["agent"], kwargs["X_test"], kwargs["y_test"]
+    slice_ix = jnp.arange(0, steps) + t - steps // 2
+    X_window = jnp.take(X_test, slice_ix, axis=0)
+    y_window = jnp.take(y_test, slice_ix, axis=0)
+    if linearize:
+        lpd = agent.evaluate_log_prob(bel_pred, X_window, y_window, aleatoric_factor)
+        nlpd = -lpd.mean()
+    else:
+        nlpd = agent.nlpd_mc(bel_pred, X_window, y_window, temperature=temperature)
+        nlpd = nlpd.mean()
+    nlpd = {
+        "nlpd": nlpd
+    }
+    
+    return nlpd
 
 
 def cb_reg_sup(bel, pred_obs, t, X, y, bel_pred, apply_fn, ymean, ystd, steps=10, 
