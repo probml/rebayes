@@ -129,6 +129,7 @@ class RebayesEKF(Rebayes):
         self, 
         bel: EKFBel,
         x: Float[Array, "input_dim"],
+        aleatoric_factor: float = 1.0,
     ) -> Float[Array, "output_dim output_dim"]:
         m, P = bel.mean, bel.cov
         m_Y = lambda z: self.emission_mean_function(z, x)
@@ -137,7 +138,7 @@ class RebayesEKF(Rebayes):
             V_epi = H @ P @ H.T
         else:
             V_epi = (P * H) @ H.T
-        R = self.obs_cov(bel, x)
+        R = self.obs_cov(bel, x) * aleatoric_factor
         P_obs = V_epi + R
         
         return P_obs
