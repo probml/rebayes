@@ -399,6 +399,7 @@ def build_estimator(init_fn, hparams, method, classification=True, **kwargs):
             lossfn_fifo,
             loglikelihood_fifo,
             apply_fn=apply_fn,
+            emission_cov_function=emission_cov_fn,
             tx=tx,
             buffer_size=kwargs["buffer_size"],
             dim_features=[1, 28, 28, 1],
