@@ -26,9 +26,9 @@ def _check_positive_int(value):
     return ivalue
 
 
-def _check_positive_float(value):
+def _check_nonneg_float(value):
     fvalue = float(value)
-    if fvalue <= 0:
+    if fvalue < 0:
         raise argparse.ArgumentTypeError(f"{value} is not a positive float")
     
     return fvalue
@@ -101,6 +101,8 @@ def _eval_metric(
     problem: str,
     nll_method: str,
     temperature: float,
+    linearize: bool = False,
+    aleatoric_factor: float = 1.0,
 ) -> dict:
     """Get evaluation metric for classification problem type.
     """
@@ -120,11 +122,14 @@ def _eval_metric(
             result = {
                 "val": lambda *args, **kwargs: tree_map(
                     lambda x: -x, partial(
-                        callbacks.cb_reg_nlpd_mc, temperature=temperature
+                        callbacks.cb_reg_nlpd_mc, temperature=temperature,
+                        linearize=linearize, aleatoric_factor=aleatoric_factor,
                     )(*args, **kwargs)
                 ),
-                "test": partial(callbacks.cb_reg_nlpd_mc,
-                                temperature=temperature),
+                "test": partial(
+                    callbacks.cb_reg_nlpd_mc, temperature=temperature,
+                    linearize=linearize, aleatoric_factor=aleatoric_factor,
+                ),
             }
     elif problem == "permuted":
         result = {
@@ -176,7 +181,6 @@ def tune_and_store_hyperparameters(
             for Bayesian optimization. Defaults to 20.
         n_exploit (int, optional): Number of exploitation steps for
             Bayesian optimization. Defaults to 25.
-        temperature (float, optional): Temperature for NLPD-MC sampling.
 
     Returns:
         hparams (dict): Dictionary of tuned hyperparameters.
@@ -197,7 +201,10 @@ def tune_and_store_hyperparameters(
         best_hparams = hparam_tune.get_best_params(optimizer, agent_name,
                                                    classification=False)
         # Store as json
-        with open(Path(hparam_path, f"{agent_name}.json"), "w") as f:
+        agent_filepath = agent_name
+        if temperature != 1.0:
+            agent_filepath += f"-temp-{temperature}"
+        with open(Path(hparam_path, f"{agent_filepath}.json"), "w") as f:
             json.dump(best_hparams, f)
         hparams[agent_name] = best_hparams
 
@@ -243,9 +250,8 @@ def evaluate_and_store_result(
                      eval_callback, n_iter, key, **kwargs)
     
     # Store result
-    if temperature != 1.0:
-        agent_filepath = f"{agent_name}-temp{temperature}"
-    with open(Path(output_path, f"{agent_filepath}.pkl"), "wb") as f:
+    agent_name = f"{agent_name}-temp-{temperature}"
+    with open(Path(output_path, f"{agent_name}.pkl"), "wb") as f:
         pickle.dump(result, f)
     
     return result
@@ -257,9 +263,12 @@ def main(cl_args):
     problem_name = cl_args.problem
     if cl_args.problem != "permuted":
         problem_name += "-" + str(cl_args.ntrain)
+    nll_method = cl_args.nll_method
+    if cl_args.nll_method == "nlpd-mc" and cl_args.linearize:
+        nll_method += "-linearized"
     if output_path is None:
         output_path = Path("regression", "outputs", problem_name,
-                           cl_args.dataset, cl_args.model, cl_args.nll_method)
+                           cl_args.dataset, cl_args.model, nll_method,)
     Path(output_path).mkdir(parents=True, exist_ok=True)
     
     # Set config path
@@ -284,7 +293,8 @@ def main(cl_args):
     )
     dataset_load_fn = partial(dataset_load_fn, dataset=base_dataset)
     eval_metric = _eval_metric(cl_args.obs_scale, cl_args.problem, 
-                               cl_args.nll_method, cl_args.temp)
+                               cl_args.nll_method, cl_args.temp,
+                               cl_args.linearize, cl_args.aleatoric)
     
     # Initialize model
     if cl_args.model == "cnn":
@@ -301,7 +311,7 @@ def main(cl_args):
     
     # Set up hyperparameter tuning
     hparam_path = Path(config_path, problem_name, cl_args.dataset, 
-                       cl_args.model, cl_args.nll_method)
+                       cl_args.model, nll_method)
     if cl_args.tune:
         agent_hparams = \
             tune_and_store_hyperparameters(hparam_path, model_init_fn, 
@@ -313,7 +323,10 @@ def main(cl_args):
         agent_hparams = {}
         for agent_name in agents:
             # Check if hyperparameters are specified in config file
-            agent_hparam_path = Path(hparam_path, agent_name+".json")
+            agent_filepath = agent_name
+            if cl_args.temp != 1.0:
+                agent_filepath = f"{agent_name}-temp-{cl_args.temp}"
+            agent_hparam_path = Path(hparam_path, agent_filepath+".json")
             try:
                 # Load json file
                 with open(agent_hparam_path, "r") as f:
@@ -363,14 +376,20 @@ if __name__ == "__main__":
                         choices=["mlp", "cnn"])
     
     # Observation noise
-    parser.add_argument("--obs_scale", type=_check_positive_float, default=15.0)
+    parser.add_argument("--obs_scale", type=_check_nonneg_float, default=15.0)
     
     # Negative log likelihood evaluation method
     parser.add_argument("--nll_method", type=str, default="nll", 
                         choices=["nll", "nlpd-mc"])
     
+    # Linearized NLPD-MC sampling
+    parser.add_argument("--linearize", action="store_true")
+    
+    # Multiplicative factor for aleatoric uncertainty
+    parser.add_argument("--aleatoric", type=_check_nonneg_float, default=1.0)
+    
     # Temperature for NLPD-MC sampling
-    parser.add_argument("--temp", type=_check_positive_float, default=1.0)
+    parser.add_argument("--temp", type=_check_nonneg_float, default=1.0)
     
     # Tune the hyperparameters of the agents
     parser.add_argument("--tune", action="store_true")
