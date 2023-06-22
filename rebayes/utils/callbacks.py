@@ -198,8 +198,9 @@ def cb_reg_nlpd_mc(bel, pred_obs, t, X, y, bel_pred, nan_val=-1e8,
         kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"], kwargs["agent"]
     key = jax.random.fold_in(kwargs["key"], t)
     if linearize:
-        nlpd = agent.evaluate_log_prob(bel_pred, X_test[:, jnp.newaxis, :], 
+        lpd = agent.evaluate_log_prob(bel_pred, X_test[:, jnp.newaxis, :], 
                                        y_test, aleatoric_factor).mean()
+        nlpd = -lpd
     else:
         nlpd = agent.nlpd_mc(bel, key, X_test[:, jnp.newaxis, :], y_test,
                             temperature=temperature).mean()
