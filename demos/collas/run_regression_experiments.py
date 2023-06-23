@@ -209,10 +209,10 @@ def tune_and_store_hyperparameters(
         best_hparams = hparam_tune.get_best_params(optimizer, agent_name,
                                                    classification=False)
         # Store as json
-        agent_filepath = agent_name
-        if temperature != 1.0:
-            agent_filepath += f"-temp-{temperature}"
-        with open(Path(hparam_path, f"{agent_filepath}.json"), "w") as f:
+        # agent_filepath = agent_name
+        # if temperature != 1.0:
+        #     agent_filepath += f"-temp-{temperature}"
+        with open(Path(hparam_path, f"{agent_name}.json"), "w") as f:
             json.dump(best_hparams, f)
         hparams[agent_name] = best_hparams
 
@@ -258,7 +258,7 @@ def evaluate_and_store_result(
                      eval_callback, n_iter, key, **kwargs)
     
     # Store result
-    agent_name = f"{agent_name}-temp-{temperature}"
+    # agent_name = f"{agent_name}-temp-{temperature}"
     with open(Path(output_path, f"{agent_name}.pkl"), "wb") as f:
         pickle.dump(result, f)
     
@@ -269,8 +269,8 @@ def main(cl_args):
     # Set output path
     output_path = os.environ.get("REBAYES_OUTPUT")
     problem_name = cl_args.problem
-    if cl_args.problem != "permuted":
-        problem_name += "-" + str(cl_args.ntrain)
+    # if cl_args.problem != "permuted":
+    #     problem_name += "-" + str(cl_args.ntrain)
     nll_method = cl_args.nll_method
     if cl_args.nll_method == "nlpd-mc" and cl_args.linearize:
         nll_method = "nlpd-linearized"
