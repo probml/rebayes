@@ -6,6 +6,7 @@ from typing import Callable
 from pathlib import Path
 import pickle
 
+from jax.tree_util import tree_map
 import jax.random as jr
 import optax
 
@@ -24,6 +25,14 @@ def _check_positive_int(value):
         raise argparse.ArgumentTypeError(f"{value} is not a positive integer")
     
     return ivalue
+
+
+def _check_nonneg_float(value):
+    fvalue = float(value)
+    if fvalue < 0:
+        raise argparse.ArgumentTypeError(f"{value} is not a positive float")
+    
+    return fvalue
 
 
 def _process_agent_args(agent_args, lofi_cov_type, ranks, output_dim, problem):
@@ -100,16 +109,36 @@ def _process_agent_args(agent_args, lofi_cov_type, ranks, output_dim, problem):
 
 def _eval_metric(
     problem: str,
+    nll_method: str,
+    temperature: float,
+    linearize: bool = False,
+    cooling_factor: float = 1.0,
 ) -> dict:
     """Get evaluation metric for classification problem type.
     """
     if problem == "stationary":
-        result = {
-            "val": partial(callbacks.cb_eval,
-                            evaluate_fn=callbacks.softmax_ll_il_clf_eval_fn),
-            "test": partial(callbacks.cb_eval,
-                            evaluate_fn=callbacks.softmax_clf_eval_fn)
-        }
+        if nll_method == "nll":
+            result = {
+                "val": partial(callbacks.cb_eval,
+                                evaluate_fn=callbacks.softmax_ll_il_clf_eval_fn),
+                "test": partial(callbacks.cb_eval,
+                                evaluate_fn=callbacks.softmax_clf_eval_fn)
+            }
+        else: # nlpd-mc
+            result = {
+                "val": lambda *args, **kwargs: tree_map(
+                    lambda x: -x, partial(
+                        callbacks.cb_clf_nlpd_mc, temperature=temperature,
+                        linearize=linearize, cooling_factor=cooling_factor,
+                        int_labels=True
+                    )(*args, **kwargs)
+                ),
+                "test": partial(
+                    callbacks.cb_reg_nlpd_mc, temperature=temperature,
+                    linearize=linearize, cooling_factor=cooling_factor,
+                    int_labels=False
+                ),
+            }
     elif problem == "permuted":
         result = {
             "val": partial(callbacks.cb_osa,
@@ -239,9 +268,12 @@ def main(cl_args):
     problem_str = cl_args.problem
     if cl_args.problem == "stationary" or cl_args.problem == "rotated":
         problem_str += "-" + str(cl_args.ntrain)
+    nll_method = cl_args.nll_method
+    if cl_args.nll_method == "nlpd-mc" and cl_args.linearize:
+        nll_method = "nlpd-linearized"
     if output_path is None:
         output_path = Path("classification", "outputs", problem_str,
-                           cl_args.dataset, cl_args.model)
+                           cl_args.dataset, cl_args.model, nll_method)
     Path(output_path).mkdir(parents=True, exist_ok=True)
     
     # Set config path
@@ -258,7 +290,9 @@ def main(cl_args):
         dataset_load_fn, kwargs = dataset().values()
     dataset_load_fn = partial(dataset_load_fn, 
                               fashion=cl_args.dataset=="f-mnist")
-    eval_metric = _eval_metric(cl_args.problem)
+    eval_metric = _eval_metric(cl_args.problem, cl_args.nll_method,
+                               cl_args.temp, cl_args.linearize,
+                               cl_args.cooling)
     
     # Initialize model
     if cl_args.model == "cnn":
@@ -328,6 +362,19 @@ if __name__ == "__main__":
     # Type of model (mlp or cnn)
     parser.add_argument("--model", type=str, default="mlp",
                         choices=["mlp", "cnn"])
+    
+    # Negative log likelihood evaluation method
+    parser.add_argument("--nll_method", type=str, default="nll", 
+                        choices=["nll", "nlpd-mc"])
+    
+    # Linearized NLPD-MC sampling
+    parser.add_argument("--linearize", action="store_true")
+    
+    # Multiplicative factor for posterior cooling (higher is more cooled)
+    parser.add_argument("--cooling", type=_check_nonneg_float, default=1.0)
+    
+    # Temperature for NLPD-MC sampling
+    parser.add_argument("--temp", type=_check_nonneg_float, default=1.0)
     
     # Tune the hyperparameters of the agents
     parser.add_argument("--tune", action="store_true")
