@@ -130,11 +130,11 @@ def _eval_metric(
                     lambda x: -x, partial(
                         callbacks.cb_clf_nlpd_mc, temperature=temperature,
                         linearize=linearize, cooling_factor=cooling_factor,
-                        int_labels=True
+                        nan_val=1e8, int_labels=True
                     )(*args, **kwargs)
                 ),
                 "test": partial(
-                    callbacks.cb_reg_nlpd_mc, temperature=temperature,
+                    callbacks.cb_clf_nlpd_mc, temperature=temperature,
                     linearize=linearize, cooling_factor=cooling_factor,
                     int_labels=False
                 ),
