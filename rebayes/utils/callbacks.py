@@ -381,6 +381,34 @@ def cb_clf_window_test(bel, pred_obs, t, X, y, bel_pred, steps=200, **kwargs):
     return result
 
 
+def cb_clf_nlpd_mc(bel, pred_obs, t, X, y, bel_pred, nan_val=-1e8,
+                   temperature=1.0, linearize=False, cooling_factor=1.0,
+                   int_labels=False, **kwargs):
+    X_test, y_test, apply_fn, agent = \
+        kwargs["X_test"], kwargs["y_test"], kwargs["apply_fn"], kwargs["agent"]
+    key = jax.random.fold_in(kwargs["key"], t)
+    if linearize:
+        def eval_probit_approx(x, y):
+            logits = apply_fn(bel_pred.mean, x)
+            cov = agent.predict_obs_cov(bel_pred, x, aleatoric_factor=0.0, 
+                                        apply_fn=apply_fn)
+            logits_adj = logits / jnp.sqrt(1 + jnp.pi * jnp.diag(cov) / 8)
+            prob = jax.nn.softmax(logits_adj * cooling_factor)
+            result = prob[y] if int_labels else prob[y.argmax()]
+            return result
+        lpd = jnp.log(vmap(eval_probit_approx)(X_test[:, jnp.newaxis, :], y_test))
+        nlpd = -lpd.mean()
+    else:
+        nlpd = agent.nlpd_mc(bel, key, X_test[:, jnp.newaxis, :], y_test,
+                             temperature=temperature).mean()
+    
+    nlpd = {
+        "nlpd": jnp.where(jnp.isnan(nlpd), nan_val, nlpd)
+    }
+    
+    return nlpd
+
+
 # Evaluation functions
 nll_softmax = lambda logits, labels, int_labels: \
     optax.softmax_cross_entropy_with_integer_labels(logits, labels) if int_labels \
