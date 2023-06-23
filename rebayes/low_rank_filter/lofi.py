@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Union, Any, Tuple
+from typing import Any, Callable, Union
 
 import chex
 import jax
@@ -187,16 +187,20 @@ class RebayesLoFiSpherical(RebayesLoFi):
 
         return bel_pred
 
-    @partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,4))
     def predict_obs_cov(
         self,
         bel: LoFiBel,
         x: Float[Array, "input_dim"],
         aleatoric_factor: float = 1.0,
+        apply_fn: Callable = None,
     ) -> Union[Float[Array, "output_dim output_dim"], Any]:
         m, U, Lambda, eta = \
             bel.mean, bel.basis, bel.svs, bel.eta
-        m_Y = lambda z: self.emission_mean_function(z, x)
+        if apply_fn is None:
+            m_Y = lambda z: self.emission_mean_function(z, x)
+        else:
+            m_Y = lambda z: apply_fn(z, x)
         H = core._jacrev_2d(m_Y, m)
         G = (Lambda**2) / (eta * (eta + Lambda**2))
         V_epi = H @ H.T/eta - (G * (H@U)) @ (H@U).T
@@ -366,16 +370,20 @@ class RebayesLoFiDiagonal(RebayesLoFi):
 
         return bel_pred
 
-    @partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,4))
     def predict_obs_cov(
         self,
         bel: LoFiBel,
         x: Float[Array, "input_dim"],
         aleatoric_factor: float = 1.0,
+        apply_fn: Callable = None,
     ) -> Union[Float[Array, "output_dim output_dim"], Any]:
         m, U, Lambda, Ups = \
             bel.mean, bel.basis, bel.svs, bel.Ups
-        m_Y = lambda z: self.emission_mean_function(z, x)
+        if apply_fn is None:
+            m_Y = lambda z: self.emission_mean_function(z, x)
+        else:
+            m_Y = lambda z: apply_fn(z, x)
         H = core._jacrev_2d(m_Y, m)
         _, L = U.shape
         W = U * Lambda

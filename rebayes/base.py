@@ -82,6 +82,7 @@ class Rebayes(ABC):
         bel: Belief,
         X: Float[Array, "input_dim"],
         aleatoric_factor: float = 1.0,
+        apply_fn: Callable = None,
     ) -> Union[Float[Array, "output_dim output_dim"], Any]: 
         """Return Cov(y(t) | X(t), D(1:t-1))"""
         return None

@@ -1,4 +1,4 @@
-from typing import NamedTuple, Union
+from typing import Callable, Union
 
 import chex
 from functools import partial
@@ -124,15 +124,19 @@ class RebayesEKF(Rebayes):
         
         return y_pred
     
-    @partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,4))
     def predict_obs_cov(
         self, 
         bel: EKFBel,
         x: Float[Array, "input_dim"],
         aleatoric_factor: float = 1.0,
+        apply_fn: Callable = None,
     ) -> Float[Array, "output_dim output_dim"]:
         m, P = bel.mean, bel.cov
-        m_Y = lambda z: self.emission_mean_function(z, x)
+        if apply_fn is None:
+            m_Y = lambda z: self.emission_mean_function(z, x)
+        else:
+            m_Y = lambda z: apply_fn(z, x)
         H =  core._jacrev_2d(m_Y, m)
         if self.method == 'fcekf':
             V_epi = H @ P @ H.T

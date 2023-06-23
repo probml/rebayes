@@ -238,8 +238,8 @@ class FifoSGDLaplaceDiag(FifoSGD):
         Fdiag = jax.tree_map(lambda g, p: -(g ** 2).sum(axis=0) - p, grads, precision)
         return Fdiag
     
-    @partial(jax.jit, static_argnums=(0,))
-    def predict_obs_cov(self, bel, X, aleatoric_factor=1.0):
+    @partial(jax.jit, static_argnums=(0,4))
+    def predict_obs_cov(self, bel, X, aleatoric_factor=1.0, apply_fn=None):
         m_Y = lambda z: self.apply_fn(z, X)
         H = _jacrev_2d(m_Y, bel.mean)
         cov = jax.tree_map(lambda x: 1/x, bel.precision)
