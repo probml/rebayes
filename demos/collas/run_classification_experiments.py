@@ -136,7 +136,7 @@ def _eval_metric(
                 "test": partial(
                     callbacks.cb_clf_nlpd_mc, temperature=temperature,
                     linearize=linearize, cooling_factor=cooling_factor,
-                    int_labels=False
+                    int_labels=True
                 ),
             }
     elif problem == "permuted":
