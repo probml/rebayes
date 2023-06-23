@@ -273,7 +273,7 @@ def main(cl_args):
         problem_name += "-" + str(cl_args.ntrain)
     nll_method = cl_args.nll_method
     if cl_args.nll_method == "nlpd-mc" and cl_args.linearize:
-        nll_method += "-linearized"
+        nll_method = "nlpd-linearized"
     if output_path is None:
         output_path = Path("regression", "outputs", problem_name,
                            cl_args.dataset, cl_args.model, nll_method,)
@@ -286,7 +286,7 @@ def main(cl_args):
     Path(config_path).mkdir(parents=True, exist_ok=True)
     
     # Load dataset
-    dataset = mnist_data.reg_datasets[f"{cl_args.problem}-mnist"]
+    dataset = mnist_data.reg_datasets[cl_args.problem+"-mnist"]
     if cl_args.problem == "permuted":
         dataset = dataset()
     else:
