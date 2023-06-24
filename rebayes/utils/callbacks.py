@@ -55,13 +55,19 @@ def cb_osa(bel, y_pred, t, X, y, bel_pred, evaluate_fn, nan_val=-1e8,
 
 def cb_mc_osa(bel, y_pred, t, X, y, bel_pred, nan_val=-1e8,
               temperature=1.0, linearize=False, aleatoric_factor=1.0, 
-              label="loss", **kwargs):
-    agent = kwargs["agent"]
+              label="loss", classification=False, **kwargs):
+    apply_fn, agent = kwargs["apply_fn"], kwargs["agent"]
     key = jax.random.fold_in(kwargs["key"], t)
     X = jnp.atleast_2d(X)[None, None, :]
     y = jnp.atleast_1d(y)
     if linearize:
-        lpd = agent.evaluate_log_prob(bel_pred, X, y, aleatoric_factor)
+        if classification:
+            llfn = partial(clf_linearized_llfn, bel=bel_pred, agent=agent,
+                           apply_fn=apply_fn, cooling_factor=aleatoric_factor,
+                           int_labels=False)
+            lpd = vmap(llfn)(X, jnp.atleast_2d(y)).mean()
+        else:
+            lpd = agent.evaluate_log_prob(bel_pred, X, y, aleatoric_factor)
     else:
         nlpd = agent.nlpd_mc(bel_pred, key, X, y, temperature=temperature)
         lpd = -nlpd
@@ -311,6 +317,20 @@ def reg_eval_fn(flat_params, apply_fn, X_test, y_test, scale):
 # Classification
 
 
+def clf_linearized_llfn(x, y, bel, agent, apply_fn, cooling_factor, int_labels=True):
+    logits = apply_fn(bel.mean, x)
+    cov = agent.predict_obs_cov(bel, x, aleatoric_factor=0.0, apply_fn=apply_fn)
+    logits_adj = logits / jnp.sqrt(1 + jnp.pi * jnp.diag(cov) / 8)
+    prob = jax.nn.softmax(logits_adj * cooling_factor)
+    if int_labels:
+        result = prob[y]
+    else:
+        result = prob[y.argmax()]
+    result = jnp.log(result)
+    
+    return result
+
+
 def cb_clf_discrete_tasks(bel, pred_obs, t, x, y, bel_pred, i,
                           nll_loss_fn=None, miscl_loss_fn=None, **kwargs):
     if nll_loss_fn is None:
@@ -388,15 +408,8 @@ def cb_clf_nlpd_mc(bel, pred_obs, t, X, y, bel_pred, nan_val=-1e8,
         kwargs["X_test"][:100], kwargs["y_test"][:100], kwargs["apply_fn"], kwargs["agent"]
     key = jax.random.fold_in(kwargs["key"], t)
     if linearize:
-        def llfn(x, y):
-            logits = apply_fn(bel_pred.mean, x)
-            cov = agent.predict_obs_cov(bel_pred, x, aleatoric_factor=0.0, 
-                                        apply_fn=apply_fn)
-            logits_adj = logits / jnp.sqrt(1 + jnp.pi * jnp.diag(cov) / 8)
-            prob = jax.nn.softmax(logits_adj * cooling_factor)
-            result = prob[y] if int_labels else prob[y.argmax()]
-            result = jnp.log(result)
-            return result
+        llfn = partial(clf_linearized_llfn, bel=bel_pred, agent=agent,
+                       apply_fn=apply_fn, cooling_factor=cooling_factor)
         lpd = vmap(llfn)(X_test[:, jnp.newaxis, :], y_test)
         nlpd = -lpd.mean()
     else:
@@ -405,6 +418,28 @@ def cb_clf_nlpd_mc(bel, pred_obs, t, X, y, bel_pred, nan_val=-1e8,
     
     nlpd = {
         "nlpd": jnp.where(jnp.isnan(nlpd), nan_val, nlpd)
+    }
+    
+    return nlpd
+
+
+def cb_clf_mc_window(bel, pred_obs, t, X, y, bel_pred, apply_fn, steps=100,
+                     temperature=1.0, linearize=False, cooling_factor=1.0,
+                     **kwargs):
+    agent, X_test, y_test = kwargs["agent"], kwargs["X_test"], kwargs["y_test"]
+    slice_ix = jnp.arange(0, steps) + t - steps // 2
+    X_window = jnp.take(X_test, slice_ix, axis=0, mode="clip")
+    y_window = jnp.take(y_test, slice_ix, axis=0, mode="clip")
+    if linearize:
+        llfn = partial(clf_linearized_llfn, bel=bel_pred, agent=agent,
+                       apply_fn=apply_fn, cooling_factor=cooling_factor)
+        lpd = vmap(llfn)(X_window, y_window)
+        nlpd = -lpd.mean()
+    else:
+        nlpd = agent.nlpd_mc(bel_pred, X_window, y_window, temperature=temperature)
+        nlpd = nlpd.mean()
+    nlpd = {
+        "nlpd": nlpd
     }
     
     return nlpd
