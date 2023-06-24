@@ -148,13 +148,25 @@ def _eval_metric(
             "test": callbacks.cb_clf_discrete_tasks,
         }
     elif problem == "rotated":
-        result = {
-            "val": partial(callbacks.cb_osa,
-                           evaluate_fn=partial(callbacks.ll_softmax,
-                                               int_labels=False),
-                           label="log_likelihood"),
-            "test": callbacks.cb_clf_window_test,
-        }
+        if nll_method == "nll":
+            result = {
+                "val": partial(callbacks.cb_osa,
+                            evaluate_fn=partial(callbacks.ll_softmax,
+                                                int_labels=False),
+                            label="log_likelihood"),
+                "test": callbacks.cb_clf_window_test,
+            }
+        else: # nlpd-mc
+            result = {
+                "val": partial(callbacks.cb_mc_osa,
+                               temperature=temperature, linearize=linearize,
+                               aleatoric_factor=cooling_factor,
+                               classification=True,
+                               label="log_likelihood"),
+                "test": partial(callbacks.cb_clf_mc_window,
+                                temperature=temperature, linearize=linearize,
+                                cooling_factor=cooling_factor),
+            }
     elif problem == "split":
         result = {
             "val": partial(callbacks.cb_osa,
