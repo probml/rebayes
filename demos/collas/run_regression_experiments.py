@@ -34,15 +34,17 @@ def _check_nonneg_float(value):
     return fvalue
 
 
-def _process_agent_args(agent_args, ranks, output_dim, problem, obs_scale):
+def _process_agent_args(agent_args, ranks, output_dim, problem, 
+                        obs_scale, nll_method):
     agents = {}
     sgd_loss_fn = partial(callbacks.nll_reg, scale=obs_scale)
     
     # Bounds for tuning
     sgd_pbounds = {
-        "log_init_cov": (-10.0, 0.0),
         "log_learning_rate": (-10.0, 0.0),
     }
+    if nll_method == "nlpd-mc":
+        sgd_pbounds["log_init_cov"] = (-10.0, 0.0)
     if problem == "iid":
         filter_pbounds = {
             'log_init_cov': (-10, 0.0),
@@ -175,6 +177,7 @@ def tune_and_store_hyperparameters(
     n_explore: int = 20,
     n_exploit: int = 25,
     temperature: float = 1.0,
+    nll_method: str = "nll",
 ) -> dict:
     """Tune and store hyperparameters.
 
@@ -203,11 +206,11 @@ def tune_and_store_hyperparameters(
         optimizer = hparam_tune.create_optimizer(
             model_init_fn, pbounds, dataset["train"], dataset["val"],
             val_callback, agent_name, verbose=verbose, callback_at_end=False,
-            classification=False, **agent_params
+            nll_method=nll_method, **agent_params
         )
         optimizer.maximize(init_points=n_explore, n_iter=n_exploit)
         best_hparams = hparam_tune.get_best_params(optimizer, agent_name,
-                                                   classification=False)
+                                                   nll_method=nll_method)
         # Store as json
         # agent_filepath = agent_name
         # if temperature != 1.0:
@@ -315,7 +318,8 @@ def main(cl_args):
     # Set up agents
     output_dim = 1
     agents = _process_agent_args(cl_args.agents, cl_args.ranks, output_dim,
-                                 cl_args.problem, cl_args.obs_scale)
+                                 cl_args.problem, cl_args.obs_scale,
+                                 cl_args.nll_method)
     
     # Set up hyperparameter tuning
     hparam_path = Path(config_path, problem_name, cl_args.dataset, 
@@ -326,7 +330,7 @@ def main(cl_args):
                                            dataset_load_fn, agents,
                                            eval_metric["val"], cl_args.verbose, 
                                            cl_args.n_explore, cl_args.n_exploit,
-                                           cl_args.temp)
+                                           cl_args.temp, cl_args.nll_method)
     else:
         agent_hparams = {}
         for agent_name in agents:

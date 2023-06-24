@@ -253,7 +253,7 @@ def create_optimizer(
     verbose=2,
     callback_at_end=True,
     n_seeds=5,
-    classification=True,
+    nll_method="nll",
     **kwargs
 ):
     """init_fn(key) is a function of random jax key"""
@@ -267,7 +267,7 @@ def create_optimizer(
             callback_at_end=callback_at_end,
             **kwargs # Must include loss_fn, buffer_size, dim_output
         )
-        if classification:
+        if nll_method == "nll":
             bbf_partial = partial(
                 bbf_partial,
                 log_init_cov=0.0
@@ -301,14 +301,14 @@ def create_optimizer(
     return optimizer
 
 
-def get_best_params(optimizer, method, classification=True):
+def get_best_params(optimizer, method, nll_method="nll"):
     max_params = optimizer.max["params"].copy()
     if "sgd" in method or "adam" in method:
         learning_rate = jnp.exp(max_params["log_learning_rate"]).item()
         hparams = {
             "learning_rate": learning_rate,
         }
-        if not classification:
+        if nll_method != "nll":
             initial_covariance = jnp.exp(max_params["log_init_cov"]).item()
             hparams["initial_covariance"] = initial_covariance
     else:

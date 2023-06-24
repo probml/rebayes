@@ -35,7 +35,8 @@ def _check_nonneg_float(value):
     return fvalue
 
 
-def _process_agent_args(agent_args, lofi_cov_type, ranks, output_dim, problem):
+def _process_agent_args(agent_args, lofi_cov_type, ranks, output_dim, 
+                        problem, nll_method):
     agents = {}
     sgd_loss_fn = optax.softmax_cross_entropy if output_dim >= 2 \
         else optax.sigmoid_binary_cross_entropy
@@ -44,6 +45,8 @@ def _process_agent_args(agent_args, lofi_cov_type, ranks, output_dim, problem):
     sgd_pbounds = {
         "log_learning_rate": (-10.0, 0.0),
     }
+    if nll_method == "nlpd-mc":
+        sgd_pbounds["log_init_cov"] = (-10.0, 0.0)
     if problem == "stationary":
         filter_pbounds = {
             'log_init_cov': (-10, 0.0),
@@ -191,6 +194,7 @@ def tune_and_store_hyperparameters(
     verbose: int = 2,
     n_explore: int = 20,
     n_exploit: int = 25,
+    nll_method: str = "nll",
 ) -> dict:
     """Tune and store hyperparameters.
 
@@ -219,11 +223,11 @@ def tune_and_store_hyperparameters(
         optimizer = hparam_tune.create_optimizer(
             model_init_fn, pbounds, dataset["train"], dataset["val"],
             val_callback, agent_name, verbose=verbose, callback_at_end=False,
-            classification=True, **agent_params
+            nll_method=nll_method, **agent_params
         )
         optimizer.maximize(init_points=n_explore, n_iter=n_exploit)
         best_hparams = hparam_tune.get_best_params(optimizer, agent_name, 
-                                                   classification=True)
+                                                   nll_method=nll_method)
         # Store as json
         with open(Path(hparam_path, f"{agent_name}.json"), "w") as f:
             json.dump(best_hparams, f)
@@ -316,7 +320,8 @@ def main(cl_args):
     
     # Set up agents
     agents = _process_agent_args(cl_args.agents, cl_args.lofi_cov_type,
-                                 cl_args.ranks, output_dim, cl_args.problem)
+                                 cl_args.ranks, output_dim, cl_args.problem,
+                                 cl_args.nll_method)
     
     # Set up hyperparameter tuning
     hparam_path = Path(config_path, problem_str,
@@ -326,7 +331,8 @@ def main(cl_args):
             tune_and_store_hyperparameters(hparam_path, model_init_fn, 
                                            dataset_load_fn, agents,
                                            eval_metric["val"], cl_args.verbose, 
-                                           cl_args.n_explore, cl_args.n_exploit)
+                                           cl_args.n_explore, cl_args.n_exploit,
+                                           cl_args.nll_method)
     else:
         agent_hparams = {}
         for agent_name in agents:
