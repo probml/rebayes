@@ -254,6 +254,7 @@ def create_optimizer(
     callback_at_end=True,
     n_seeds=5,
     nll_method="nll",
+    classification=True,
     **kwargs
 ):
     """init_fn(key) is a function of random jax key"""

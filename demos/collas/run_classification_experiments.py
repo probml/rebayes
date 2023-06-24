@@ -223,7 +223,7 @@ def tune_and_store_hyperparameters(
         optimizer = hparam_tune.create_optimizer(
             model_init_fn, pbounds, dataset["train"], dataset["val"],
             val_callback, agent_name, verbose=verbose, callback_at_end=False,
-            nll_method=nll_method, **agent_params
+            nll_method=nll_method, classification=True, **agent_params,
         )
         optimizer.maximize(init_points=n_explore, n_iter=n_exploit)
         best_hparams = hparam_tune.get_best_params(optimizer, agent_name, 
