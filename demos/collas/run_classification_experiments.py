@@ -282,8 +282,8 @@ def main(cl_args):
     # Set output path
     output_path = os.environ.get("REBAYES_OUTPUT")
     problem_str = cl_args.problem
-    if cl_args.problem == "stationary" or cl_args.problem == "rotated":
-        problem_str += "-" + str(cl_args.ntrain)
+    # if cl_args.problem == "stationary" or cl_args.problem == "rotated":
+    #     problem_str += "-" + str(cl_args.ntrain)
     nll_method = cl_args.nll_method
     if cl_args.nll_method == "nlpd-mc" and cl_args.linearize:
         nll_method = "nlpd-linearized"
@@ -325,7 +325,7 @@ def main(cl_args):
     
     # Set up hyperparameter tuning
     hparam_path = Path(config_path, problem_str,
-                       cl_args.dataset, cl_args.model)
+                       cl_args.dataset, cl_args.model, nll_method)
     if cl_args.tune:
         agent_hparams = \
             tune_and_store_hyperparameters(hparam_path, model_init_fn, 
