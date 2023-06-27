@@ -553,7 +553,7 @@ def load_split_dataset(
 
 # For experiments --------------------------------------------------------------
 
-def generate_mnist_experiment(
+def generate_stationary_experiment(
     ntrain: int
 ):
     kwargs = {
@@ -568,7 +568,7 @@ def generate_mnist_experiment(
     return dataset
 
 
-def generate_pmnist_experiment(
+def generate_permuted_experiment(
     n_tasks: int=10,
     ntrain_per_task: int=300,
     nval_per_task: int=1,
@@ -581,14 +581,14 @@ def generate_pmnist_experiment(
         "ntest_per_task": ntest_per_task,
     }
     dataset = {
-        "load_fn": partial(load_permuted_mnist_dataset, **kwargs),
+        "load_fn": partial(load_permuted_dataset, **kwargs),
         "configs": kwargs,
     }
     
     return dataset
 
 
-def generate_rmnist_experiment(
+def generate_rotated_experiment(
     ntrain: int,
     angle_fn: Callable,
     include_labels: bool=False,
@@ -598,7 +598,7 @@ def generate_rmnist_experiment(
         "ntrain": ntrain,
         "nval": 500,
     }
-    load_fn = partial(load_rotated_mnist_dataset, include_labels=include_labels,
+    load_fn = partial(load_rotated_dataset, include_labels=include_labels,
                       angle_fn=angle_fn, max_angle=max_angle, **kwargs)
     if angle_fn in (generate_amplified_angles, generate_random_walk_angles):
         load_fn = partial(load_fn, match_train_test_angles=True)
@@ -610,7 +610,7 @@ def generate_rmnist_experiment(
     return dataset
 
 
-def generate_split_mnist_experiment(
+def generate_split_experiment(
     ntrain_per_task: int=300,
     nval_per_task: int=1,
     ntest_per_task: int=500,
@@ -621,14 +621,14 @@ def generate_split_mnist_experiment(
         "ntest_per_task": ntest_per_task,
     }
     dataset = {
-        "load_fn": partial(load_split_mnist_dataset, **kwargs),
+        "load_fn": partial(load_split_dataset, **kwargs),
         "configs": kwargs,
     }
     
     return dataset
 
 
-def generate_rotated_permuted_mnist_experiment(
+def generate_rotated_permuted_experiment(
     n_tasks: int=10,
     ntrain_per_task: int=300,
     nval_per_task: int=1,
@@ -647,7 +647,7 @@ def generate_rotated_permuted_mnist_experiment(
         "max_angle": max_angle,
     }
     dataset = {
-        "load_fn": partial(load_rotated_permuted_mnist_dataset, **kwargs),
+        "load_fn": partial(load_rotated_permuted_dataset, **kwargs),
         "configs": kwargs,
     }
     
@@ -662,22 +662,22 @@ smnist_kwargs = {
 
 
 clf_datasets = {
-    'stationary-mnist': generate_mnist_experiment,
-    'permuted-mnist': generate_pmnist_experiment,
-    'rotated-mnist': partial(generate_rmnist_experiment,
-                             angle_fn=generate_random_walk_angles,
-                             include_labels=True, max_angle=90.0),
-    'split-mnist': generate_split_mnist_experiment,
+    'stationary': generate_stationary_experiment,
+    'permuted': generate_permuted_experiment,
+    'rotated': partial(generate_rotated_experiment,
+                       angle_fn=generate_random_walk_angles,
+                       include_labels=True, max_angle=90.0),
+    'split': generate_split_experiment,
 }
 
 
 reg_datasets = {
-    "iid-mnist": partial(generate_rmnist_experiment,
-                         angle_fn=generate_random_angles),
-    "amplified-mnist": partial(generate_rmnist_experiment,
-                               angle_fn=generate_amplified_angles), 
-    "random-walk-mnist": partial(generate_rmnist_experiment,
-                                 angle_fn=generate_random_walk_angles),
-    "permuted-mnist": partial(generate_rotated_permuted_mnist_experiment,
-                              angle_fn=generate_random_angles),
+    "iid": partial(generate_rotated_experiment,
+                   angle_fn=generate_random_angles),
+    "amplified": partial(generate_rotated_experiment,
+                         angle_fn=generate_amplified_angles), 
+    "random-walk": partial(generate_rotated_experiment,
+                           angle_fn=generate_random_walk_angles),
+    "permuted": partial(generate_rotated_permuted_experiment,
+                        angle_fn=generate_random_angles),
 }
