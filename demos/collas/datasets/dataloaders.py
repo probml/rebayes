@@ -327,8 +327,12 @@ def load_rotated_dataset(
         test = generate_rotated_images(*dataset['test'], ntest, subkey,
                                        target_digit, angle_fn, min_angle,
                                        max_angle, include_labels)
-    oh_train = True if include_labels else False
-    output_dim = train[2].max() + 1
+    if include_labels:
+        oh_train = True
+        output_dim = train[2].max() + 1
+    else:
+        oh_train = False
+        output_dim = None
     dataset = process_dataset(train, val, test, oh_train=oh_train, 
                               output_dim=output_dim, shuffle=False, 
                               **process_kwargs)
@@ -348,7 +352,7 @@ def load_seq_digits_rotated_dataset(
     min_angle=0,
     max_angle=180,
 ) -> dict:
-    """Load rotated MNIST dataset where each digit is used sequentially.
+    """Load rotated dataset where each digit is used sequentially.
     """
     if isinstance(key, int):
         key = jr.PRNGKey(key)
@@ -469,16 +473,16 @@ def load_permuted_dataset(
     return dataset
 
 
-# Rotated Permuted MNIST -------------------------------------------------------
+# Rotated Permuted Dataset -----------------------------------------------------
 
-def load_rotated_permuted_mnist_dataset(
+def load_rotated_permuted_dataset(
     n_tasks: int,
     ntrain_per_task: int,
     nval_per_task: int,
     ntest_per_task: int,
     dataset: dict=None,
     data_dir: str="/tmp/data",
-    fashion: bool=False,
+    dataset_type: str="fashion_mnist",
     key: int=0,
     angle_fn: Callable=None,
     min_angle=0,
@@ -488,10 +492,10 @@ def load_rotated_permuted_mnist_dataset(
         key = jr.PRNGKey(key)
     keys = jr.split(key, 2)
     permuted_dataset = \
-        load_permuted_mnist_dataset(n_tasks, ntrain_per_task, nval_per_task, 
-                                    ntest_per_task, dataset, data_dir, fashion, 
-                                    keys[0], oh_train=False)
-    dataset = load_rotated_mnist_dataset(
+        load_permuted_dataset(n_tasks, ntrain_per_task, nval_per_task, 
+                              ntest_per_task, dataset, data_dir, dataset_type,
+                              keys[0], oh_train=False)
+    dataset = load_rotated_dataset(
         permuted_dataset, angle_fn=angle_fn, min_angle=min_angle, 
         max_angle=max_angle, key=keys[1], include_labels=False,
     )
