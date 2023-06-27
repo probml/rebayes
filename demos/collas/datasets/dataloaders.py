@@ -58,7 +58,7 @@ def process_dataset(
     oh_train: bool=True,
     output_dim: int=10,
 ) -> dict:
-    """Wrap MNIST dataset into a dictionary.
+    """Wrap dataset into a dictionary.
     """
     if isinstance(key, int):
         key = jr.PRNGKey(key)
@@ -77,14 +77,14 @@ def process_dataset(
     return dataset
 
 
-# MNIST ------------------------------------------------------------------------
+# Base Dataset -----------------------------------------------------------------
 
 def load_base_dataset(
     data_dir: str="/tmp/data",
     dataset_type: str='fashion_mnist',
     **process_kwargs,
 ) -> dict:
-    """Load MNIST train, validatoin, and test datasets into memory.
+    """Load train, validatoin, and test datasets into memory.
     """
     ds_builder = tfds.builder(dataset_type, data_dir=data_dir)
     ds_builder.download_and_prepare()
@@ -108,7 +108,7 @@ def load_base_dataset(
     return dataset
 
 
-# Rotated MNIST ----------------------------------------------------------------
+# Rotated Dataset --------------------------------------------------------------
 
 def generate_random_angles(
     n_tasks: int,
@@ -178,7 +178,7 @@ def rotate_image(
     img: jnp.ndarray,
     angle: float,
 ) -> jnp.ndarray:
-    """Rotate MNIST image given an angle.
+    """Rotate image given an angle.
     """
     img_rot = img.squeeze()
     rotate_transform = augmax.Chain(
@@ -272,7 +272,7 @@ def load_target_digit_dataset(
     dataset_type: str="fashion_mnist",
     n: int=None, 
 ):
-    """Generate rotated MNIST dataset for a target digit.
+    """Generate rotated dataset for a target digit.
     """
     dataset = load_base_dataset(data_dir, dataset_type, oh_train=False)
     train, val, test = \
@@ -304,7 +304,7 @@ def load_rotated_dataset(
     angle_std = 5.0,
     **process_kwargs,
 ) -> dict:
-    """Load rotated MNIST dataset.
+    """Load rotated dataset.
     """
     if isinstance(key, int):
         key = jr.PRNGKey(key)
@@ -328,18 +328,21 @@ def load_rotated_dataset(
                                        target_digit, angle_fn, min_angle,
                                        max_angle, include_labels)
     oh_train = True if include_labels else False
-    dataset = process_dataset(train, val, test, oh_train=oh_train,
-                              shuffle=False, **process_kwargs)
+    output_dim = train[2].max() + 1
+    dataset = process_dataset(train, val, test, oh_train=oh_train, 
+                              output_dim=output_dim, shuffle=False, 
+                              **process_kwargs)
     
     return dataset
     
     
-def load_seq_digits_rotated_mnist_dataset(
+def load_seq_digits_rotated_dataset(
+    n_tasks: int,
     ntrain_per_task: int,
     nval_per_task: int,
     ntest_per_task: int,
     data_dir: str="/tmp/data",
-    fashion: bool=False,
+    dataset_type: str="fashion_mnist",
     key: int=0,
     angle_fn: Callable=None,
     min_angle=0,
@@ -351,9 +354,9 @@ def load_seq_digits_rotated_mnist_dataset(
         key = jr.PRNGKey(key)
     
     datasets = []
-    for i in range(10):
-        dataset = load_rotated_mnist_dataset(
-            data_dir, fashion, key, i, angle_fn, min_angle, max_angle,
+    for i in range(n_tasks):
+        dataset = load_rotated_dataset(
+            None, data_dir, dataset_type, key, i, angle_fn, min_angle, max_angle,
             ntrain=ntrain_per_task, nval=nval_per_task, ntest=ntest_per_task,
         )
         datasets.append(dataset)
@@ -365,7 +368,7 @@ def load_seq_digits_rotated_mnist_dataset(
     return dataset
 
 
-# Permuted MNIST ---------------------------------------------------------------
+# Permuted Dataset -------------------------------------------------------------
 
 def _permute(
     img: jnp.ndarray,
@@ -399,7 +402,7 @@ def _permute_dataset(
     return imgs_permuted, labels
 
 
-def load_single_permuted_mnist_dataset(
+def load_single_permuted_dataset(
     perm_idx: jnp.ndarray,
     ntrain: int,
     nval: int,
@@ -410,24 +413,26 @@ def load_single_permuted_mnist_dataset(
     key: int=0,
     **process_kwargs,
 ) -> dict:
-    """Load permuted MNIST dataset given permuted index.
+    """Load permuted dataset given single permuted index.
     """
     if isinstance(key, int):
         key = jr.PRNGKey(key)
     if dataset is None:
         dataset = load_base_dataset(data_dir, dataset_type, oh_train=False)
+    output_dim = dataset['train'][1].max() + 1
     keys = jr.split(key, 3)
-        
+    
     train, val, test = \
         (_permute_dataset(*dataset[k], perm_idx, n, key_) for k, n, key_ in 
          zip(['train', 'val', 'test'], [ntrain, nval, ntest], keys))
     
-    dataset = process_mnist_dataset(train, val, test, **process_kwargs)
+    dataset = process_dataset(train, val, test, output_dim=output_dim,
+                              **process_kwargs)
     
     return dataset
 
 
-def load_permuted_mnist_dataset(
+def load_permuted_dataset(
     n_tasks: int,
     ntrain_per_task: int,
     nval_per_task: int,
@@ -438,7 +443,7 @@ def load_permuted_mnist_dataset(
     key: int=0,
     **process_kwargs,
 ) -> dict:
-    """Load Permuted MNIST dataset.
+    """Load Permuted dataset.
     """
     if isinstance(key, int):
         key = jr.PRNGKey(key)
@@ -454,9 +459,9 @@ def load_permuted_mnist_dataset(
     )
     keys = jr.split(keys[-1], n_tasks)
     permute_fn = lambda idx, k: \
-        load_single_permuted_mnist_dataset(idx, ntrain_per_task, nval_per_task,
-                                           ntest_per_task, dataset, key=k,
-                                           **process_kwargs)
+        load_single_permuted_dataset(idx, ntrain_per_task, nval_per_task,
+                                     ntest_per_task, dataset, key=k,
+                                     **process_kwargs)
     dataset = vmap(permute_fn)(perm_idx, keys)
     # Squash vmapped axis
     dataset = tree_map(lambda x: jnp.concatenate(x, axis=0), dataset)
