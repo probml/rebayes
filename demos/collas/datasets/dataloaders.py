@@ -503,16 +503,16 @@ def load_rotated_permuted_dataset(
     return dataset
 
 
-# Split MNIST ------------------------------------------------------------------
+# Split Dataset ----------------------------------------------------------------
 
-def make_split_mnist(
+def make_split_dataset(
     imgs: jnp.ndarray,
     labels: jnp.ndarray,
+    n_tasks: int=5,
     n: int=None,
 ) -> Tuple[jnp.ndarray, jnp.ndarray]:
     """Split given dataset into 5 tasks.
     """
-    n_tasks = 10//2
     n = n or len(imgs)
     imgs_split, labels_split = [], []
     for i in range(n_tasks):
@@ -528,7 +528,7 @@ def make_split_mnist(
     return imgs_split, labels_split
 
 
-def load_split_mnist_dataset(
+def load_split_dataset(
     ntrain_per_task: int, 
     nval_per_task: int, 
     ntest_per_task: int,
@@ -541,12 +541,12 @@ def load_split_mnist_dataset(
     if isinstance(key, int):
         key = jr.PRNGKey(key)
     dataset = load_base_dataset(data_dir, dataset_type, oh_train=False)
+    num_classes = dataset['train'][1].max() + 1
     train, val, test = \
-        (make_split_mnist(*dataset[k], n)
+        (make_split_dataset(*dataset[k], num_classes//2, n)
          for k, n in zip(('train', 'val', 'test'),
                          (ntrain_per_task, nval_per_task, ntest_per_task)))
-    dataset = process_mnist_dataset(train, val, test, shuffle=False,
-                                    oh_train=False)
+    dataset = process_dataset(train, val, test, shuffle=False, oh_train=False)
     
     return dataset
 
