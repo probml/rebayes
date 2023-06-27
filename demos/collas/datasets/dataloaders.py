@@ -16,19 +16,20 @@ from rebayes.datasets.data_utils import Rotate
 
 # Helper Functions -------------------------------------------------------------
 
-def _process_mnist(
+def _process(
     dataset: Tuple,
     n: int=None,
     key: int=0,
     shuffle: bool=True,
     oh: bool=True,
+    output_dim: int=10,
 ) -> Tuple:
     """Process a single element.
     """
     X, *args, Y = dataset
     if isinstance(key, int):
         key = jr.PRNGKey(key)
-    Y = jax.nn.one_hot(Y, 10) if oh else Y
+    Y = jax.nn.one_hot(Y, output_dim) if oh else Y
     idx = jr.permutation(key, jnp.arange(len(X))) if shuffle \
         else jnp.arange(len(X))
     X, Y = X[idx], Y[idx]
@@ -45,7 +46,7 @@ def _process_mnist(
     return X, *new_args, Y
 
 
-def process_mnist_dataset(
+def process_dataset(
     train: Tuple,
     val: Tuple,
     test: Tuple,
@@ -55,6 +56,7 @@ def process_mnist_dataset(
     key: int=0,
     shuffle: bool=True,
     oh_train: bool=True,
+    output_dim: int=10,
 ) -> dict:
     """Wrap MNIST dataset into a dictionary.
     """
@@ -62,7 +64,7 @@ def process_mnist_dataset(
         key = jr.PRNGKey(key)
     keys = jr.split(key, 3)
     train, val, test = \
-        (_process_mnist(dataset, n, key, shuffle, oh)
+        (_process(dataset, n, key, shuffle, oh, output_dim)
          for dataset, n, key, oh in zip([train, val, test], 
                                         [ntrain, nval, ntest],
                                         keys, [oh_train, False, False]))
@@ -77,17 +79,14 @@ def process_mnist_dataset(
 
 # MNIST ------------------------------------------------------------------------
 
-def load_mnist_dataset(
+def load_base_dataset(
     data_dir: str="/tmp/data",
-    fashion: bool=False,
+    dataset_type: str='fashion_mnist',
     **process_kwargs,
 ) -> dict:
     """Load MNIST train, validatoin, and test datasets into memory.
     """
-    dataset='mnist'
-    if fashion:
-        dataset='fashion_mnist'
-    ds_builder = tfds.builder(dataset, data_dir=data_dir)
+    ds_builder = tfds.builder(dataset_type, data_dir=data_dir)
     ds_builder.download_and_prepare()
     
     train_ds, val_ds, test_ds = \
@@ -98,11 +97,13 @@ def load_mnist_dataset(
     for ds in [train_ds, val_ds, test_ds]:
         ds['image'] = np.float32(ds['image']) / 255.
     
+    output_dim = train_ds["label"].max() + 1
     train, val, test = \
         ((jnp.array(ds['image']), jnp.array(ds['label'])) 
          for ds in [train_ds, val_ds, test_ds])
     
-    dataset = process_mnist_dataset(train, val, test, **process_kwargs)
+    dataset = process_dataset(train, val, test, output_dim=output_dim,
+                              **process_kwargs)
 
     return dataset
 
@@ -179,7 +180,7 @@ def rotate_mnist(
 ) -> jnp.ndarray:
     """Rotate MNIST image given an angle.
     """
-    img_rot = img.reshape(28, 28)
+    img_rot = img.squeeze()
     rotate_transform = augmax.Chain(
         Rotate((angle, angle,))
     )
@@ -267,13 +268,13 @@ def generate_rotated_images(
 
 def load_target_digit_dataset(
     data_dir: str="/tmp/data",
-    fashion: bool=False,
     target_digit: int=0,
+    dataset_type: str="fashion_mnist",
     n: int=None, 
 ):
     """Generate rotated MNIST dataset for a target digit.
     """
-    dataset = load_mnist_dataset(data_dir, fashion, oh_train=False)
+    dataset = load_base_dataset(data_dir, dataset_type, oh_train=False)
     train, val, test = \
         (_filter_target_digit(dataset[split], target_digit, n=n) 
          for split in ['train', 'val', 'test'])
@@ -289,7 +290,7 @@ def load_target_digit_dataset(
 def load_rotated_mnist_dataset(
     dataset: dict=None,
     data_dir: str="/tmp/data",
-    fashion: bool=False,
+    dataset_type: str="fashion_mnist",
     key: int=0,
     target_digit: int=None,
     angle_fn: Callable=None,
@@ -308,7 +309,7 @@ def load_rotated_mnist_dataset(
     if isinstance(key, int):
         key = jr.PRNGKey(key)
     if dataset is None:
-        dataset = load_mnist_dataset(data_dir, fashion, oh_train=False)
+        dataset = load_base_dataset(data_dir, dataset_type, oh_train=False)
     *keys, subkey = jr.split(key, 3)
     train, val = \
         (generate_rotated_images(*dataset[k], n, key_, target_digit, angle_fn,
@@ -405,7 +406,7 @@ def load_single_permuted_mnist_dataset(
     ntest: int,
     dataset: dict=None,
     data_dir: str="/tmp/data",
-    fashion: bool=False,
+    dataset_type: str="fashion_mnist",
     key: int=0,
     **process_kwargs,
 ) -> dict:
@@ -414,7 +415,7 @@ def load_single_permuted_mnist_dataset(
     if isinstance(key, int):
         key = jr.PRNGKey(key)
     if dataset is None:
-        dataset = load_mnist_dataset(data_dir, fashion, oh_train=False)
+        dataset = load_base_dataset(data_dir, dataset_type, oh_train=False)
     keys = jr.split(key, 3)
         
     train, val, test = \
@@ -433,7 +434,7 @@ def load_permuted_mnist_dataset(
     ntest_per_task: int,
     dataset: dict=None,
     data_dir: str="/tmp/data",
-    fashion: bool=False,
+    dataset_type: str="fashion_mnist",
     key: int=0,
     **process_kwargs,
 ) -> dict:
@@ -442,11 +443,12 @@ def load_permuted_mnist_dataset(
     if isinstance(key, int):
         key = jr.PRNGKey(key)
     if dataset is None:
-        dataset = load_mnist_dataset(data_dir, fashion, oh_train=False)
-    identity_idx = jnp.arange(28*28)[None, :]
+        dataset = load_base_dataset(data_dir, dataset_type, oh_train=False)
+    img_size = np.prod(dataset["train"][0][0].shape)
+    identity_idx = jnp.arange(img_size)[None, :]
     keys = jr.split(key, n_tasks)
     perm_idx = jnp.concatenate(
-        [identity_idx, jnp.array([jr.permutation(keys[i], jnp.arange(28*28))
+        [identity_idx, jnp.array([jr.permutation(keys[i], jnp.arange(img_size))
                                   for i in range(n_tasks-1)]),],
         axis=0,
     )
@@ -522,14 +524,14 @@ def load_split_mnist_dataset(
     nval_per_task: int, 
     ntest_per_task: int,
     data_dir: str="/tmp/data",
-    fashion: bool=False,
+    dataset_type: str="fashion_mnist",
     key=0,
 ) -> dict:
     """Load Split MNIST dataset, each with 2 consecutive digits given dataset.
     """
     if isinstance(key, int):
         key = jr.PRNGKey(key)
-    dataset = load_mnist_dataset(data_dir, fashion=fashion, oh_train=False)
+    dataset = load_base_dataset(data_dir, dataset_type, oh_train=False)
     train, val, test = \
         (make_split_mnist(*dataset[k], n)
          for k, n in zip(('train', 'val', 'test'),
@@ -550,7 +552,7 @@ def generate_mnist_experiment(
         "nval": 1_000,
     }
     dataset = {
-        "load_fn": partial(load_mnist_dataset, **kwargs),
+        "load_fn": partial(load_base_dataset, **kwargs),
         "configs": kwargs,
     }
     
