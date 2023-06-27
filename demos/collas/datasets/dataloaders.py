@@ -174,7 +174,7 @@ def generate_random_walk_angles(
     return angles
 
 
-def rotate_mnist(
+def rotate_image(
     img: jnp.ndarray,
     angle: float,
 ) -> jnp.ndarray:
@@ -259,7 +259,7 @@ def generate_rotated_images(
     imgs = imgs[:len(angles)]
     labels = jnp.concatenate([labels]*(len(angles)//len(labels)+1), axis=0)
     labels = labels[:len(angles)]
-    imgs_rot = vmap(rotate_mnist)(imgs, angles)
+    imgs_rot = vmap(rotate_image)(imgs, angles)
     if include_labels:
         return imgs_rot, angles, labels
     
@@ -287,7 +287,7 @@ def load_target_digit_dataset(
     return dataset
 
 
-def load_rotated_mnist_dataset(
+def load_rotated_dataset(
     dataset: dict=None,
     data_dir: str="/tmp/data",
     dataset_type: str="fashion_mnist",
@@ -328,8 +328,8 @@ def load_rotated_mnist_dataset(
                                        target_digit, angle_fn, min_angle,
                                        max_angle, include_labels)
     oh_train = True if include_labels else False
-    dataset = process_mnist_dataset(train, val, test, oh_train=oh_train,
-                                    shuffle=False, **process_kwargs)
+    dataset = process_dataset(train, val, test, oh_train=oh_train,
+                              shuffle=False, **process_kwargs)
     
     return dataset
     
