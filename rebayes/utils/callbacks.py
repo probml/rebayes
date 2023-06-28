@@ -18,7 +18,7 @@ import optax
 def evaluate_function(flat_params, apply_fn, X_test, y_test, loss_fn, 
                       label="loss", **kwargs):
     def evaluate(label, image):
-        image = image.reshape((1, 28, 28, 1))
+        image = jnp.array(image, ndmin=4)
         logits = apply_fn(flat_params, image).ravel()
         loss = loss_fn(logits, label, **kwargs)
         
