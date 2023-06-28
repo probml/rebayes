@@ -133,11 +133,11 @@ def _eval_metric(
     problem: str,
     nll_method: str,
     temperature: float,
-    linearize: bool = False,
     cooling_factor: float = 1.0,
 ) -> dict:
     """Get evaluation metric for classification problem type.
     """
+    linearize = nll_method == "nlpd-linearized"
     if problem == "stationary":
         if nll_method == "nll":
             result = {
@@ -146,7 +146,7 @@ def _eval_metric(
                 "test": partial(callbacks.cb_eval,
                                 evaluate_fn=callbacks.softmax_clf_eval_fn)
             }
-        else: # nlpd-mc
+        else: # nlpd
             result = {
                 "val": lambda *args, **kwargs: tree_map(
                     lambda x: -x, partial(
@@ -178,7 +178,7 @@ def _eval_metric(
                             label="log_likelihood"),
                 "test": callbacks.cb_clf_window_test,
             }
-        else: # nlpd-mc
+        else: # nlpd
             result = {
                 "val": partial(callbacks.cb_mc_osa,
                                temperature=temperature, linearize=linearize,
@@ -301,14 +301,10 @@ def main(cl_args):
     # Set output path
     output_path = os.environ.get("REBAYES_OUTPUT")
     problem_str = cl_args.problem
-    # if cl_args.problem == "stationary" or cl_args.problem == "rotated":
-    #     problem_str += "-" + str(cl_args.ntrain)
     nll_method = cl_args.nll_method
-    if cl_args.nll_method == "nlpd-mc" and cl_args.linearize:
-        nll_method = "nlpd-linearized"
     if output_path is None:
         output_path = Path("classification", "outputs", problem_str,
-                           cl_args.dataset, cl_args.model, nll_method)
+                           cl_args.dataset, cl_args.model, cl_args.nll_method)
     Path(output_path).mkdir(parents=True, exist_ok=True)
     
     # Set config path
@@ -325,8 +321,7 @@ def main(cl_args):
         dataset_load_fn, kwargs = dataset().values()
     dataset_load_fn = partial(dataset_load_fn, dataset_type=cl_args.dataset)
     eval_metric = _eval_metric(cl_args.problem, cl_args.nll_method,
-                               cl_args.temp, cl_args.linearize,
-                               cl_args.cooling)
+                               cl_args.temp, cl_args.cooling)
     
     # Initialize model
     if cl_args.model == "cnn":
@@ -389,7 +384,7 @@ if __name__ == "__main__":
     parser.add_argument("--problem", type=str, default="stationary",
                         choices=["stationary", "permuted", "rotated", "split"])
     
-    # Type of dataset (mnist or f-mnist)
+    # Type of dataset
     parser.add_argument("--dataset", type=str, default="fashion_mnist", 
                         choices=["mnist", "fashion_mnist", 
                                  "cifar10", "cifar100"])
@@ -403,10 +398,7 @@ if __name__ == "__main__":
     
     # Negative log likelihood evaluation method
     parser.add_argument("--nll_method", type=str, default="nll", 
-                        choices=["nll", "nlpd-mc"])
-    
-    # Linearized NLPD-MC sampling
-    parser.add_argument("--linearize", action="store_true")
+                        choices=["nll", "nlpd-mc", "nlpd-linearized"])
     
     # Multiplicative factor for posterior cooling (higher is more cooled)
     parser.add_argument("--cooling", type=_check_nonneg_float, default=1.0)
