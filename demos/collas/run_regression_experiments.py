@@ -333,7 +333,7 @@ def main(cl_args):
     # Set up hyperparameter tuning
     hparam_path = Path(config_path, problem_str, cl_args.dataset,
                        cl_args.model, nll_method)
-    if cl_args.tune:
+    if cl_args.hyperparameters != "eval_only":
         agent_hparams = \
             tune_and_store_hyperparameters(hparam_path, model_init_fn, 
                                            dataset_load_fn, agents,
@@ -356,22 +356,23 @@ def main(cl_args):
                 raise FileNotFoundError(f"Hyperparameter {agent_hparam_path} "
                                         "not found.")
     
-    # Evaluate agents
-    kwargs["scale"] = cl_args.obs_scale
-    for agent_name, hparams in agent_hparams.items():
-        print(f"Evaluating {agent_name}...")
-        agent_kwargs = agents[agent_name]
-        if "pbounds" in agent_kwargs:
-            agent_kwargs.pop("pbounds")
-        optimizer_dict = hparam_tune.build_estimator(model_init_fn, hparams,
-                                                     agent_name, 
-                                                     classification=False,
-                                                     **agent_kwargs)
-        _ = evaluate_and_store_result(output_path, model_init_fn,
-                                      dataset_load_fn, optimizer_dict,
-                                      eval_metric["test"], agent_name,
-                                      cl_args.problem, cl_args.n_iter,
-                                      temperature=cl_args.temp, **kwargs)
+    if cl_args.hyperparameters != "tune_only":
+        # Evaluate agents
+        kwargs["scale"] = cl_args.obs_scale
+        for agent_name, hparams in agent_hparams.items():
+            print(f"Evaluating {agent_name}...")
+            agent_kwargs = agents[agent_name]
+            if "pbounds" in agent_kwargs:
+                agent_kwargs.pop("pbounds")
+            optimizer_dict = hparam_tune.build_estimator(model_init_fn, hparams,
+                                                        agent_name, 
+                                                        classification=False,
+                                                        **agent_kwargs)
+            _ = evaluate_and_store_result(output_path, model_init_fn,
+                                        dataset_load_fn, optimizer_dict,
+                                        eval_metric["test"], agent_name,
+                                        cl_args.problem, cl_args.n_iter,
+                                        temperature=cl_args.temp, **kwargs)
     
 
 if __name__ == "__main__":
@@ -411,7 +412,8 @@ if __name__ == "__main__":
     parser.add_argument("--temp", type=_check_nonneg_float, default=1.0)
     
     # Tune the hyperparameters of the agents
-    parser.add_argument("--tune", action="store_true")
+    parser.add_argument("--hyperparameters", type=str, default="tune_and_eval",
+                        choices=["tune_and_eval", "tune_only", "eval_only"])
     
     # Set the number of exploration steps
     parser.add_argument("--n_explore", type=int, default=10)
