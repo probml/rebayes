@@ -9,7 +9,7 @@ import pickle
 import jax.random as jr
 from jax.tree_util import tree_map
 
-import demos.collas.datasets.mnist_data as mnist_data
+import demos.collas.datasets.dataloaders as dataloaders
 import rebayes.utils.models as models
 import rebayes.utils.callbacks as callbacks
 import demos.collas.hparam_tune as hparam_tune
@@ -34,8 +34,18 @@ def _check_nonneg_float(value):
     return fvalue
 
 
-def _process_agent_args(agent_args, ranks, output_dim, problem, 
-                        obs_scale, nll_method):
+def _compute_io_dims(dataset_type):
+    input_dim, output_dim = 0, 1
+    if "mnist" in dataset_type:
+        input_dim = (1, 28, 28, 1)
+    elif "cifar" in dataset_type:
+        input_dim = (1, 32, 32, 3)
+    
+    return input_dim, output_dim
+
+
+def _process_agent_args(agent_args, ranks, input_dim, output_dim, 
+                        problem, obs_scale, nll_method):
     agents = {}
     sgd_loss_fn = partial(callbacks.nll_reg, scale=obs_scale)
     
@@ -79,6 +89,7 @@ def _process_agent_args(agent_args, ranks, output_dim, problem,
             f'sgd-rb-{rank}': {
                 'loss_fn': sgd_loss_fn,
                 'buffer_size': rank,
+                'dim_input': input_dim,
                 'dim_output': output_dim,
                 "optimizer": "sgd",
                 'pbounds': sgd_pbounds,
@@ -89,6 +100,7 @@ def _process_agent_args(agent_args, ranks, output_dim, problem,
             f'adam-rb-{rank}': {
                 'loss_fn': sgd_loss_fn,
                 'buffer_size': rank,
+                'dim_input': input_dim,
                 'dim_output': output_dim,
                 "optimizer": "adam",
                 'pbounds': sgd_pbounds,
@@ -103,11 +115,11 @@ def _eval_metric(
     problem: str,
     nll_method: str,
     temperature: float,
-    linearize: bool = False,
     aleatoric_factor: float = 1.0,
 ) -> dict:
     """Get evaluation metric for classification problem type.
     """
+    linearize = nll_method == "nlpd-linearized"
     if problem == "iid":
         if nll_method == "nll":
             result = {
@@ -271,14 +283,10 @@ def evaluate_and_store_result(
 def main(cl_args):
     # Set output path
     output_path = os.environ.get("REBAYES_OUTPUT")
-    problem_name = cl_args.problem
-    # if cl_args.problem != "permuted":
-    #     problem_name += "-" + str(cl_args.ntrain)
+    problem_str = cl_args.problem
     nll_method = cl_args.nll_method
-    if cl_args.nll_method == "nlpd-mc" and cl_args.linearize:
-        nll_method = "nlpd-linearized"
     if output_path is None:
-        output_path = Path("regression", "outputs", problem_name,
+        output_path = Path("regression", "outputs", problem_str,
                            cl_args.dataset, cl_args.model, nll_method,)
     Path(output_path).mkdir(parents=True, exist_ok=True)
     
@@ -289,7 +297,7 @@ def main(cl_args):
     Path(config_path).mkdir(parents=True, exist_ok=True)
     
     # Load dataset
-    dataset = mnist_data.reg_datasets[cl_args.problem+"-mnist"]
+    dataset = dataloaders.reg_datasets[cl_args.problem]
     if cl_args.problem == "permuted":
         dataset = dataset()
     else:
@@ -298,31 +306,32 @@ def main(cl_args):
     ntrain = None
     if kwargs is not None and "ntrain" in kwargs:
         ntrain = kwargs["ntrain"]
-    base_dataset = mnist_data.load_target_digit_dataset(
-        fashion=cl_args.dataset=="f-mnist",
-        target_digit=cl_args.target_digit, n=ntrain,
+    base_dataset = dataloaders.load_target_digit_dataset(
+        target_digit=cl_args.target_digit, 
+        dataset_type=cl_args.dataset, n=ntrain,
     )
     dataset_load_fn = partial(dataset_load_fn, dataset=base_dataset)
     eval_metric = _eval_metric(cl_args.obs_scale, cl_args.problem, 
                                cl_args.nll_method, cl_args.temp,
-                               cl_args.linearize, cl_args.aleatoric)
+                               cl_args.aleatoric)
     
     # Initialize model
     if cl_args.model == "cnn":
-        model_init_fn = partial(models.initialize_regression_cnn, 
-                                emission_cov=cl_args.obs_scale**2)
+        model_init_fn = models.initialize_regression_cnn
     else: # cl_args.model == "mlp"
-        model_init_fn = partial(models.initialize_regression_mlp, 
-                                emission_cov=cl_args.obs_scale**2)
+        model_init_fn = models.initialize_regression_mlp
+    input_dim, output_dim = _compute_io_dims(cl_args.dataset)
+    model_init_fn = partial(model_init_fn, input_dim=input_dim, 
+                            output_dim=output_dim, 
+                            emission_cov=cl_args.obs_scale**2)
     
     # Set up agents
-    output_dim = 1
-    agents = _process_agent_args(cl_args.agents, cl_args.ranks, output_dim,
-                                 cl_args.problem, cl_args.obs_scale,
-                                 cl_args.nll_method)
+    agents = _process_agent_args(cl_args.agents, cl_args.ranks, input_dim,
+                                 output_dim, cl_args.problem, 
+                                 cl_args.obs_scale, cl_args.nll_method)
     
     # Set up hyperparameter tuning
-    hparam_path = Path(config_path, problem_name, cl_args.dataset, 
+    hparam_path = Path(config_path, problem_str, cl_args.dataset,
                        cl_args.model, nll_method)
     if cl_args.tune:
         agent_hparams = \
@@ -372,9 +381,10 @@ if __name__ == "__main__":
     parser.add_argument("--problem", type=str, default="iid",
                         choices=["iid", "amplified", "random-walk", "permuted"])
     
-    # Type of dataset (mnist or f-mnist)
-    parser.add_argument("--dataset", type=str, default="f-mnist", 
-                        choices=["mnist", "f-mnist"])
+    # Type of dataset
+    parser.add_argument("--dataset", type=str, default="fashion_mnist", 
+                        choices=["mnist", "fashion_mnist", 
+                                 "cifar10", "cifar100"])
     
     # Target digit
     parser.add_argument("--target_digit", type=int, default=2,
@@ -392,10 +402,7 @@ if __name__ == "__main__":
     
     # Negative log likelihood evaluation method
     parser.add_argument("--nll_method", type=str, default="nll", 
-                        choices=["nll", "nlpd-mc"])
-    
-    # Linearized NLPD-MC sampling
-    parser.add_argument("--linearize", action="store_true")
+                        choices=["nll", "nlpd-mc", "nlpd-linearized"])
     
     # Multiplicative factor for aleatoric uncertainty
     parser.add_argument("--aleatoric", type=_check_nonneg_float, default=1.0)
