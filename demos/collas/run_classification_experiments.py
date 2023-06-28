@@ -69,14 +69,14 @@ def _process_agent_args(agent_args, lofi_cov_type, ranks,
             'log_init_cov': (-10, 0.0),
             'log_1m_dynamics_weights': (-90, -90),
             'log_dynamics_cov': (-90, -90),
-            'log_alpha': (-30, 0),
+            'log_alpha': (-90, -90),
         }
     else:
         filter_pbounds = {
             'log_init_cov': (-10, 0),
             'log_1m_dynamics_weights': (-30, 0),
             'log_dynamics_cov': (-30, 0),
-            'log_alpha': (-30, 0),
+            'log_alpha': (-90, -90),
         }
     
     # Create agents
@@ -341,7 +341,7 @@ def main(cl_args):
     # Set up hyperparameter tuning
     hparam_path = Path(config_path, problem_str,
                        cl_args.dataset, cl_args.model, nll_method)
-    if cl_args.hyperparameter != "eval_only":
+    if cl_args.hyperparameters != "eval_only":
         agent_hparams = \
             tune_and_store_hyperparameters(hparam_path, model_init_fn, 
                                            dataset_load_fn, agents,
@@ -361,7 +361,7 @@ def main(cl_args):
                 raise FileNotFoundError(f"Hyperparameter {agent_hparam_path} "
                                         "not found.")
     
-    if cl_args.hyperparameter != "tune_only":
+    if cl_args.hyperparameters != "tune_only":
         # Evaluate agents
         for agent_name, hparams in agent_hparams.items():
             print(f"Evaluating {agent_name}...")
@@ -413,7 +413,7 @@ if __name__ == "__main__":
     parser.add_argument("--temp", type=_check_nonneg_float, default=1.0)
     
     # Tune the hyperparameters of the agents
-    parser.add_argument("--hyperparameter", type=str, default="tune_and_eval",
+    parser.add_argument("--hyperparameters", type=str, default="tune_and_eval",
                         choices=["tune_and_eval", "tune_only", "eval_only"])
     
     # Set the number of exploration steps
