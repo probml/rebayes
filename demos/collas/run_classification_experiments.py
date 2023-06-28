@@ -318,7 +318,8 @@ def main(cl_args):
     if cl_args.problem == "stationary" or cl_args.problem == "rotated":
         dataset_load_fn, kwargs = dataset(ntrain=cl_args.ntrain).values()
     else:
-        dataset_load_fn, kwargs = dataset().values()
+        dataset_load_fn, kwargs = \
+            dataset(ntrain_per_task=cl_args.ntrain_per_task).values()
     dataset_load_fn = partial(dataset_load_fn, dataset_type=cl_args.dataset)
     eval_metric = _eval_metric(cl_args.problem, cl_args.nll_method,
                                cl_args.temp, cl_args.cooling)
@@ -393,6 +394,9 @@ if __name__ == "__main__":
     
     # Number of training examples
     parser.add_argument("--ntrain", type=_check_positive_int, default=2_000)
+    
+    parser.add_argument("--ntrain_per_task", type=_check_positive_int, 
+                        default=300)
     
     # Type of model (mlp or cnn)
     parser.add_argument("--model", type=str, default="mlp",
