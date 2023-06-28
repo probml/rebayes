@@ -168,6 +168,7 @@ def bbf_rsgd(
     callback,
     loss_fn,
     buffer_size,
+    dim_input,
     dim_output,
     callback_at_end=True,
     optimizer="sgd",
@@ -211,7 +212,7 @@ def bbf_rsgd(
         emission_cov_function=model_dict["emission_cov_function"],
         tx=tx,
         buffer_size=buffer_size,
-        dim_features=[1, 28, 28, 1],
+        dim_features=dim_input,
         dim_output=dim_output,
         n_inner=1,
     )
@@ -403,7 +404,7 @@ def build_estimator(init_fn, hparams, method, classification=True, **kwargs):
             emission_cov_function=emission_cov_fn,
             tx=tx,
             buffer_size=kwargs["buffer_size"],
-            dim_features=[1, 28, 28, 1],
+            dim_features=kwargs["dim_input"],
             dim_output=kwargs["dim_output"],
             n_inner=1,
         )

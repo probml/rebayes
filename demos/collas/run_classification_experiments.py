@@ -10,7 +10,7 @@ from jax.tree_util import tree_map
 import jax.random as jr
 import optax
 
-import demos.collas.datasets.mnist_data as mnist_data
+import demos.collas.datasets.dataloaders as dataloaders
 import rebayes.utils.models as models
 import rebayes.utils.callbacks as callbacks
 import demos.collas.hparam_tune as hparam_tune
@@ -35,8 +35,25 @@ def _check_nonneg_float(value):
     return fvalue
 
 
-def _process_agent_args(agent_args, lofi_cov_type, ranks, output_dim, 
-                        problem, nll_method):
+def _compute_io_dims(problem, dataset_type):
+    input_dim, output_dim = 0, 0
+    if "mnist" in dataset_type:
+        input_dim = (1, 28, 28, 1)
+        output_dim = 10
+    elif "cifar" in dataset_type:
+        input_dim = (1, 32, 32, 3)
+        if dataset_type == "cifar10":
+            output_dim = 10
+        elif dataset_type == "cifar100":
+            output_dim = 100
+    if problem == "split":
+        output_dim = 1
+    
+    return input_dim, output_dim
+
+
+def _process_agent_args(agent_args, lofi_cov_type, ranks, 
+                        input_dim, output_dim, problem, nll_method):
     agents = {}
     sgd_loss_fn = optax.softmax_cross_entropy if output_dim >= 2 \
         else optax.sigmoid_binary_cross_entropy
@@ -91,6 +108,7 @@ def _process_agent_args(agent_args, lofi_cov_type, ranks, output_dim,
             f'sgd-rb-{rank}': {
                 'loss_fn': sgd_loss_fn,
                 'buffer_size': rank,
+                'dim_input': input_dim,
                 'dim_output': output_dim,
                 "optimizer": "sgd",
                 'pbounds': sgd_pbounds,
@@ -101,6 +119,7 @@ def _process_agent_args(agent_args, lofi_cov_type, ranks, output_dim,
             f'adam-rb-{rank}': {
                 'loss_fn': sgd_loss_fn,
                 'buffer_size': rank,
+                'dim_input': input_dim,
                 'dim_output': output_dim,
                 "optimizer": "adam",
                 'pbounds': sgd_pbounds,
@@ -299,13 +318,12 @@ def main(cl_args):
     Path(config_path).mkdir(parents=True, exist_ok=True)
     
     # Load dataset
-    dataset = mnist_data.clf_datasets[cl_args.problem+"-mnist"]
+    dataset = dataloaders.clf_datasets[cl_args.problem]
     if cl_args.problem == "stationary" or cl_args.problem == "rotated":
         dataset_load_fn, kwargs = dataset(ntrain=cl_args.ntrain).values()
     else:
         dataset_load_fn, kwargs = dataset().values()
-    dataset_load_fn = partial(dataset_load_fn, 
-                              fashion=cl_args.dataset=="f-mnist")
+    dataset_load_fn = partial(dataset_load_fn, dataset_type=cl_args.dataset)
     eval_metric = _eval_metric(cl_args.problem, cl_args.nll_method,
                                cl_args.temp, cl_args.linearize,
                                cl_args.cooling)
@@ -315,13 +333,14 @@ def main(cl_args):
         model_init_fn = models.initialize_classification_cnn
     else: # cl_args.model == "mlp"
         model_init_fn = models.initialize_classification_mlp
-    output_dim = 1 if cl_args.problem == "split" else 10
-    model_init_fn = partial(model_init_fn, output_dim=output_dim) 
+    input_dim, output_dim = _compute_io_dims(cl_args.problem, cl_args.dataset)
+    model_init_fn = partial(model_init_fn, input_dim=input_dim,
+                            output_dim=output_dim)
     
     # Set up agents
     agents = _process_agent_args(cl_args.agents, cl_args.lofi_cov_type,
-                                 cl_args.ranks, output_dim, cl_args.problem,
-                                 cl_args.nll_method)
+                                 cl_args.ranks, input_dim, output_dim, 
+                                 cl_args.problem, cl_args.nll_method)
     
     # Set up hyperparameter tuning
     hparam_path = Path(config_path, problem_str,
@@ -371,8 +390,9 @@ if __name__ == "__main__":
                         choices=["stationary", "permuted", "rotated", "split"])
     
     # Type of dataset (mnist or f-mnist)
-    parser.add_argument("--dataset", type=str, default="f-mnist", 
-                        choices=["mnist", "f-mnist"])
+    parser.add_argument("--dataset", type=str, default="fashion_mnist", 
+                        choices=["mnist", "fashion_mnist", 
+                                 "cifar10", "cifar100"])
     
     # Number of training examples
     parser.add_argument("--ntrain", type=_check_positive_int, default=2_000)
