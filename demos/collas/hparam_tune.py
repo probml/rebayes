@@ -53,7 +53,7 @@ def bbf_lofi(
     
     model_dict = init_fn(key=0)
     
-    emission_dist = lambda mean, cov: tfd.Categorical(probs=mean) \
+    emission_dist = lambda mean, cov: tfd.OneHotCategorical(probs=mean) \
         if classification else tfd.Normal(loc=mean, scale=jnp.sqrt(cov))
     
     estimator = lofi_estimator(
@@ -121,7 +121,7 @@ def bbf_ekf(
     alpha = jnp.exp(log_alpha).item()
 
     model_dict = init_fn(key=0)
-    emission_dist = lambda mean, cov: tfd.Categorical(probs=mean) \
+    emission_dist = lambda mean, cov: tfd.OneHotCategorical(probs=mean) \
         if classification else tfd.Normal(loc=mean, scale=jnp.sqrt(cov))
     estimator = ekf.RebayesEKF(
         dynamics_weights_or_function=dynamics_weights,
@@ -166,7 +166,6 @@ def bbf_ekf_it(
     log_alpha,
     log_learning_rate,
     # Specify before running
-    log_likelihood_input_processing_fn,
     n_replay,
     init_fn,
     train,
@@ -192,7 +191,7 @@ def bbf_ekf_it(
 
     method_name = method.split("-")[0]
     model_dict = init_fn(key=0)
-    emission_dist = lambda mean, cov: tfd.Categorical(probs=mean) \
+    emission_dist = lambda mean, cov: tfd.OneHotCategorical(probs=mean) \
         if classification else tfd.Normal(loc=mean, scale=jnp.sqrt(cov))
     estimator = replay_ekf.RebayesReplayEKF(
         dynamics_weights_or_function=dynamics_weights,
@@ -201,7 +200,6 @@ def bbf_ekf_it(
         emission_cov_function=model_dict["emission_cov_function"],
         dynamics_covariance_inflation_factor=alpha,
         emission_dist=emission_dist,
-        log_likelihood_input_processing_fn=log_likelihood_input_processing_fn,
         n_replay=n_replay,
         learning_rate=learning_rate,
         method=method_name,
@@ -419,7 +417,7 @@ def build_estimator(init_fn, hparams, method, classification=True, **kwargs):
         model_dict["apply_fn"], model_dict["emission_mean_function"], \
             model_dict["emission_cov_function"]
     hparams = hparams.copy()
-    emission_dist = lambda mean, cov: tfd.Categorical(probs=mean) \
+    emission_dist = lambda mean, cov: tfd.OneHotCategorical(probs=mean) \
         if classification else tfd.Normal(loc=mean, scale=jnp.sqrt(cov))
     if "ekf-it" in method:
         init_covariance = hparams.pop("initial_covariance")

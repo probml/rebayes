@@ -112,7 +112,6 @@ def _process_agent_args(agent_args, lofi_cov_type, ranks, input_dim, output_dim,
     if "fdekf-it" in agent_args:
         agents["fdekf-it"] = {
             'pbounds': it_filter_pbounds,
-            'log_likelihood_input_processing_fn': lambda y: jnp.argmax(y),
             'n_replay': filter_n_iter,
         }
     if "vdekf" in agent_args:
@@ -120,7 +119,6 @@ def _process_agent_args(agent_args, lofi_cov_type, ranks, input_dim, output_dim,
     if "vdekf-it" in agent_args:
         agents["vdekf-it"] = {
             'pbounds': it_filter_pbounds,
-            'log_likelihood_input_processing_fn': lambda y: jnp.argmax(y),
             'n_replay': filter_n_iter,
         }
     if "sgd-rb" in agent_args:
