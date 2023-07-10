@@ -6,6 +6,7 @@ from typing import Callable
 from pathlib import Path
 import pickle
 
+import jax.numpy as jnp
 from jax.tree_util import tree_map
 import jax.random as jr
 import optax
@@ -16,7 +17,8 @@ import rebayes.utils.callbacks as callbacks
 import demos.collas.hparam_tune as hparam_tune
 import demos.collas.train_utils as train_utils
 
-AGENT_TYPES = ["lofi", "fdekf", "vdekf", "sgd-rb", "adam-rb"]
+AGENT_TYPES = ["lofi", "fdekf", "vdekf", "sgd-rb", "adam-rb",
+               "lofi-it", "fdekf-it", "vdekf-it"]
 
 
 def _check_positive_int(value):
@@ -52,8 +54,8 @@ def _compute_io_dims(problem, dataset_type):
     return input_dim, output_dim
 
 
-def _process_agent_args(agent_args, lofi_cov_type, ranks, 
-                        input_dim, output_dim, problem, nll_method):
+def _process_agent_args(agent_args, lofi_cov_type, ranks, input_dim, output_dim, 
+                        problem, nll_method, filter_n_iter):
     agents = {}
     sgd_loss_fn = optax.softmax_cross_entropy if output_dim >= 2 \
         else optax.sigmoid_binary_cross_entropy
@@ -71,6 +73,8 @@ def _process_agent_args(agent_args, lofi_cov_type, ranks,
             'log_dynamics_cov': (-90, -90),
             'log_alpha': (-90, -90),
         }
+        it_filter_pbounds = filter_pbounds.copy()
+        it_filter_pbounds["log_learning_rate"] = (-10.0, 0.0)
     else:
         filter_pbounds = {
             'log_init_cov': (-10, 0),
@@ -78,6 +82,8 @@ def _process_agent_args(agent_args, lofi_cov_type, ranks,
             'log_dynamics_cov': (-30, 0),
             'log_alpha': (-90, -90),
         }
+        it_filter_pbounds = filter_pbounds.copy()
+        it_filter_pbounds["log_learning_rate"] = (-10.0, 0.0)
     
     # Create agents
     if "lofi" in agent_args:
@@ -99,10 +105,24 @@ def _process_agent_args(agent_args, lofi_cov_type, ranks,
                     'pbounds': filter_pbounds,
                 } for rank in ranks
             })
+    if "lofi-it" in agent_args:
+        pass # TODO
     if "fdekf" in agent_args:
         agents["fdekf"] = {'pbounds': filter_pbounds}
+    if "fdekf-it" in agent_args:
+        agents["fdekf-it"] = {
+            'pbounds': it_filter_pbounds,
+            'log_likelihood_input_processing_fn': lambda y: jnp.argmax(y),
+            'n_replay': filter_n_iter,
+        }
     if "vdekf" in agent_args:
         agents["vdekf"] = {'pbounds': filter_pbounds}
+    if "vdekf-it" in agent_args:
+        agents["vdekf-it"] = {
+            'pbounds': it_filter_pbounds,
+            'log_likelihood_input_processing_fn': lambda y: jnp.argmax(y),
+            'n_replay': filter_n_iter,
+        }
     if "sgd-rb" in agent_args:
         agents.update({
             f'sgd-rb-{rank}': {
@@ -337,7 +357,8 @@ def main(cl_args):
     # Set up agents
     agents = _process_agent_args(cl_args.agents, cl_args.lofi_cov_type,
                                  cl_args.ranks, input_dim, output_dim, 
-                                 cl_args.problem, cl_args.nll_method)
+                                 cl_args.problem, cl_args.nll_method,
+                                 cl_args.filter_n_iter)
     
     # Set up hyperparameter tuning
     hparam_path = Path(config_path, problem_str,
@@ -433,6 +454,9 @@ if __name__ == "__main__":
     # List of ranks to use for the agents
     parser.add_argument("--ranks", type=_check_positive_int, nargs="+",
                         default=[1, 10,])
+    
+    # Iterative filter number of iterations
+    parser.add_argument("--filter_n_iter", type=_check_positive_int, default=2)
     
     # List of agents to use
     parser.add_argument("--agents", type=str, nargs="+", default=AGENT_TYPES,
