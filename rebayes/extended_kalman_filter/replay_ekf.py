@@ -42,6 +42,7 @@ class RebayesReplayEKF(RebayesEKF):
         emission_cov_function: Union[FnStateToEmission2, FnStateAndInputToEmission2],
         emission_dist: EmissionDistFn = \
             lambda mean, cov: MVN(loc=mean, scale_tril=jnp.linalg.cholesky(cov)),
+        log_likelihood_input_processing_fn: Callable=lambda y: y,
         dynamics_covariance_inflation_factor: float = 0.0,
         method: str="fcekf",
         n_replay: int=10,
@@ -54,7 +55,9 @@ class RebayesReplayEKF(RebayesEKF):
         )
         self.log_likelihood = lambda params, x, y: \
             emission_dist(self.emission_mean_function(params, x),
-                          self.emission_cov_function(params, x)).log_prob(y)
+                          self.emission_cov_function(params, x)).log_prob(
+                              log_likelihood_input_processing_fn(y)
+                            )
         self.n_replay = n_replay
         self.learning_rate = learning_rate
         
