@@ -70,7 +70,8 @@ class RebayesReplayEKF(RebayesEKF):
     ) -> ReplayEKFBel:
         m, P = bel.mean, bel.cov
         gll = jax.grad(self.log_likelihood, argnums=0)(m, x, y)
-        m_cond = m - self.learning_rate * (m - m_prev + P @ gll)
+        additive_term = P @ gll if self.method == "fcekf" else P * gll
+        m_cond = m - self.learning_rate * (m - m_prev + additive_term)
         bel_cond = bel.replace(mean=m_cond)
         
         return bel_cond
