@@ -82,14 +82,9 @@ class RebayesReplayEKF(RebayesEKF):
         y: Float[Array, "output_dim"],
     ) -> ReplayEKFBel:
         m_prev, P_prev = bel.mean, bel.cov
-        m_Y = lambda m: self.emission_mean_function(m, x)
-        Cov_Y = lambda m: self.emission_cov_function(m, x)
-        R = jnp.atleast_2d(Cov_Y(m_prev))
-        H = core._jacrev_2d(m_Y, m_prev)
-        S = R + (H @ P_prev @ H.T)
-        C = P_prev @ H.T
-        K = jnp.linalg.lstsq(S, C.T)[0].T
-        P_cond = P_prev - K @ S @ K.T
+        _, P_cond = self.update_fn(m_prev, P_prev, self.emission_mean_function,
+                                   self.emission_cov_function, x, y, 
+                                   1, False, 0.0)
         bel_cond = bel.replace(cov=P_cond)
         
         return bel_cond
