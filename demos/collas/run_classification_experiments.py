@@ -17,8 +17,7 @@ import rebayes.utils.callbacks as callbacks
 import demos.collas.hparam_tune as hparam_tune
 import demos.collas.train_utils as train_utils
 
-AGENT_TYPES = ["lofi", "fdekf", "vdekf", "sgd-rb", "adam-rb",
-               "lofi-it", "fdekf-it", "vdekf-it"]
+AGENT_TYPES = ["lofi", "fdekf", "vdekf", "sgd-rb", "adam-rb",]
 AGENT_ITER_TYPES = [*AGENT_TYPES, "lofi-it", "fdekf-it", "vdekf-it"]
 
 
