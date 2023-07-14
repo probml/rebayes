@@ -19,6 +19,7 @@ import demos.collas.train_utils as train_utils
 
 AGENT_TYPES = ["lofi", "fdekf", "vdekf", "sgd-rb", "adam-rb",
                "lofi-it", "fdekf-it", "vdekf-it"]
+AGENT_ITER_TYPES = [*AGENT_TYPES, "lofi-it", "fdekf-it", "vdekf-it"]
 
 
 def _check_positive_int(value):
