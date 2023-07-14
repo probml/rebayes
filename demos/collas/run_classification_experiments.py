@@ -54,8 +54,9 @@ def _compute_io_dims(problem, dataset_type):
     return input_dim, output_dim
 
 
-def _process_agent_args(agent_args, lofi_cov_type, ranks, input_dim, output_dim, 
-                        problem, nll_method, filter_n_iter):
+def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks, 
+                        input_dim, output_dim, problem, 
+                        nll_method, filter_n_iter):
     agents = {}
     sgd_loss_fn = optax.softmax_cross_entropy if output_dim >= 2 \
         else optax.sigmoid_binary_cross_entropy
@@ -123,7 +124,8 @@ def _process_agent_args(agent_args, lofi_cov_type, ranks, input_dim, output_dim,
         }
     if "sgd-rb" in agent_args:
         pbounds = sgd_pbounds.copy()
-        pbounds["log_1m_momentum"] = (-10.0, 0.0)
+        if tune_sgd_momentum:
+            pbounds["log_1m_momentum"] = (-10.0, 0.0)
         agents.update({
             f'sgd-rb-{rank}': {
                 'loss_fn': sgd_loss_fn,
@@ -363,6 +365,7 @@ def main(cl_args):
     
     # Set up agents
     agents = _process_agent_args(cl_args.agents, cl_args.lofi_cov_type,
+                                 cl_args.tune_sgd_momentum,
                                  cl_args.ranks, input_dim, output_dim, 
                                  cl_args.problem, cl_args.nll_method,
                                  cl_args.filter_n_iter)
@@ -477,6 +480,9 @@ if __name__ == "__main__":
     # List of agents to use
     parser.add_argument("--agents", type=str, nargs="+", default=AGENT_TYPES,
                         choices=AGENT_TYPES)
+    
+    # Tune momentum for SGD
+    parser.add_argument("--tune_sgd_momentum", action="store_true")
     
     # LOFI covariance type
     parser.add_argument("--lofi_cov_type", type=str, default="diagonal",

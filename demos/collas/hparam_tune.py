@@ -344,7 +344,7 @@ def create_optimizer(
             n_seeds=n_seeds,
             **kwargs # Must include loss_fn, buffer_size, dim_output
         )
-        if "adam" in method:
+        if "log_1m_momentum" not in bounds:
             bbf_partial = partial(
                 bbf_partial,
                 log_1m_momentum=0.0

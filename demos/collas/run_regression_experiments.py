@@ -44,8 +44,8 @@ def _compute_io_dims(dataset_type):
     return input_dim, output_dim
 
 
-def _process_agent_args(agent_args, ranks, input_dim, output_dim, 
-                        problem, obs_scale, nll_method):
+def _process_agent_args(agent_args, tune_sgd_momentum, ranks, input_dim, 
+                        output_dim, problem, obs_scale, nll_method):
     agents = {}
     sgd_loss_fn = partial(callbacks.nll_reg, scale=obs_scale)
     
@@ -86,7 +86,8 @@ def _process_agent_args(agent_args, ranks, input_dim, output_dim,
         agents["vdekf"] = {'pbounds': filter_pbounds}
     if "sgd-rb" in agent_args:
         pbounds = sgd_pbounds.copy()
-        pbounds["log_1m_momentum"] = (-10.0, 0.0)
+        if tune_sgd_momentum:
+            pbounds["log_1m_momentum"] = (-10.0, 0.0)
         agents.update({
             f'sgd-rb-{rank}': {
                 'loss_fn': sgd_loss_fn,
@@ -328,9 +329,10 @@ def main(cl_args):
                             emission_cov=cl_args.obs_scale**2)
     
     # Set up agents
-    agents = _process_agent_args(cl_args.agents, cl_args.ranks, input_dim,
-                                 output_dim, cl_args.problem, 
-                                 cl_args.obs_scale, cl_args.nll_method)
+    agents = _process_agent_args(cl_args.agents, cl_args.tune_sgd_momentum,
+                                 cl_args.ranks, input_dim, output_dim,
+                                 cl_args.problem, cl_args.obs_scale, 
+                                 cl_args.nll_method)
     
     # Set up hyperparameter tuning
     hparam_path = Path(config_path, problem_str, cl_args.dataset,
@@ -434,6 +436,9 @@ if __name__ == "__main__":
     # List of agents to use
     parser.add_argument("--agents", type=str, nargs="+", default=AGENT_TYPES,
                         choices=AGENT_TYPES)
+    
+    # Tune momentum for SGD
+    parser.add_argument("--tune_sgd_momentum", action="store_true")
     
     # Number of random initializations for evaluation
     parser.add_argument("--n_iter", type=int, default=100)
