@@ -340,6 +340,7 @@ def create_optimizer(
             test=test,
             callback=callback,
             callback_at_end=callback_at_end,
+            n_seeds=n_seeds,
             **kwargs # Must include loss_fn, buffer_size, dim_output
         )
         if nll_method == "nll":

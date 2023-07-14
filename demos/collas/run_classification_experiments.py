@@ -228,10 +228,13 @@ def tune_and_store_hyperparameters(
     dataset_load_fn: Callable,
     agents: dict,
     val_callback: Callable,
+    callback_at_end: bool=False,
+    n_seeds: int=5,
     verbose: int = 2,
     n_explore: int = 20,
     n_exploit: int = 25,
     nll_method: str = "nll",
+    
 ) -> dict:
     """Tune and store hyperparameters.
 
@@ -241,6 +244,9 @@ def tune_and_store_hyperparameters(
         dataset_load_fn (Callable): Dataset loading function.
         agents (dict): Dictionary of agent parameters.
         val_callback (Callable): Tuning objective.
+        callback_at_end (bool, optional): Whether to call the callback
+            at the end of training when tuning. Defaults to False.
+        n_seeds (int, optional): Number of seeds for Bayesian optimization.
         verbosity (int, optional): Verbosity level for Bayesian optimization.
         n_explore (int, optional): Number of random exploration steps
             for Bayesian optimization. Defaults to 20.
@@ -259,7 +265,8 @@ def tune_and_store_hyperparameters(
         pbounds = agent_params.pop("pbounds")
         optimizer = hparam_tune.create_optimizer(
             model_init_fn, pbounds, dataset["train"], dataset["val"],
-            val_callback, agent_name, verbose=verbose, callback_at_end=False,
+            val_callback, agent_name, verbose=verbose, 
+            callback_at_end=callback_at_end, n_seeds=n_seeds,
             nll_method=nll_method, classification=True, **agent_params,
         )
         optimizer.maximize(init_points=n_explore, n_iter=n_exploit)
@@ -365,7 +372,10 @@ def main(cl_args):
         agent_hparams = \
             tune_and_store_hyperparameters(hparam_path, model_init_fn, 
                                            dataset_load_fn, agents,
-                                           eval_metric["val"], cl_args.verbose, 
+                                           eval_metric["val"], 
+                                           cl_args.tune_cb_at_end,
+                                           cl_args.tune_n_seeds,
+                                           cl_args.verbose, 
                                            cl_args.n_explore, cl_args.n_exploit,
                                            cl_args.nll_method)
     else:
@@ -438,6 +448,12 @@ if __name__ == "__main__":
     # Tune the hyperparameters of the agents
     parser.add_argument("--hyperparameters", type=str, default="tune_and_eval",
                         choices=["tune_and_eval", "tune_only", "eval_only"])
+    
+    # Evaluate callback on validation set at end of training
+    parser.add_argument("--tune_cb_at_end", action="store_true")
+    
+    # Evaluate callback on validation set at end of training
+    parser.add_argument("--tune_n_seeds", type=_check_positive_int, default=5)
     
     # Set the number of exploration steps
     parser.add_argument("--n_explore", type=_check_positive_int, default=20)
