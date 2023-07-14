@@ -53,8 +53,10 @@ class RebayesReplayEKF(RebayesEKF):
             dynamics_covariance_inflation_factor, method
         )
         self.log_likelihood = lambda params, x, y: \
-            emission_dist(self.emission_mean_function(params, x),
-                          self.emission_cov_function(params, x)).log_prob(y)
+            jnp.sum(
+                emission_dist(self.emission_mean_function(params, x),
+                              self.emission_cov_function(params, x)).log_prob(y)
+            )
         self.n_replay = n_replay
         self.learning_rate = learning_rate
         
