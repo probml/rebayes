@@ -234,6 +234,7 @@ def bbf_ekf_it(
 def bbf_rsgd(
     log_init_cov,
     log_learning_rate,
+    log_1m_momentum,
     # Specify before running
     init_fn,
     train,
@@ -251,15 +252,15 @@ def bbf_rsgd(
     X_train, *_, y_train = train
     X_test, *_, y_test = test
     
+    initial_covariance = jnp.exp(log_init_cov).item()
+    learning_rate=jnp.exp(log_learning_rate).item()
+    momentum = 1 - jnp.exp(log_1m_momentum).item()
     if optimizer == "sgd":
-        opt = optax.sgd
+        tx = optax.sgd(learning_rate=learning_rate, momentum=momentum)
     elif optimizer == "adam":
-        opt = optax.adam
+        tx = optax.adam(learning_rate=learning_rate)
     else:
         raise ValueError("optimizer must be either 'sgd' or 'adam'")
-    
-    initial_covariance = jnp.exp(log_init_cov).item()
-    tx = opt(learning_rate=jnp.exp(log_learning_rate).item())
     
     model_dict = init_fn(key=0)
     
@@ -343,6 +344,11 @@ def create_optimizer(
             n_seeds=n_seeds,
             **kwargs # Must include loss_fn, buffer_size, dim_output
         )
+        if "adam" in method:
+            bbf_partial = partial(
+                bbf_partial,
+                log_1m_momentum=0.0
+            )
         if nll_method == "nll":
             bbf_partial = partial(
                 bbf_partial,
@@ -386,6 +392,9 @@ def get_best_params(optimizer, method, nll_method="nll"):
         hparams = {
             "learning_rate": learning_rate,
         }
+        if "sgd" in method:
+            momentum = 1 - jnp.exp(max_params["log_1m_momentum"]).item()
+            hparams["momentum"] = momentum
         if nll_method != "nll":
             initial_covariance = jnp.exp(max_params["log_init_cov"]).item()
             hparams["initial_covariance"] = initial_covariance
@@ -462,14 +471,18 @@ def build_estimator(init_fn, hparams, method, classification=True, **kwargs):
     elif "sgd" in method or "adam" in method:
         if "optimizer" in kwargs:
             if kwargs["optimizer"] == "sgd":
-                opt = optax.sgd
+                tx = optax.sgd(
+                    learning_rate=hparams["learning_rate"],
+                    momentum=hparams["momentum"],
+                )
             elif kwargs["optimizer"] == "adam":
-                opt = optax.adam
+                tx = optax.adam(
+                    learning_rate=hparams["learning_rate"],
+                )
             else:
                 raise ValueError("optimizer must be either 'sgd' or 'adam'")
         else:
-            opt = optax.sgd
-        tx = opt(learning_rate=hparams["learning_rate"])
+            tx = optax.sgd(learning_rate=hparams["learning_rate"])
         
         @partial(jit, static_argnames=("applyfn",))
         def lossfn_fifo(params, counter, X, y, applyfn):

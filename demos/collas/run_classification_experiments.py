@@ -122,6 +122,8 @@ def _process_agent_args(agent_args, lofi_cov_type, ranks, input_dim, output_dim,
             'n_replay': filter_n_iter,
         }
     if "sgd-rb" in agent_args:
+        pbounds = sgd_pbounds.copy()
+        pbounds["log_1m_momentum"] = (-10.0, 0.0)
         agents.update({
             f'sgd-rb-{rank}': {
                 'loss_fn': sgd_loss_fn,
@@ -129,7 +131,7 @@ def _process_agent_args(agent_args, lofi_cov_type, ranks, input_dim, output_dim,
                 'dim_input': input_dim,
                 'dim_output': output_dim,
                 "optimizer": "sgd",
-                'pbounds': sgd_pbounds,
+                'pbounds': pbounds,
             } for rank in ranks
         })
     if "adam-rb" in agent_args:
