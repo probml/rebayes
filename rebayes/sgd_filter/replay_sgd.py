@@ -150,7 +150,6 @@ class FifoSGD(Rebayes):
     def predict_state(self, bel):
         return bel
 
-    # TODO: define
     def sample_state(self, bel, key, n_samples):
         return bel
 
