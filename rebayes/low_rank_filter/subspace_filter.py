@@ -3,29 +3,38 @@ import chex
 import jax.numpy as jnp
 import flax.linen as nn
 from rebayes import base
-from typing import Union
+from typing import Union, Callable
 from jaxtyping import Array, Float
 from flax.training.train_state import TrainState
 from jax.flatten_util import ravel_pytree
 
 
-class SubspaceModule(nn.Module):
-    dim_subspace: int
-    base_module: nn.Module
-    init_normal: Callable = nn.initializers.normal()
-    init_proj: Callable = nn.initializers.normal()
+def subcify(cls):
+    class SubspaceModule(nn.Module):
+        dim_subspace: int
+        init_normal: Callable = nn.initializers.normal()
+        init_proj: Callable = nn.initializers.normal()
 
 
-    def setup(self, X_buff, y_buff):
-        # TODO:
-        # Define a projection matrix, a bias vector and a reconstruction function
-        ...
+        # How to get the dim_subspace and dim_full?
+        def setup(self):
+            self.subspace = self.param(
+                "subspace",
+                self.init_proj,
+                (dim_subspace,)
+            )
+            self.projection = self.param(
+                "projection",
+                self.init_proj,
+                (dim_full, dim_subspace)
+            )
 
-    def __call__(self, x):
-        params = self.projection_matrix @ self.w + self.b
-        params = self.reconstruct_params(params)
-        yhat = self.base_module.apply(params, x)
-        return yhat
+        @nn.compact
+        def __call__(self, x):
+            params = self.projection @ self.subspace
+            params = rfn(params)
+            return NNet().apply(params, x)
+
 
 class SubspaceBel(TrainState):
     projection_matrix: Float[Array, "dim_full dim_subspace"]
