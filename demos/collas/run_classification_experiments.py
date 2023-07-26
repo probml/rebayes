@@ -479,7 +479,7 @@ if __name__ == "__main__":
     
     # List of agents to use
     parser.add_argument("--agents", type=str, nargs="+", default=AGENT_TYPES,
-                        choices=AGENT_TYPES)
+                        choices=AGENT_ITER_TYPES)
     
     # Tune momentum for SGD
     parser.add_argument("--tune_sgd_momentum", action="store_true")
