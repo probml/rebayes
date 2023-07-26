@@ -107,21 +107,33 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
                 } for rank in ranks
             })
     if "lofi-it" in agent_args:
-        pass # TODO
+        agents.update({
+            f'lofi-{rank}-it-{n_iter}': {
+                'memory_size': rank,
+                'inflation': "hybrid",
+                'lofi_method': "diagonal",
+                'pbounds': filter_pbounds,
+                'n_replay': n_iter,
+            } for rank in ranks for n_iter in filter_n_iter
+        })
     if "fdekf" in agent_args:
         agents["fdekf"] = {'pbounds': filter_pbounds}
     if "fdekf-it" in agent_args:
-        agents["fdekf-it"] = {
-            'pbounds': it_filter_pbounds,
-            'n_replay': filter_n_iter,
-        }
+        agents.update({
+            f"fdekf-it-{n_iter}": {
+                'pbounds': it_filter_pbounds,
+                'n_replay': n_iter,
+            } for n_iter in filter_n_iter
+        })
     if "vdekf" in agent_args:
         agents["vdekf"] = {'pbounds': filter_pbounds}
     if "vdekf-it" in agent_args:
-        agents["vdekf-it"] = {
-            'pbounds': it_filter_pbounds,
-            'n_replay': filter_n_iter,
-        }
+        agents.update({
+            f"vdekf-it-{n_iter}": {
+                'pbounds': it_filter_pbounds,
+                'n_replay': n_iter,
+            } for n_iter in filter_n_iter
+        })
     if "sgd-rb" in agent_args:
         pbounds = sgd_pbounds.copy()
         if tune_sgd_momentum:
@@ -408,10 +420,10 @@ def main(cl_args):
                                                         classification=True, 
                                                         **agent_kwargs)
             _ = evaluate_and_store_result(output_path, model_init_fn,
-                                        dataset_load_fn, optimizer_dict,
-                                        eval_metric["test"], agent_name,
-                                        cl_args.problem, cl_args.n_iter,
-                                        **kwargs)
+                                          dataset_load_fn, optimizer_dict,
+                                          eval_metric["test"], agent_name,
+                                          cl_args.problem, cl_args.n_iter,
+                                          **kwargs)
     
 
 if __name__ == "__main__":
@@ -475,7 +487,8 @@ if __name__ == "__main__":
                         default=[1, 10,])
     
     # Iterative filter number of iterations
-    parser.add_argument("--filter_n_iter", type=_check_positive_int, default=2)
+    parser.add_argument("--filter_n_iter", type=_check_positive_int, nargs="+",
+                        default=[2,])
     
     # List of agents to use
     parser.add_argument("--agents", type=str, nargs="+", default=AGENT_TYPES,
