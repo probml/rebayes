@@ -1,10 +1,9 @@
-from typing import Callable, Union
+from typing import Union
 
 import chex
 from functools import partial
 import jax
-from jax import jit, vmap
-from jax.flatten_util import ravel_pytree
+from jax import jit
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 import tensorflow_probability.substrates.jax as tfp
@@ -18,7 +17,6 @@ from rebayes.base import (
     FnStateToEmission2,
     FnStateToState,
 )
-import rebayes.extended_kalman_filter.ekf_core as core
 from rebayes.extended_kalman_filter.ekf import RebayesEKF
 
 
@@ -52,6 +50,7 @@ class RebayesReplayEKF(RebayesEKF):
             emission_mean_function, emission_cov_function, emission_dist, False,
             dynamics_covariance_inflation_factor, method
         )
+        
         self.log_likelihood = lambda params, x, y: \
             jnp.sum(
                 emission_dist(self.emission_mean_function(params, x),
@@ -68,7 +67,7 @@ class RebayesReplayEKF(RebayesEKF):
         y: Float[Array, "output_dim"],
     ) -> ReplayEKFBel:
         m, P = bel.mean, bel.cov
-        gll = jax.grad(self.log_likelihood, argnums=0)(m, x, y)
+        gll = -jax.grad(self.log_likelihood, argnums=0)(m, x, y)
         additive_term = P @ gll if self.method == "fcekf" else P * gll
         m_cond = m - self.learning_rate * (m - m_prev + additive_term)
         bel_cond = bel.replace(mean=m_cond)
@@ -97,7 +96,6 @@ class RebayesReplayEKF(RebayesEKF):
         y: Float[Array, "output_dim"],
     ) -> ReplayEKFBel:
         m_prev = bel.mean
-        
         def partial_step(_, bel):
             bel = self._update_mean(bel, m_prev, x, y)
             return bel
