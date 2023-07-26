@@ -112,7 +112,7 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
                 'memory_size': rank,
                 'inflation': "hybrid",
                 'lofi_method': "diagonal",
-                'pbounds': filter_pbounds,
+                'pbounds': it_filter_pbounds,
                 'n_replay': n_iter,
             } for rank in ranks for n_iter in filter_n_iter
         })

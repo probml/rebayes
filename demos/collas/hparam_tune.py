@@ -532,17 +532,6 @@ def build_estimator(init_fn, hparams, method, classification=True, **kwargs):
             method=method,
             **hparams,
         )
-    elif "lofi-it" in method:
-        if "lofi_method" in kwargs:
-            kwargs.pop("lofi_method")
-        init_covariance = hparams.pop("initial_covariance")
-        estimator = lofi.RebayesGradientLoFi(
-            emission_mean_function=emission_mean_fn,
-            emission_cov_function=emission_cov_fn,
-            emission_dist=emission_dist,
-            **hparams,
-            **kwargs,
-        )
     elif "lofi" in method:
         if "lofi_method" in kwargs:
             if kwargs["lofi_method"] == "diagonal":
@@ -554,6 +543,8 @@ def build_estimator(init_fn, hparams, method, classification=True, **kwargs):
             kwargs.pop("lofi_method")
         else:
             estimator = lofi.RebayesLoFiDiagonal
+        if "it" in method:
+            estimator = lofi.RebayesGradientLoFi
         init_covariance = hparams.pop("initial_covariance")
         estimator = estimator(
             emission_mean_function=emission_mean_fn,
