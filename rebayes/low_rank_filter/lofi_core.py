@@ -811,5 +811,52 @@ def _lofi_orth_condition_on(
     return m_cond, U_cond, Lambda_cond
 
 
-# Kernel LOFI --------------------------------------------------------------
+# Gradient LOFI ----------------------------------------------------------------
 
+def _lofi_gradient_diagonal_cov_predict(
+    m0: Float[Array, "state_dim"],
+    m: Float[Array, "state_dim"],
+    U: Float[Array, "state_dim memory_size"],
+    Lambda: Float[Array, "memory_size"],
+    gamma: float,
+    q: float,
+    eta: float,
+    Ups: Float[Array, "state_dim"],
+):
+    """Predict step of the low-rank filter with diagonal covariance matrix.
+
+    Args:
+        m0 (D_hid,): Initial mean.
+        m (D_hid,): Prior mean.
+        U (D_hid, D_mem,): Prior basis.
+        Lambda (D_mem,): Prior singluar values.
+        gamma (float): Dynamics decay factor.
+        q (float): Dynamics noise factor.
+        eta (float): Prior precision.
+        Ups (D_hid,): Prior diagonal covariance.
+
+    Returns:
+        m0_pred (D_hid,): Predicted predictive mean.
+        m_pred (D_hid,): Predicted mean.
+        U_pred (D_hid, D_mem,): Predicted basis.
+        Lambda_pred (D_mem,): Predicted singular values.
+        eta_pred (float): Predicted precision.
+        Ups_pred (D_hid,): Predicted diagonal covariance.
+    """
+    P, L = U.shape
+    
+    # Mean prediction
+    m0_pred = gamma*m0
+    W = U * Lambda
+    m_pred = gamma*m
+
+    # Covariance prediction
+    eta_pred = eta/(gamma**2 + q*eta)
+    Ups_pred = 1/(gamma**2/Ups + q)
+    C = jnp.linalg.pinv(jnp.eye(L) + q*W.T @ (W*(Ups_pred/Ups)))
+    W_pred = gamma*(Ups_pred/Ups)*W @ jnp.linalg.cholesky(C)
+    U_pred, Lambda_pred = W_pred, jnp.ones(L)
+    S_pred = (W/Ups).T
+    T_pred = gamma**2 * jnp.linalg.pinv(jnp.eye(L) + W.T @ (W/Ups)) @ S_pred
+    
+    return m0_pred, m_pred, U_pred, Lambda_pred, eta_pred, Ups_pred, S_pred, T_pred

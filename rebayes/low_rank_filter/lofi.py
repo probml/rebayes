@@ -44,9 +44,9 @@ class LoFiBel:
     gamma: float
     q: float
 
-    Ups: CovMat = None
-    nobs: int = 0
-    obs_noise_var: float = 1.0
+    Ups: CovMat
+    nobs: int
+    obs_noise_var: float
 
 
 class RebayesLoFi(Rebayes):
@@ -104,7 +104,9 @@ class RebayesLoFi(Rebayes):
             eta=init_eta,
             gamma=gamma,
             q=q,
-            Ups=init_Ups
+            Ups=init_Ups,
+            nobs=0,
+            obs_noise_var=1.0,
         )
         
         return bel
@@ -491,3 +493,154 @@ def init_regression_agent(
     )
 
     return agent, recfn
+
+
+# Gradient (Diagonal) LOFI -----------------------------------------------------
+
+@chex.dataclass
+class GradientLoFiBel(LoFiBel):
+    pp_mean: chex.Array
+    mean: chex.Array
+    basis: chex.Array
+    svs: chex.Array
+    eta: float
+    gamma: float
+    q: float
+    S: chex.Array
+    T: chex.Array
+    
+    Ups: CovMat
+    nobs: int
+    obs_noise_var: float
+
+
+class RebayesGradientLoFi(RebayesLoFiDiagonal):
+    def __init__(
+        self,
+        dynamics_weights: CovMat,
+        dynamics_covariance: CovMat,
+        emission_mean_function: Union[FnStateToEmission, FnStateAndInputToEmission],
+        emission_cov_function: Union[FnStateToEmission2, FnStateAndInputToEmission2],
+        emission_dist: EmissionDistFn = \
+            lambda mean, cov: MVN(loc=mean, scale_tril=jnp.linalg.cholesky(cov)),
+        adaptive_emission_cov: bool=False,
+        dynamics_covariance_inflation_factor: float=0.0,
+        memory_size: int = 10,
+        steady_state: bool = False,
+        inflation: str = 'bayesian',
+        use_svd: bool = True,
+        n_replay: int = 10,
+        learning_rate: float = 0.01,
+    ):
+        super().__init__(dynamics_weights, dynamics_covariance, emission_mean_function, 
+                         emission_cov_function, emission_dist, adaptive_emission_cov, 
+                         dynamics_covariance_inflation_factor, memory_size, steady_state, 
+                         inflation, use_svd)
+        self.log_likelihood = lambda params, x, y: \
+            jnp.sum(
+                emission_dist(self.emission_mean_function(params, x),
+                              self.emission_cov_function(params, x)).log_prob(y)
+            )
+        self.n_replay = n_replay
+        self.learning_rate = learning_rate
+        
+    def init_bel(
+        self, 
+        initial_mean: Float[Array, "state_dim"],
+        initial_covariance: CovMat, 
+        X: Float[Array, "input_dim"]=None,
+        y: Float[Array, "output_dim"]=None,
+    ) -> GradientLoFiBel:
+        init_mean = initial_mean # Initial mean
+        memory_size = self.memory_size
+        bel = super().init_bel(initial_mean, initial_covariance)
+        bel = GradientLoFiBel(
+            **bel,
+            S=jnp.zeros((memory_size, len(init_mean))),
+            T=jnp.zeros((memory_size, len(init_mean))),
+        )
+        
+        return bel
+        
+    @partial(jit, static_argnums=(0,))
+    def predict_state(
+        self,
+        bel: GradientLoFiBel,
+    ) -> GradientLoFiBel:
+        alpha = self.dynamics_covariance_inflation_factor
+
+        # Inflate posterior covariance.
+        inflate_params = core._lofi_diagonal_cov_inflate(
+            bel.pp_mean, bel.mean, bel.basis, bel.svs, bel.eta, bel.Ups, alpha, self.inflation
+        )
+        m_infl, U_infl, Lambda_infl, Ups_infl = inflate_params
+
+        # Predict dynamics.
+        pred_dynamics = core._lofi_gradient_diagonal_cov_predict(
+            bel.pp_mean, m_infl, U_infl, Lambda_infl, bel.gamma, bel.q, bel.eta, Ups_infl
+        )
+        pp_mean_pred, m_pred, U_pred, Lambda_pred, eta_pred, Ups_pred , S_pred, T_pred = \
+            pred_dynamics
+
+        # Update belief 
+        bel_pred = bel.replace(
+            pp_mean=pp_mean_pred,
+            mean=m_pred,
+            basis=U_pred,
+            svs=Lambda_pred,
+            eta=eta_pred,
+            Ups=Ups_pred,
+            S=S_pred,
+            T=T_pred,
+        )
+
+        return bel_pred
+    
+    def _update_mean(
+        self,
+        bel: GradientLoFiBel,
+        m_prev: Float[Array, "state_dim"],
+        x: Float[Array, "input_dim"],
+        y: Float[Array, "output_dim"],
+    ) -> GradientLoFiBel:
+        m, Ups, S, T = bel.mean, bel.Ups, bel.S, bel.T
+        gll = -jax.grad(self.log_likelihood, argnums=0)(m, x, y)
+        additive_term = gll/Ups[:,0] - S.T @ (T @ gll)
+        m_cond = m - self.learning_rate * (m - m_prev + additive_term)
+        bel_cond = bel.replace(mean=m_cond)
+        
+        return bel_cond
+    
+    def _update_precision(
+        self,
+        bel: GradientLoFiBel,
+        x: Float[Array, "input_dim"],
+        y: Float[Array, "output_dim"],
+    ) -> GradientLoFiBel:
+        bel_cond = super().update_state(bel, x, y)
+        bel_cond = bel.replace(
+            basis=bel_cond.basis,
+            svs=bel_cond.svs,
+            Ups=bel_cond.Ups,
+            nobs=bel_cond.nobs,
+            obs_noise_var=bel_cond.obs_noise_var,
+        )
+        
+        return bel_cond
+    
+    @partial(jit, static_argnums=(0,))
+    def update_state(
+        self, 
+        bel: GradientLoFiBel,
+        x: Float[Array, "input_dim"],
+        y: Float[Array, "output_dim"],
+    ) -> GradientLoFiBel:
+        m_prev = bel.mean
+        def partial_step(_, bel):
+            bel = self._update_mean(bel, m_prev, x, y)
+            return bel
+        bel = jax.lax.fori_loop(0, self.n_replay-1, partial_step, bel)
+        bel = self._update_mean(bel, m_prev, x, y)
+        bel_cond = self._update_precision(bel, x, y)
+        
+        return bel_cond
