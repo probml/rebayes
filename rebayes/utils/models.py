@@ -100,6 +100,7 @@ def _initialize_classification(
     model_dict = {
         "model": model,
         "flat_params": flat_params,
+        "unflatten_fn": unflatten_fn,
         "apply_fn": apply_fn,
         "emission_mean_function": emission_mean_function,
         "emission_cov_function": emission_cov_function,
@@ -173,6 +174,7 @@ def _initialize_regression(
     model_dict = {
         "model": model,
         "flat_params": flat_params,
+        "unflatten_fn": unflatten_fn,
         "apply_fn": apply_fn,
         "emission_mean_function": emission_mean_function,
         "emission_cov_function": emission_cov_function,
