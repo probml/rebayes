@@ -71,10 +71,6 @@ def _initialize_classification(
     apply_fn = lambda w, x: \
         model.apply({'params': unflatten_fn(w)}, x,
                     capture_intermediates=capture_intermediates)
-    if capture_intermediates:
-        apply_fn = lambda w, x: (apply_fn(w, x)[0].ravel(), apply_fn(w, x)[1])
-    else:
-        apply_fn = lambda w, x: apply_fn(w, x).ravel()
     if output_dim == 1:
         # Binary classification
         sigmoid_fn = lambda w, x: \
