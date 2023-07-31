@@ -62,16 +62,21 @@ def _initialize_classification(
     input_dim: int,
     output_dim: int,
     homogenize_cov: bool = False,
+    capture_intermediates: bool = False,
 ) -> dict:
     """Initialize generic classification model.
     """
     params = model.init(key, jnp.ones(input_dim))['params']
     flat_params, unflatten_fn = ravel_pytree(params)
-    apply_fn = lambda w, x: model.apply({'params': unflatten_fn(w)}, x).ravel()
+    apply_fn = lambda w, x: \
+        model.apply({'params': unflatten_fn(w)}, x,
+                    capture_intermediates=capture_intermediates).ravel()
     if output_dim == 1:
         # Binary classification
         sigmoid_fn = lambda w, x: \
             jnp.clip(jax.nn.sigmoid(apply_fn(w, x)), 1e-4, 1-1e-4).ravel()
+        if capture_intermediates:
+            sigmoid_fn = lambda w, x: sigmoid_fn(w, x)[0]
         emission_mean_function = lambda w, x: sigmoid_fn(w, x)
         emission_cov_function = lambda w, x: \
             sigmoid_fn(w, x) * (1 - sigmoid_fn(w, x))
@@ -80,6 +85,9 @@ def _initialize_classification(
     else:
         # Multiclass classification
         emission_mean_function = lambda w, x: jax.nn.softmax(apply_fn(w, x))
+        if capture_intermediates:
+            emission_mean_function = lambda w, x: \
+                emission_mean_function(w, x)[0]
         def emission_cov_function(w, x):
             ps = emission_mean_function(w, x)
             # Add diagonal to avoid singularity
@@ -105,6 +113,7 @@ def initialize_classification_cnn(
     input_dim: Sequence[int] = (1, 28, 28, 1),
     output_dim: int = 10,
     homogenize_cov: bool = False,
+    capture_intermediates: bool = False,
 ) -> dict:
     """Initialize a CNN for classification.
     """
@@ -112,7 +121,8 @@ def initialize_classification_cnn(
         key = jr.PRNGKey(key)
     model = CNN(input_dim=input_dim, output_dim=output_dim)
     model_dict = _initialize_classification(key, model, input_dim, 
-                                            output_dim, homogenize_cov)
+                                            output_dim, homogenize_cov,
+                                            capture_intermediates)
     
     return model_dict
 
@@ -123,6 +133,7 @@ def initialize_classification_mlp(
     hidden_dims: Sequence[int] = (500, 500,),
     output_dim: int = 10,
     homogenize_cov: bool = False,
+    capture_intermediates: bool = False,
 ) -> dict:
     """Initialize an MLP for classification.
     """
@@ -131,7 +142,8 @@ def initialize_classification_mlp(
     features = (*hidden_dims, output_dim)
     model = MLP(features=features)
     model_dict = _initialize_classification(key, model, input_dim,
-                                            output_dim, homogenize_cov)
+                                            output_dim, homogenize_cov,
+                                            capture_intermediates)
     
     return model_dict
 
@@ -145,13 +157,18 @@ def _initialize_regression(
     input_dim: Sequence[int],
     output_dim: int,
     emission_cov: float = 1.0,
+    capture_intermediates: bool = False,
 ) -> dict:
     """Initialize generic regression model.
     """
     params = model.init(key, jnp.ones(input_dim))['params']
     flat_params, unflatten_fn = ravel_pytree(params)
-    apply_fn = lambda w, x: model.apply({'params': unflatten_fn(w)}, x).ravel()
+    apply_fn = lambda w, x: \
+        model.apply({'params': unflatten_fn(w)}, x,
+                     capture_intermediates=capture_intermediates).ravel()
     emission_mean_function = apply_fn
+    if capture_intermediates:
+        emission_mean_function = lambda w, x: emission_mean_function(w, x)[0]
     emission_cov_function = lambda w, x: emission_cov * jnp.eye(output_dim)
     model_dict = {
         "model": model,
@@ -168,7 +185,8 @@ def initialize_regression_cnn(
     key: int = 0,
     input_dim: Sequence[int] = (1, 28, 28, 1),
     output_dim: int = 1,
-    emission_cov: float = 1.0
+    emission_cov: float = 1.0,
+    capture_intermediates: bool = False,
 ) -> dict:
     """Initialize a CNN for regression.
     """
@@ -176,7 +194,8 @@ def initialize_regression_cnn(
         key = jr.PRNGKey(key)
     model = CNN(input_dim=input_dim, output_dim=output_dim)
     model_dict = _initialize_regression(key, model, input_dim, 
-                                        output_dim, emission_cov)
+                                        output_dim, emission_cov,
+                                        capture_intermediates)
     
     return model_dict
 
@@ -186,7 +205,8 @@ def initialize_regression_mlp(
     input_dim: Sequence[int] = (1, 28, 28, 1),
     hidden_dims: Sequence[int] = (500, 500,),
     output_dim: int = 1,
-    emission_cov: float = 1.0
+    emission_cov: float = 1.0,
+    capture_intermediates: bool = False,
 ) -> dict:
     """Initialize an MLP for regression.
     """
@@ -195,6 +215,7 @@ def initialize_regression_mlp(
     features = (*hidden_dims, output_dim)
     model = MLP(features=features)
     model_dict = _initialize_regression(key, model, input_dim,
-                                        output_dim, emission_cov)
+                                        output_dim, emission_cov,
+                                        capture_intermediates)
     
     return model_dict
