@@ -2,6 +2,7 @@ import argparse
 from functools import partial
 import json
 from pathlib import Path
+import pickle
 
 from bayes_opt import BayesianOptimization
 import flax
@@ -25,7 +26,7 @@ import demos.collas.hparam_tune as hparam_tune
 import demos.collas.train_utils as train_utils
 import demos.collas.run_classification_experiments as experiments
 
-AGENT_TYPES = ["fcekf", "offline-sgd"]
+AGENT_TYPES = ["fcekf", "neural-linear", "neural-stitching"]
 
 PBOUNDS = {
     "fcekf": {
@@ -34,7 +35,7 @@ PBOUNDS = {
         'log_dynamics_cov': (-90, -90),
         'log_alpha': (-90, -90),
     },
-    "offline-sgd": {
+    "sgd": {
         'log_learning_rate': (-10.0, 2.0)
     }
 }
@@ -183,7 +184,7 @@ def tune_and_store_hyperparameters(
 ):  
     print(f"Tuning {agent_type} hyperparameters...")
     pbounds = PBOUNDS[agent_type]
-    if agent_type == "offline-sgd":
+    if agent_type == "sgd":
         def bbf_offline_sgd(log_learning_rate):
             lr = jnp.exp(log_learning_rate).item()
             _, losses = train_offline_sgd(model_init_fn, X, y, learning_rate=lr)
@@ -225,12 +226,14 @@ def tune_and_store_hyperparameters(
 
 def main(cl_args):
     # Training dataset
-    X_train, y_train = generate_dataset(cl_args.n_train, 0.1, _f1, 0, 
+    train_fn = _f1 if cl_args.train_dataset_type == 1 else _f2
+    eval_fn =  _f1 if cl_args.eval_dataset_type == 1 else _f2
+    X_train, y_train = generate_dataset(cl_args.n_train, 0.1, train_fn, 0, 
                                         in_between=True)
     
-    # OOD dataset
-    X_ood, y_ood = generate_dataset(cl_args.n_train, 0.1, _f2, 1, 
-                                    in_between=True)
+    # Eval dataset
+    X_eval, y_eval = generate_dataset(cl_args.n_train, 0.1, eval_fn, 1,
+                                      in_between=True)
     
     # Test dataset
     X_test = jnp.linspace(-5, 5, 200)
@@ -239,11 +242,14 @@ def main(cl_args):
     model_init_fn = partial(models.initialize_regression_mlp,
                             input_dim=(1,), hidden_dims=cl_args.mlp_features,
                             emission_cov=0.1)
+    model = model_init_fn(0)
     
     # Tune hyperparameters
+    agent_type = "sgd" if "linear" in cl_args.agent else cl_args.agent
     config_path = Path("configs")
     Path(config_path).mkdir(parents=True, exist_ok=True)
-    hparam_path = f"mlp_{cl_args.mlp_features}_n_train_{cl_args.n_train}_{cl_args.agent}"
+    hparam_path = f"dataset_{cl_args.train_dataset_type}_" + \
+        f"mlp_{cl_args.mlp_features}_n_train_{cl_args.n_train}_{agent_type}"
     if cl_args.stitch_layer != -1:
         hparam_path += f"_stitch_{cl_args.stitch_layer}"
     hparam_path = Path(config_path, f"{hparam_path}.json")
@@ -251,16 +257,112 @@ def main(cl_args):
     if cl_args.hyperparameters != "eval_only":
         agent_hparams = \
             tune_and_store_hyperparameters(
-                cl_args.agent, hparam_path, model_init_fn, X_train, y_train,
+                agent_type, hparam_path, model_init_fn, X_train, y_train,
             )
     else:
         try:
             agent_hparams = json.load(open(hparam_path, "r"))
         except FileNotFoundError:
-            raise ValueError(f"Hyperparameters for {cl_args.agent} not found!")
-    
-    
+            raise ValueError(f"Hyperparameters for {agent_type} not found!")
+        
+    # Output
+    output_path = Path("outputs")
+    Path(output_path).mkdir(parents=True, exist_ok=True)
+    if agent_type == "fcekf":
+        estimator = hparam_tune.build_estimator(
+            model_init_fn, agent_hparams, "fcekf", False
+        )
+        model = model_init_fn()
+        # Train
+        bel, _ = estimator["agent"].scan(
+            model["flat_params"], estimator["init_cov"],
+            X_train, y_train,
+        )
+        
+        # Evaluate
+        y_preds = vmap(model["apply_fn"], (None, 0))(bel.mean, X_test).ravel()
+        y_cov = vmap(
+            estimator["agent"].predict_obs_cov, (None, 0)
+        )(bel, X_test).ravel()
+        y_std = jnp.sqrt(y_cov)
+    elif agent_type == "sgd":
+        # Train
+        learning_rate = agent_hparams["learning_rate"]
+        state, _ = train_offline_sgd(model_init_fn, X_train, y_train,
+                                     learning_rate=learning_rate)
+        
+        # Neural-linear
+        if cl_args.agent == "neural-linear":
+            y_preds = vmap(model["apply_fn"], (None, 0))(state.params, X_test).ravel()
+            abridged_model = generate_sub_networks(
+                model_init_fn, state.params, 0, 2
+            )
+            phi_train = vmap(abridged_model["apply_fn"])(X_train)
+            phi_test = vmap(abridged_model["apply_fn"])(X_test)
+            y_cov = phi_test @ jnp.linalg.pinv(phi_train.T @ phi_train/0.3 +
+                                               jnp.eye(phi_train.shape[-1])) \
+                                                   @ phi_test.T
+            y_cov += 1e-2 * jnp.eye(len(y_cov))
+            y_std = jnp.sqrt(jnp.diag(y_cov))
+        
+        # Neural-stitching
+        if cl_args.agent == "neural-stitching":
+            ood = "_ood_" if cl_args.ood else ""
+            hparam_path = Path(
+                config_path, f"pretrain_{cl_args.train_dataset_type}_" + \
+                    f"eval_{cl_args.eval_dataset_type}_" + \
+                        f"mlp_{cl_args.mlp_features}_n_train_" + \
+                        f"{cl_args.n_train}{ood}_stitch_{cl_args.stitch_layer}.json"
+            )
+            if cl_args.stitching_hyperparameters != "eval_only":
+                model1 = generate_sub_networks(
+                    model_init_fn, state.params, 0, cl_args.stitch_layer
+                )
+                model2 = generate_sub_networks(
+                    model_init_fn, state.params, cl_args.stitch_layer, -1
+                )
+                stitch_model_init_fn = lambda key=0: \
+                    construct_linear_stitching(model1, model2, key=key)
 
+                stitch_agent_hparams = \
+                    tune_and_store_hyperparameters(
+                        agent_type, hparam_path, stitch_model_init_fn, 
+                        X_eval, y_eval,
+                    )
+            else:
+                try:
+                    stitch_agent_hparams = json.load(open(hparam_path, "r"))
+                except FileNotFoundError:
+                    raise ValueError(f"Hyperparameters for {cl_args.agent} not found!")
+            
+            # Evaluate
+            stitch_estimator = hparam_tune.build_estimator(
+                stitch_model_init_fn, stitch_agent_hparams, "fcekf", False
+            )
+            stitch_model = stitch_model_init_fn()
+            stitch_bel, _ = stitch_estimator["agent"].scan(
+                stitch_model["flat_params"], stitch_estimator["init_cov"],
+                X_eval, y_eval,
+            )
+            y_preds = vmap(stitch_model["apply_fn"], (None, 0))(
+                stitch_bel.mean, X_test
+            ).ravel()
+            y_cov = vmap(
+                stitch_estimator["agent"].predict_obs_cov, (None, 0)
+            )(stitch_bel, X_test).ravel()
+            y_std = jnp.sqrt(y_cov)
+    else:
+        raise ValueError(f"Agent {cl_args.agent} not supported!")
+    
+    # Save result
+    result = {
+        "y_preds": y_preds,
+        "y_std": y_std,
+    }
+    result_path = Path(output_path, f"{hparam_path.stem}.pkl")
+    with open(result_path, "wb") as f:
+        pickle.dump(result, f)
+        
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -268,19 +370,32 @@ if __name__ == "__main__":
     # Number of training examples
     parser.add_argument("--n_train", type=int, default=200)
     
+    # Training dataset
+    parser.add_argument("--train_dataset_type", type=int, default=1,
+                        choices=[1, 2])
+    
+    # Evaluation dataset
+    parser.add_argument("--eval_dataset_type", type=int, default=1,
+                        choices=[1, 2])
+    
     # MLP hidden dimensions
     parser.add_argument("--mlp_features", type=_check_positive_int, nargs="+",
                         default=[50, 50, 50])
     
     # List of agents to use
-    parser.add_argument("--agent", type=str, default="offline-sgd",
+    parser.add_argument("--agent", type=str, default="neural-linear",
                         choices=AGENT_TYPES)
     
-    # Layer to stitch (-1 means no stitching)
-    parser.add_argument("--stitch_layer", type=int, default=-1)
+    # Layer to stitch
+    parser.add_argument("--stitch_layer", type=_check_positive_int, default=1)
     
     # Tune the hyperparameters of the agents
     parser.add_argument("--hyperparameters", type=str, default="tune_and_eval",
+                        choices=["tune_and_eval", "tune_only", "eval_only"])
+    
+    # Tune the hyperparameters of the stitching agents
+    parser.add_argument("--stitching_hyperparameters", type=str, 
+                        default="tune_and_eval",
                         choices=["tune_and_eval", "tune_only", "eval_only"])
     
     # Whether to eval on OOD
