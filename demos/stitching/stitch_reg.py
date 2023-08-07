@@ -26,7 +26,8 @@ import demos.collas.hparam_tune as hparam_tune
 import demos.collas.train_utils as train_utils
 import demos.collas.run_classification_experiments as experiments
 
-AGENT_TYPES = ["fcekf", "neural-linear", "neural-stitching"]
+AGENT_TYPES = ["fcekf", "neural-linear", "full-neural-linear",
+               "neural-stitching"]
 
 PBOUNDS = {
     "fcekf": {
@@ -245,13 +246,11 @@ def main(cl_args):
     model = model_init_fn(0)
     
     # Tune hyperparameters
-    agent_type = "sgd" if "linear" in cl_args.agent else cl_args.agent
+    agent_type = "sgd" if "neural" in cl_args.agent else cl_args.agent
     config_path = Path("configs")
     Path(config_path).mkdir(parents=True, exist_ok=True)
     hparam_path = f"dataset_{cl_args.train_dataset_type}_" + \
         f"mlp_{cl_args.mlp_features}_n_train_{cl_args.n_train}_{agent_type}"
-    if cl_args.stitch_layer != -1:
-        hparam_path += f"_stitch_{cl_args.stitch_layer}"
     hparam_path = Path(config_path, f"{hparam_path}.json")
     
     if cl_args.hyperparameters != "eval_only":
@@ -284,36 +283,56 @@ def main(cl_args):
         y_cov = vmap(
             estimator["agent"].predict_obs_cov, (None, 0)
         )(bel, X_test).ravel()
-        y_std = jnp.sqrt(y_cov)
+        y_stds = jnp.sqrt(y_cov)
     elif agent_type == "sgd":
+        ood = "_ood_" if cl_args.eval_ood else ""
+        hparam_path_name = f"pretrain_{cl_args.train_dataset_type}_" + \
+            f"eval_{cl_args.eval_dataset_type}_" + \
+            f"mlp_{cl_args.mlp_features}_n_train_{cl_args.n_train}{ood}"
+            
         # Train
         learning_rate = agent_hparams["learning_rate"]
         state, _ = train_offline_sgd(model_init_fn, X_train, y_train,
                                      learning_rate=learning_rate)
         
         # Neural-linear
-        if cl_args.agent == "neural-linear":
+        if "neural-linear" in cl_args.agent:
             y_preds = vmap(model["apply_fn"], (None, 0))(state.params, X_test).ravel()
-            abridged_model = generate_sub_networks(
-                model_init_fn, state.params, 0, 2
-            )
-            phi_train = vmap(abridged_model["apply_fn"])(X_train)
-            phi_test = vmap(abridged_model["apply_fn"])(X_test)
+            if cl_args.agent == "full-neural-linear":
+                hparam_path_name += "_full_neural_linear"
+                hparam_path = Path(config_path, hparam_path_name)
+                n_features = len(cl_args.mlp_features)
+                abridged_models = [
+                    generate_sub_networks(model_init_fn, state.params, 0, i+1)
+                    for i in range(n_features)
+                ]
+                phi_train = jnp.concatenate([
+                    vmap(abridged_model["apply_fn"])(X_train)
+                    for abridged_model in abridged_models
+                ], axis=1)
+                phi_test = jnp.concatenate([
+                    vmap(abridged_model["apply_fn"])(X_test)
+                    for abridged_model in abridged_models
+                ], axis=1)
+            else:
+                hparam_path_name += "_neural_linear"
+                hparam_path = Path(config_path, hparam_path_name)
+                abridged_model = generate_sub_networks(
+                    model_init_fn, state.params, 0, 2
+                )
+                phi_train = vmap(abridged_model["apply_fn"])(X_train)
+                phi_test = vmap(abridged_model["apply_fn"])(X_test)
+                
             y_cov = phi_test @ jnp.linalg.pinv(phi_train.T @ phi_train/0.3 +
-                                               jnp.eye(phi_train.shape[-1])) \
-                                                   @ phi_test.T
+                                            jnp.eye(phi_train.shape[-1])) \
+                                                @ phi_test.T
             y_cov += 1e-2 * jnp.eye(len(y_cov))
-            y_std = jnp.sqrt(jnp.diag(y_cov))
+            y_stds = jnp.sqrt(jnp.diag(y_cov))
         
         # Neural-stitching
         if cl_args.agent == "neural-stitching":
-            ood = "_ood_" if cl_args.ood else ""
-            hparam_path = Path(
-                config_path, f"pretrain_{cl_args.train_dataset_type}_" + \
-                    f"eval_{cl_args.eval_dataset_type}_" + \
-                        f"mlp_{cl_args.mlp_features}_n_train_" + \
-                        f"{cl_args.n_train}{ood}_stitch_{cl_args.stitch_layer}.json"
-            )
+            hparam_path_name += f"_neural_stitching_{cl_args.stitch_layer}.json"
+            hparam_path = Path(config_path, hparam_path_name)
             if cl_args.stitching_hyperparameters != "eval_only":
                 model1 = generate_sub_networks(
                     model_init_fn, state.params, 0, cl_args.stitch_layer
@@ -326,7 +345,7 @@ def main(cl_args):
 
                 stitch_agent_hparams = \
                     tune_and_store_hyperparameters(
-                        agent_type, hparam_path, stitch_model_init_fn, 
+                        "fcekf", hparam_path, stitch_model_init_fn, 
                         X_eval, y_eval,
                     )
             else:
@@ -350,14 +369,14 @@ def main(cl_args):
             y_cov = vmap(
                 stitch_estimator["agent"].predict_obs_cov, (None, 0)
             )(stitch_bel, X_test).ravel()
-            y_std = jnp.sqrt(y_cov)
+            y_stds = jnp.sqrt(y_cov)
     else:
         raise ValueError(f"Agent {cl_args.agent} not supported!")
     
     # Save result
     result = {
         "y_preds": y_preds,
-        "y_std": y_std,
+        "y_stds": y_stds,
     }
     result_path = Path(output_path, f"{hparam_path.stem}.pkl")
     with open(result_path, "wb") as f:
