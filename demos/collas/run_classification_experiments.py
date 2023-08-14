@@ -18,7 +18,8 @@ import demos.collas.hparam_tune as hparam_tune
 import demos.collas.train_utils as train_utils
 
 AGENT_TYPES = ["lofi", "fdekf", "vdekf", "sgd-rb", "adam-rb",]
-AGENT_ITER_TYPES = [*AGENT_TYPES, "lofi-it", "fdekf-it", "vdekf-it"]
+AGENT_ALL_TYPES = [*AGENT_TYPES, "lofi-it", "fdekf-it", "vdekf-it",
+                   "lofi-grad"]
 
 
 def _check_positive_int(value):
@@ -100,6 +101,25 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
         if lofi_cov_type == "spherical" or lofi_cov_type == "both":
             agents.update({
                 f'lofi-sph-{rank}': {
+                    'memory_size': rank,
+                    'inflation': "hybrid",
+                    'lofi_method': "spherical",
+                    'pbounds': filter_pbounds,
+                } for rank in ranks
+            })
+    if "lofi-grad" in agent_args:
+        if lofi_cov_type == "diagonal" or lofi_cov_type == "both":
+            agents.update({
+                f'lofi-{rank}-grad': {
+                    'memory_size': rank,
+                    'inflation': "hybrid",
+                    'lofi_method': "diagonal",
+                    'pbounds': filter_pbounds,
+                } for rank in ranks
+            })
+        if lofi_cov_type == "spherical" or lofi_cov_type == "both":
+            agents.update({
+                f'lofi-sph-{rank}-grad': {
                     'memory_size': rank,
                     'inflation': "hybrid",
                     'lofi_method': "spherical",
@@ -492,7 +512,7 @@ if __name__ == "__main__":
     
     # List of agents to use
     parser.add_argument("--agents", type=str, nargs="+", default=AGENT_TYPES,
-                        choices=AGENT_ITER_TYPES)
+                        choices=AGENT_ALL_TYPES)
     
     # Tune momentum for SGD
     parser.add_argument("--tune_sgd_momentum", action="store_true")

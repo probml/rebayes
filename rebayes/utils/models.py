@@ -79,7 +79,7 @@ def _initialize_classification(
             sigmoid_fn = lambda w, x: sigmoid_fn(w, x)[0]
         emission_mean_function = lambda w, x: sigmoid_fn(w, x)
         emission_cov_function = lambda w, x: \
-            sigmoid_fn(w, x) * (1 - sigmoid_fn(w, x))
+            jnp.atleast_2d(sigmoid_fn(w, x) * (1 - sigmoid_fn(w, x)))
         if homogenize_cov:
             emission_cov_function = lambda w, x: 0.5 * 0.5
     else:
@@ -92,7 +92,7 @@ def _initialize_classification(
             ps = emission_mean_function(w, x)
             # Add diagonal to avoid singularity
             cov = jnp.diag(ps) - jnp.outer(ps, ps) + 1e-3 * jnp.eye(len(ps))
-            return cov
+            return jnp.atleast_2d(cov)
         if homogenize_cov:
             ps = jnp.ones(output_dim) / output_dim
             emission_cov_function = lambda w, x: \

@@ -126,7 +126,7 @@ def bbf_lofi_it(
     learning_rate = jnp.exp(log_learning_rate).item()
 
     if lofi_method == "diagonal":
-        lofi_estimator = lofi.RebayesGradientLoFi
+        lofi_estimator = lofi.RebayesIteratedLoFi
     else:
         raise ValueError("method must be 'diagonal'")
     
@@ -146,6 +146,82 @@ def bbf_lofi_it(
         emission_dist=emission_dist,
         n_replay=n_replay,
         learning_rate=learning_rate,
+    )
+    
+    test_cb_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test,
+                      "apply_fn": model_dict["apply_fn"], "key": jr.PRNGKey(0),
+                      **kwargs}
+
+    result = []
+    for i in range(n_seeds):
+        model_dict = init_fn(key=i)
+        flat_params = model_dict["flat_params"]
+        if callback_at_end:
+            bel, _ = estimator.scan(flat_params, initial_covariance, 
+                                    X_train, y_train, progress_bar=False)
+            metric = jnp.array(list(callback(bel, **test_cb_kwargs).values()))
+        else:
+            _, metric = estimator.scan(flat_params, initial_covariance, 
+                                       X_train, y_train, progress_bar=False, 
+                                       callback=callback, **test_cb_kwargs)
+            metric = jnp.array(list(metric.values())).mean()
+        result.append(metric)
+    result = jnp.array(result).mean()
+    
+    if jnp.isnan(result) or jnp.isinf(result):
+        result = -1e8
+        
+    return result
+
+
+def bbf_lofi_grad(
+    log_init_cov,
+    log_1m_dynamics_weights,
+    log_dynamics_cov,
+    log_alpha,
+    # Specify before running
+    init_fn,
+    train,
+    test,
+    callback,
+    memory_size,
+    inflation = "hybrid",
+    lofi_method = "diagonal",
+    callback_at_end=True,
+    n_seeds=5,
+    classification=True,
+    **kwargs,
+):
+    """
+    Black-box function for Bayesian optimization.
+    """
+    X_train, *_, y_train = train
+    X_test, *_, y_test = test
+
+    dynamics_weights = 1 - jnp.exp(log_1m_dynamics_weights).item()
+    dynamics_covariance = jnp.exp(log_dynamics_cov).item()
+    initial_covariance = jnp.exp(log_init_cov).item()
+    alpha = jnp.exp(log_alpha).item()
+
+    if lofi_method == "diagonal":
+        lofi_estimator = lofi.RebayesGradientLoFi
+    else:
+        raise ValueError("method must be 'diagonal'")
+    
+    model_dict = init_fn(key=0)
+    
+    emission_dist = lambda mean, cov: tfd.OneHotCategorical(probs=mean) \
+        if classification else tfd.Normal(loc=mean, scale=jnp.sqrt(cov))
+    
+    estimator = lofi_estimator(
+        dynamics_weights=dynamics_weights,
+        dynamics_covariance=dynamics_covariance,
+        emission_mean_function=model_dict["emission_mean_function"],
+        emission_cov_function=model_dict["emission_cov_function"],
+        dynamics_covariance_inflation_factor=alpha,
+        memory_size=memory_size,
+        inflation=inflation,
+        emission_dist=emission_dist,
     )
     
     test_cb_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test,
@@ -442,6 +518,8 @@ def create_optimizer(
             bbf = bbf_ekf
         elif "lofi-it" in method:
             bbf = bbf_lofi_it
+        elif "lofi-grad" in method:
+            bbf = bbf_lofi_grad
         elif "lofi" in method:
             bbf = bbf_lofi
         bbf_partial = partial(
@@ -544,6 +622,8 @@ def build_estimator(init_fn, hparams, method, classification=True, **kwargs):
         else:
             estimator = lofi.RebayesLoFiDiagonal
         if "it" in method:
+            estimator = lofi.RebayesIteratedLoFi
+        if "grad" in method:
             estimator = lofi.RebayesGradientLoFi
         init_covariance = hparams.pop("initial_covariance")
         estimator = estimator(
@@ -556,10 +636,15 @@ def build_estimator(init_fn, hparams, method, classification=True, **kwargs):
     elif "sgd" in method or "adam" in method:
         if "optimizer" in kwargs:
             if kwargs["optimizer"] == "sgd":
-                tx = optax.sgd(
-                    learning_rate=hparams["learning_rate"],
-                    momentum=hparams["momentum"],
-                )
+                if "momentum" in hparams:
+                    tx = optax.sgd(
+                        learning_rate=hparams["learning_rate"],
+                        momentum=hparams["momentum"],
+                    )
+                else:
+                    tx = optax.sgd(
+                        learning_rate=hparams["learning_rate"],
+                    )
             elif kwargs["optimizer"] == "adam":
                 tx = optax.adam(
                     learning_rate=hparams["learning_rate"],
