@@ -936,7 +936,6 @@ def _lofi_diagonal_gradient_resample_condition_on(
     Ups_cond = Ups + jnp.einsum('ij,ij->i', W_extra, W_extra)[:, jnp.newaxis]
     
     G = jnp.linalg.pinv(jnp.eye(W_tilde.shape[1]) + W_tilde.T @ (W_tilde/Ups))
-    next_term = (W_tilde/Ups @ G) @ ((W_tilde/Ups).T @ gll)
     K = gll/Ups - (W_tilde/Ups @ G) @ ((W_tilde/Ups).T @ gll)
     m_cond = m + K.ravel()
     
