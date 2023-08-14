@@ -212,7 +212,6 @@ def bbf_lofi_grad(
     
     emission_dist = lambda mean, cov: tfd.OneHotCategorical(probs=mean) \
         if classification else tfd.Normal(loc=mean, scale=jnp.sqrt(cov))
-    
     estimator = lofi_estimator(
         dynamics_weights=dynamics_weights,
         dynamics_covariance=dynamics_covariance,
@@ -518,7 +517,7 @@ def create_optimizer(
             bbf = bbf_ekf
         elif "lofi-it" in method:
             bbf = bbf_lofi_it
-        elif "lofi-grad" in method:
+        elif "lofi" in method and "grad" in method:
             bbf = bbf_lofi_grad
         elif "lofi" in method:
             bbf = bbf_lofi
