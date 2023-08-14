@@ -537,6 +537,11 @@ class RebayesIteratedLoFi(RebayesLoFiDiagonal):
                          emission_cov_function, emission_dist, adaptive_emission_cov, 
                          dynamics_covariance_inflation_factor, memory_size, steady_state, 
                          inflation, use_svd)
+        # def log_likelihood(params, x, y):
+        #     # Linearized Gaussian observation model
+        #     model_mean = self.emission_mean_function(params, x)
+        #     cov = self.emission_cov_function(params, x)
+        #     linearized_mean = 
         self.log_likelihood = lambda params, x, y: \
             jnp.sum(
                 emission_dist(self.emission_mean_function(params, x),
@@ -665,7 +670,6 @@ class GradientLoFiBel:
     nobs: int
     obs_noise_var: float
 
-
 class RebayesGradientLoFi(RebayesLoFiDiagonal):
     def __init__(
         self,
@@ -682,9 +686,8 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
         inflation: str = 'bayesian',
         use_svd: bool = True,
         learning_rate: float = 0.01,
-        method: str = "resample",
+        method: str = "re-sample",
         n_sample: int = 10,
-        output_dim: int = 1,
     ):
         super().__init__(dynamics_weights, dynamics_covariance, emission_mean_function, 
                          emission_cov_function, emission_dist, adaptive_emission_cov, 
@@ -698,7 +701,6 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
         self.learning_rate = learning_rate
         self.method = method
         self.n_sample = n_sample
-        self.output_dim = output_dim
         
         # Update function
         if self.method == "re-sample":

@@ -920,11 +920,12 @@ def _lofi_diagonal_gradient_resample_condition_on(
     ys = emission_dist(m_Y(m), Cov_Y(m)).sample(seed=key, sample_shape=(n_sample,))
     # Compute gradients and average
     grad_fn = lambda y: grad(log_likelihood, argnums=0)(m, x, y)
-    gll = jnp.mean(vmap(grad_fn)(ys), axis=0)
+    pseudo_gll = jnp.mean(vmap(grad_fn)(ys), axis=0).reshape(-1, 1)
+    gll = grad_fn(y).reshape(-1, 1)
         
     R_chol = jnp.linalg.cholesky(R)
     A = jnp.linalg.lstsq(R_chol, jnp.eye(C))[0].T
-    W_tilde = jnp.hstack([Lambda * U, gll.reshape(P, -1)])
+    W_tilde = jnp.hstack([Lambda * U, pseudo_gll.reshape(P, -1)])
     
     # Update the U matrix
     u, lamb = _fast_svd(W_tilde)
@@ -935,8 +936,9 @@ def _lofi_diagonal_gradient_resample_condition_on(
     Ups_cond = Ups + jnp.einsum('ij,ij->i', W_extra, W_extra)[:, jnp.newaxis]
     
     G = jnp.linalg.pinv(jnp.eye(W_tilde.shape[1]) + W_tilde.T @ (W_tilde/Ups))
-    K = gll @ A.T/Ups - (W_tilde/Ups @ G) @ ((W_tilde/Ups).T @ gll @ A.T)
-    m_cond = m + K @ (y - yhat)
+    next_term = (W_tilde/Ups @ G) @ ((W_tilde/Ups).T @ gll)
+    K = gll/Ups - (W_tilde/Ups @ G) @ ((W_tilde/Ups).T @ gll)
+    m_cond = m + K.ravel()
     
     return m_cond, U_cond, Lambda_cond, Ups_cond
 
