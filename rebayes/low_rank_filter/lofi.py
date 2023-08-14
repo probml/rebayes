@@ -6,6 +6,7 @@ import jax
 from jax import jit
 from jax.flatten_util import ravel_pytree
 import jax.numpy as jnp
+import jax.random as jr
 from jaxtyping import Float, Array
 import tensorflow_probability.substrates.jax as tfp
 
@@ -554,7 +555,7 @@ class RebayesIteratedLoFi(RebayesLoFiDiagonal):
         init_mean = initial_mean # Initial mean
         memory_size = self.memory_size
         bel = super().init_bel(initial_mean, initial_covariance)
-        bel = GradientLoFiBel(
+        bel = IteratedLoFiBel(
             **bel,
             S=jnp.zeros((memory_size, len(init_mean))),
             T=jnp.zeros((memory_size, len(init_mean))),
@@ -576,7 +577,7 @@ class RebayesIteratedLoFi(RebayesLoFiDiagonal):
         m_infl, U_infl, Lambda_infl, Ups_infl = inflate_params
 
         # Predict dynamics.
-        pred_dynamics = core._lofi_gradient_diagonal_cov_predict(
+        pred_dynamics = core._lofi_iterated_diagonal_cov_predict(
             bel.pp_mean, m_infl, U_infl, Lambda_infl, bel.gamma, bel.q, bel.eta, Ups_infl
         )
         pp_mean_pred, m_pred, U_pred, Lambda_pred, eta_pred, Ups_pred , S_pred, T_pred = \
@@ -649,7 +650,7 @@ class RebayesIteratedLoFi(RebayesLoFiDiagonal):
 # Gradient (Diagonal) LOFI -----------------------------------------------------
 
 @chex.dataclass
-class GradientLoFiBel(LoFiBel):
+class GradientLoFiBel:
     pp_mean: chex.Array
     mean: chex.Array
     basis: chex.Array
@@ -657,9 +658,9 @@ class GradientLoFiBel(LoFiBel):
     eta: float
     gamma: float
     q: float
-    S: chex.Array
-    T: chex.Array
-    
+    inv_temperature: float
+    momentum: chex.Array
+
     Ups: CovMat
     nobs: int
     obs_noise_var: float
@@ -680,8 +681,10 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
         steady_state: bool = False,
         inflation: str = 'bayesian',
         use_svd: bool = True,
-        n_replay: int = 10,
         learning_rate: float = 0.01,
+        method: str = "resample",
+        n_sample: int = 10,
+        output_dim: int = 1,
     ):
         super().__init__(dynamics_weights, dynamics_covariance, emission_mean_function, 
                          emission_cov_function, emission_dist, adaptive_emission_cov, 
@@ -692,8 +695,20 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
                 emission_dist(self.emission_mean_function(params, x),
                               self.emission_cov_function(params, x)).log_prob(y)
             )
-        self.n_replay = n_replay
         self.learning_rate = learning_rate
+        self.method = method
+        self.n_sample = n_sample
+        self.output_dim = output_dim
+        
+        # Update function
+        if self.method == "re-sample":
+            self.update_fn = core._lofi_diagonal_gradient_resample_condition_on
+        elif self.method == "importance-sample":
+            self.update_fn = core._lofi_diagonal_gradient_importance_condition_on
+        elif self.method == "momentum-correction":
+            self.update_fn = core._lofi_diagonal_gradient_momentum_condition_on
+        else:
+            raise ValueError("Invalid method.")
         
     def init_bel(
         self, 
@@ -702,54 +717,19 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
         X: Float[Array, "input_dim"]=None,
         y: Float[Array, "output_dim"]=None,
     ) -> GradientLoFiBel:
-        init_mean = initial_mean # Initial mean
-        memory_size = self.memory_size
+        state_dim, *_ = initial_mean.shape
         bel = super().init_bel(initial_mean, initial_covariance)
         bel = GradientLoFiBel(
             **bel,
-            S=jnp.zeros((memory_size, len(init_mean))),
-            T=jnp.zeros((memory_size, len(init_mean))),
+            inv_temperature=0.0, # Start with uniform proposal
+            momentum=jnp.zeros((state_dim,)),
         )
         
         return bel
-        
-    @partial(jit, static_argnums=(0,))
-    def predict_state(
-        self,
-        bel: GradientLoFiBel,
-    ) -> GradientLoFiBel:
-        alpha = self.dynamics_covariance_inflation_factor
-
-        # Inflate posterior covariance.
-        inflate_params = core._lofi_diagonal_cov_inflate(
-            bel.pp_mean, bel.mean, bel.basis, bel.svs, bel.eta, bel.Ups, alpha, self.inflation
-        )
-        m_infl, U_infl, Lambda_infl, Ups_infl = inflate_params
-
-        # Predict dynamics.
-        pred_dynamics = core._lofi_gradient_diagonal_cov_predict(
-            bel.pp_mean, m_infl, U_infl, Lambda_infl, bel.gamma, bel.q, bel.eta, Ups_infl
-        )
-        pp_mean_pred, m_pred, U_pred, Lambda_pred, eta_pred, Ups_pred , S_pred, T_pred = \
-            pred_dynamics
-
-        # Update belief 
-        bel_pred = bel.replace(
-            pp_mean=pp_mean_pred,
-            mean=m_pred,
-            basis=U_pred,
-            svs=Lambda_pred,
-            eta=eta_pred,
-            Ups=Ups_pred,
-            S=S_pred,
-            T=T_pred,
-        )
-
-        return bel_pred
     
     def _update_mean(
         self,
-        bel: GradientLoFiBel,
+        bel: LoFiBel,
         m_prev: Float[Array, "state_dim"],
         x: Float[Array, "input_dim"],
         y: Float[Array, "output_dim"],
@@ -764,7 +744,7 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
     
     def _update_precision(
         self,
-        bel: GradientLoFiBel,
+        bel: LoFiBel,
         x: Float[Array, "input_dim"],
         y: Float[Array, "output_dim"],
     ) -> GradientLoFiBel:
@@ -782,16 +762,32 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
     @partial(jit, static_argnums=(0,))
     def update_state(
         self, 
-        bel: GradientLoFiBel,
+        bel: LoFiBel,
         x: Float[Array, "input_dim"],
         y: Float[Array, "output_dim"],
     ) -> GradientLoFiBel:
-        m_prev = bel.mean
-        def partial_step(_, bel):
-            bel = self._update_mean(bel, m_prev, x, y)
-            return bel
-        bel = jax.lax.fori_loop(0, self.n_replay-1, partial_step, bel)
-        bel = self._update_mean(bel, m_prev, x, y)
-        bel_cond = self._update_precision(bel, x, y)
+        m, U, Lambda, Ups, nobs, obs_noise_var = \
+            bel.mean, bel.basis, bel.svs, bel.Ups, bel.nobs, bel.obs_noise_var
+        key = jr.PRNGKey(nobs)
+        
+        m_cond, U_cond, Lambda_cond, Ups_cond = \
+            self.update_fn(m, U, Lambda, Ups, self.emission_mean_function,
+                           self.emission_cov_function, x, y, self.emission_dist,
+                           self.log_likelihood, self.n_sample,
+                           self.adaptive_emission_cov, obs_noise_var, key)
+
+        # Estimate emission covariance.
+        nobs_est, obs_noise_var_est = \
+            core._lofi_estimate_noise(m_cond, self.emission_mean_function, x, y, 
+                                      nobs, obs_noise_var, self.adaptive_emission_cov)
+
+        bel_cond = bel.replace(
+            mean=m_cond,
+            basis=U_cond,
+            svs=Lambda_cond,
+            Ups=Ups_cond,
+            nobs=nobs_est,
+            obs_noise_var=obs_noise_var_est,
+        )
         
         return bel_cond
