@@ -496,6 +496,42 @@ def init_regression_agent(
     return agent, recfn
 
 
+def init_classification_agent(
+        model,
+        X_init,
+        dynamics_weights,
+        dynamics_covariance,
+        memory_size,
+        eps=1e-6,
+):
+    key = jax.random.PRNGKey(0)
+    _, dim_in = X_init.shape
+    pdummy = model.init(key, jnp.ones((1, dim_in)))
+    _, recfn = ravel_pytree(pdummy)
+
+    def apply_fn(flat_params, x):
+        return model.apply(recfn(flat_params), x)
+
+    def emission_cov_fn(flat_params, x):
+        p = apply_fn(flat_params, x)
+        return jnp.diag(p) - jnp.outer(p, p) + eps * jnp.eye(len(p))
+
+    agent = RebayesLoFiDiagonal(
+        dynamics_weights=dynamics_weights,
+        dynamics_covariance=dynamics_covariance,
+        emission_mean_function=apply_fn,
+        emission_cov_function=emission_cov_fn,
+        adaptive_emission_cov=False,
+        dynamics_covariance_inflation_factor=0.0,
+        memory_size=memory_size,
+        steady_state=False,
+        emission_dist=lambda mean, cov: tfd.Normal(loc=mean, scale=jnp.sqrt(cov))
+    )
+
+    return agent, recfn
+    
+
+
 # Iterated (Diagonal) LOFI -----------------------------------------------------
 
 @chex.dataclass
