@@ -525,7 +525,7 @@ def init_classification_agent(
         dynamics_covariance_inflation_factor=0.0,
         memory_size=memory_size,
         steady_state=False,
-        emission_dist=lambda mean, cov: tfd.Normal(loc=mean, scale=jnp.sqrt(cov))
+        emission_dist=lambda mean, cov: tfd.Categorical(probs=mean),
     )
 
     return agent, recfn
