@@ -552,7 +552,7 @@ def get_best_params(optimizer, method, nll_method="nll"):
         hparams = {
             "learning_rate": learning_rate,
         }
-        if "sgd" in method:
+        if "log_1m_momentum" in max_params:
             momentum = 1 - jnp.exp(max_params["log_1m_momentum"]).item()
             hparams["momentum"] = momentum
         if nll_method != "nll":
