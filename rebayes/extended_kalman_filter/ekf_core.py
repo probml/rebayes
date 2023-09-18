@@ -373,7 +373,7 @@ def _ensemble_stochastic_condition_on(
     
     # Compute Kalman gain
     L = ens.shape[0] # number of ensemble members
-    ens_fwd = vmap(m_Y)(ens).reshape(-1, 1)
+    ens_fwd = vmap(m_Y)(ens).reshape(L, -1)
     ens_fwd_mean = jnp.mean(ens_fwd, axis=0)
     ens_fwd_centered = ens_fwd - ens_fwd_mean
     HPHT = (ens_fwd_centered.T @ ens_fwd_centered) / (L - 1)
