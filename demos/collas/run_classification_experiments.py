@@ -17,7 +17,7 @@ import rebayes.utils.callbacks as callbacks
 import demos.collas.hparam_tune as hparam_tune
 import demos.collas.train_utils as train_utils
 
-AGENT_TYPES = ["lofi", "fdekf", "vdekf", "sgd-rb", "adam-rb",]
+AGENT_TYPES = ["lofi", "fdekf", "vdekf", "enkf", "sgd-rb", "adam-rb",]
 AGENT_ALL_TYPES = [*AGENT_TYPES, "lofi-it", "fdekf-it", "vdekf-it",
                    "lofi-grad"]
 
@@ -153,6 +153,13 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
                 'pbounds': it_filter_pbounds,
                 'n_replay': n_iter,
             } for n_iter in filter_n_iter
+        })
+    if "enkf" in agent_args:
+        agents.update({
+            f"enkf-{rank}": {
+                'pbounds': filter_pbounds,
+                'n_particles': rank,
+            } for rank in ranks
         })
     if "sgd-rb" in agent_args:
         pbounds = sgd_pbounds.copy()
