@@ -192,6 +192,30 @@ def _diagonal_dynamics_predict(m, P, gamma, Q, alpha):
     return m_pred, P_pred
 
 
+def _decay_dynamics_predict(m, P, gamma, Q, alpha, decoupled=False):
+    """Predict the next state using a non-stationary dynamics model.
+
+    Args:
+        m (D_hid,): Prior mean.
+        P (D_hid,): Prior covariance.
+        gamma (float): Dynamics decay.
+        Q (D_hid): Diagonal dynamics covariance vector.
+        alpha (float): Covariance inflation factor.
+        decoupled (bool): Whether to use decoupled dynamics.
+
+    Returns:
+        m_pred (D_hid,): Predicted mean.
+        P_pred (D_hid,): Predicted covariance diagonal elements.
+    """
+    if decoupled:
+        m_pred = m
+    else:
+        m_pred = gamma * m
+    P_pred = (1 + alpha) * (gamma**2 * P + (1 - gamma**2) * Q)
+    
+    return m_pred, P_pred
+
+
 def _ekf_estimate_noise(m, y_cond_mean, u, y, nobs, obs_noise_var, adaptive_variance=False):
     """Estimate observation noise based on empirical residual errors.
 
