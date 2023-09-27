@@ -388,6 +388,77 @@ def bbf_ekf_it(
     return result
 
 
+def bbf_ekf_ocl(
+    log_init_cov,
+    log_1m_dynamics_weights,
+    log_dynamics_cov,
+    log_alpha,
+    log_learning_rate,
+    # Specify before running
+    init_fn,
+    train,
+    test,
+    callback,
+    method="fdekf-ocl",
+    callback_at_end=True,
+    n_seeds=5,
+    classification=True,
+    **kwargs,
+):
+    """
+    Black-box function for Bayesian optimization.
+    """
+    X_train, *_, y_train = train
+    X_test, *_, y_test = test
+
+    dynamics_decay_delta = -2*jnp.log(1 - jnp.exp(log_1m_dynamics_weights)).item()
+    dynamics_covariance = jnp.exp(log_dynamics_cov).item()
+    initial_covariance = jnp.exp(log_init_cov).item()
+    alpha = jnp.exp(log_alpha).item()
+    learning_rate = jnp.exp(log_learning_rate).item()
+
+    method_name = method.split("-")[0]
+    model_dict = init_fn(key=0)
+    emission_dist = lambda mean, cov: tfd.OneHotCategorical(probs=mean) \
+        if classification else tfd.Normal(loc=mean, scale=jnp.sqrt(cov))
+    estimator = ekf.RebayesOCLEKF(
+        dynamics_decay_delta=dynamics_decay_delta,
+        dynamics_covariance=dynamics_covariance,
+        emission_mean_function=model_dict["emission_mean_function"],
+        emission_cov_function=model_dict["emission_cov_function"],
+        dynamics_covariance_inflation_factor=alpha,
+        emission_dist=emission_dist,
+        learning_rate=learning_rate,
+        method=method_name,
+        decay_dynamics_weight=True,
+    )
+
+    test_cb_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test, 
+                      "apply_fn": model_dict["apply_fn"], "key": jr.PRNGKey(0), 
+                      **kwargs}
+    
+    result = []
+    for i in range(n_seeds):
+        model_dict = init_fn(key=i)
+        flat_params = model_dict["flat_params"]
+        if callback_at_end:
+            bel, _ = estimator.scan(flat_params, initial_covariance, 
+                                    X_train, y_train, progress_bar=False)
+            metric = jnp.array(list(callback(bel, **test_cb_kwargs).values()))
+        else:
+            _, metric = estimator.scan(flat_params, initial_covariance, 
+                                       X_train, y_train, progress_bar=False, 
+                                       callback=callback, **test_cb_kwargs)
+            metric = jnp.array(list(metric.values())).mean()
+        result.append(metric)
+    result = jnp.array(result).mean()
+        
+    if jnp.isnan(result) or jnp.isinf(result):
+        result = -1e8
+
+    return result
+
+
 def bbf_enkf(
     log_init_cov,
     log_1m_dynamics_weights,
@@ -580,6 +651,8 @@ def create_optimizer(
     else:
         if "ekf-it" in method:
             bbf = bbf_ekf_it
+        elif "ekf-ocl" in method:
+            bbf = bbf_ekf_ocl
         elif "ekf" in method:
             bbf = bbf_ekf
         elif "enkf" in method:
@@ -638,13 +711,15 @@ def get_best_params(optimizer, method, nll_method="nll"):
             "initial_covariance": initial_covariance,
             "dynamics_covariance": dynamics_covariance,
             "dynamics_covariance_inflation_factor": alpha,
-        
         }
         if "lofi" in method:
             hparams["dynamics_weights"] = dynamics_weights
+        elif "ocl" in method:
+            hparams["dynamics_decay_delta"] = -2*jnp.log(1 - dynamics_weights).item()            
         else:
             hparams["dynamics_weights_or_function"] = dynamics_weights
-        if "it" in method:
+            
+        if "it" in method or "ocl" in method:
             hparams["learning_rate"] = jnp.exp(max_params["log_learning_rate"]).item()
 
     return hparams
@@ -662,6 +737,17 @@ def build_estimator(init_fn, hparams, method, classification=True, **kwargs):
         init_covariance = hparams.pop("initial_covariance")
         method_name = method.split("-")[0]
         estimator = replay_ekf.RebayesReplayEKF(
+            emission_mean_function=emission_mean_fn,
+            emission_cov_function=emission_cov_fn,
+            emission_dist=emission_dist,
+            method=method_name,
+            **hparams,
+            **kwargs,
+        )
+    elif "ekf-ocl" in method:
+        init_covariance = hparams.pop("initial_covariance")
+        method_name = method.split("-")[0]
+        estimator = ekf.RebayesOCLEKF(
             emission_mean_function=emission_mean_fn,
             emission_cov_function=emission_cov_fn,
             emission_dist=emission_dist,

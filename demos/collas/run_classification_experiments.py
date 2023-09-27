@@ -19,7 +19,7 @@ import demos.collas.train_utils as train_utils
 
 AGENT_TYPES = ["lofi", "fdekf", "vdekf", "enkf", "sgd-rb", "adam-rb",]
 AGENT_ALL_TYPES = [*AGENT_TYPES, "lofi-it", "fdekf-it", "vdekf-it",
-                   "lofi-grad"]
+                   "lofi-grad", "fdekf-ocl", "vdekf-ocl"]
 
 
 def _check_positive_int(value):
@@ -145,6 +145,10 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
                 'n_replay': n_iter,
             } for n_iter in filter_n_iter
         })
+    if "fdekf-ocl" in agent_args:
+        agents["fdekf-ocl"] = {
+            'pbounds': it_filter_pbounds,
+        }
     if "vdekf" in agent_args:
         agents["vdekf"] = {'pbounds': filter_pbounds}
     if "vdekf-it" in agent_args:
@@ -154,6 +158,10 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
                 'n_replay': n_iter,
             } for n_iter in filter_n_iter
         })
+    if "vdekf-ocl" in agent_args:
+        agents["vdekf-ocl"] = {
+            'pbounds': it_filter_pbounds,
+        }
     if "enkf" in agent_args:
         agents.update({
             f"enkf-{rank}": {
