@@ -430,7 +430,7 @@ def bbf_ekf_ocl(
         emission_dist=emission_dist,
         learning_rate=learning_rate,
         method=method_name,
-        decay_dynamics_weight=True,
+        decay_dynamics_weight=False,
     )
 
     test_cb_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test, 
@@ -752,6 +752,7 @@ def build_estimator(init_fn, hparams, method, classification=True, **kwargs):
             emission_cov_function=emission_cov_fn,
             emission_dist=emission_dist,
             method=method_name,
+            decay_dynamics_weight=False,
             **hparams,
             **kwargs,
         )
