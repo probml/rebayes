@@ -134,6 +134,16 @@ class Rebayes(ABC):
         """Return bel(t|t) = p(z(t) | X(t), y(t), D(1:t-1)) using bel(t|t-1) and Yt"""
         ...
     
+    @partial(jit, static_argnums=(0,))
+    def update_noise_state(
+        self,
+        bel: Belief,
+        x: Float[Array, "input_dim"],
+        y: Float[Array, "output_dim"],
+    ) -> Belief:
+        """Return bel(t|t-1) = p(noise(t) | X(t), y(t), D(1:t-1)) using bel(t|t-1) and Yt"""
+        return bel
+    
     @abstractmethod
     def sample_state(
         self,
@@ -197,7 +207,8 @@ class Rebayes(ABC):
         """Apply filtering to entire sequence of data. Return final belief state and outputs from callback."""
         num_timesteps = X.shape[0]
         def step(bel, t):
-            bel_pred = self.predict_state(bel)
+            bel_pred = self.update_noise_state(bel, X[t], Y[t])
+            bel_pred = self.predict_state(bel_pred)
             pred_obs = self.predict_obs(bel, X[t])
             bel = self.update_state(bel_pred, X[t], Y[t])
             out = None

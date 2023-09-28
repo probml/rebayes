@@ -348,7 +348,7 @@ class RebayesOCLEKF(Rebayes):
         return P_obs
     
     @partial(jit, static_argnums=(0,))
-    def update_dynamics_decay_delta(
+    def update_noise_state(
         self,
         bel: OCLEKFBel,
         x: Float[Array, "input_dim"],
@@ -455,42 +455,3 @@ class RebayesOCLEKF(Rebayes):
         
         return yhat_samples
     
-    def scan_with_tuning(
-        self,
-        initial_mean: Float[Array, "state_dim"],
-        initial_covariance: CovMat,
-        X: Float[Array, "time input_dim"],
-        Y: Float[Array, "time output_dim"],
-        callback=None,
-        bel=None,
-        debug=False,
-        Xinit=None,
-        Yinit=None,
-        **kwargs,
-    ) -> Tuple[EKFBel, Any]:
-        num_timesteps = X.shape[0]
-        num_timesteps = X.shape[0]
-        def step(bel, t):
-            bel_pred = self.update_dynamics_decay_delta(bel, X[t], Y[t])
-            bel_pred = self.predict_state(bel_pred)
-            pred_obs = self.predict_obs(bel, X[t])
-            bel = self.update_state(bel_pred, X[t], Y[t])
-            out = None
-            if callback is not None:
-                out = callback(bel, pred_obs, t, X[t], Y[t], bel_pred, **kwargs)
-            
-            return bel, out
-        carry = bel
-        if bel is None:
-            # Make initial_covariance optional? for exampl, point-estimate RSGD
-            carry = self.init_bel(initial_mean, initial_covariance, Xinit, Yinit)
-        if debug:
-            outputs = []
-            for t in range(num_timesteps):
-                carry, out = step(carry, t)
-                outputs.append(out)
-            bel = carry
-            outputs = jnp.stack(outputs)
-        else:
-            bel, outputs = scan(step, carry, jnp.arange(num_timesteps))
-        return bel, outputs
