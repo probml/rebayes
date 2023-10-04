@@ -3,7 +3,7 @@ from typing import Any, Callable, Union
 
 import chex
 import jax
-from jax import jit
+from jax import grad, jit
 from jax.flatten_util import ravel_pytree
 import jax.numpy as jnp
 import jax.random as jr
@@ -829,3 +829,110 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
         )
         
         return bel_cond
+    
+    
+# OCL (Diagonal) LOFI ----------------------------------------------------------
+    
+class RebayesOCLLoFiDiagonal(RebayesLoFiDiagonal):
+    def __init__(
+        self,
+        dynamics_weights: CovMat,
+        dynamics_covariance: CovMat,
+        emission_mean_function: Union[FnStateToEmission, FnStateAndInputToEmission],
+        emission_cov_function: Union[FnStateToEmission2, FnStateAndInputToEmission2],
+        emission_dist: EmissionDistFn = \
+            lambda mean, cov: MVN(loc=mean, scale_tril=jnp.linalg.cholesky(cov)),
+        adaptive_emission_cov: bool=False,
+        decay_dynamics_weight: bool=False,
+        dynamics_covariance_inflation_factor: float=0.0,
+        memory_size: int = 10,
+        steady_state: bool = False,
+        inflation: str = 'bayesian',
+        use_svd: bool = True,
+        learning_rate: float=1e-2,
+        gamma_ub: float=None,
+    ):
+        super().__init__(dynamics_weights, dynamics_covariance, emission_mean_function, 
+                         emission_cov_function, emission_dist, adaptive_emission_cov, 
+                         dynamics_covariance_inflation_factor, memory_size, steady_state, 
+                         inflation, use_svd)
+
+        self.delta_ub = None if gamma_ub is None else -2.0 * jnp.log(gamma_ub)
+        self.decay_dynamics_weight = decay_dynamics_weight
+        self.learning_rate = learning_rate
+
+    @partial(jit, static_argnums=(0,))
+    def update_noise_state(
+        self,
+        bel: LoFiBel,
+        x: Float[Array, "input_dim"],
+        y: Float[Array, "output_dim"],
+    ) -> LoFiBel:
+        alpha = self.dynamics_covariance_inflation_factor
+        
+        def post_pred_log_likelihood(delta):
+            gamma = jnp.exp(-0.5 * delta)
+            inflate_params = core._lofi_diagonal_cov_inflate(
+                bel.pp_mean, bel.mean, bel.basis, bel.svs, bel.eta, bel.Ups, alpha, self.inflation
+            )
+            m_infl, U_infl, Lambda_infl, Ups_infl = inflate_params
+            pred_dynamics = core._lofi_diagonal_cov_decay_dynamics_predict(
+                bel.pp_mean, m_infl, U_infl, Lambda_infl, gamma, bel.q, bel.eta, Ups_infl
+            )
+            pp_mean_pred, m_pred, U_pred, Lambda_pred, eta_pred, Ups_pred = pred_dynamics
+            curr_bel = bel.replace(
+                pp_mean=pp_mean_pred,
+                mean=m_pred,
+                basis=U_pred,
+                svs=Lambda_pred,
+                eta=eta_pred,
+                Ups=Ups_pred,
+            )
+            y_mean = self.predict_obs(curr_bel, x)
+            y_cov = self.predict_obs_cov(curr_bel, x)
+            y_dist = self.emission_dist(y_mean, y_cov)
+            log_prob = jnp.sum(y_dist.log_prob(y))
+            
+            return log_prob
+
+        delta = -2 * jnp.log(bel.gamma)
+        delta_cond = delta + self.learning_rate * grad(post_pred_log_likelihood)(delta)
+        delta_cond = jnp.maximum(delta_cond, 0.0)
+        if self.delta_ub is not None:
+            delta_cond = jnp.minimum(delta_cond, self.delta_ub)
+        gamma_cond = jnp.exp(-0.5 * delta_cond)
+        bel_cond = bel.replace(gamma=gamma_cond)
+        
+        return bel_cond
+    
+    @partial(jit, static_argnums=(0,))
+    def predict_state(
+        self,
+        bel: LoFiBel,
+    ) -> LoFiBel:
+        alpha = self.dynamics_covariance_inflation_factor
+
+        # Inflate posterior covariance.
+        inflate_params = core._lofi_diagonal_cov_inflate(
+            bel.pp_mean, bel.mean, bel.basis, bel.svs, bel.eta, bel.Ups, alpha, self.inflation
+        )
+        m_infl, U_infl, Lambda_infl, Ups_infl = inflate_params
+
+        # Predict dynamics.
+        pred_dynamics = core._lofi_diagonal_cov_decay_dynamics_predict(
+            bel.pp_mean, m_infl, U_infl, Lambda_infl, bel.gamma, bel.q, bel.eta, 
+            Ups_infl, decoupled=not self.decay_dynamics_weight
+        )
+        pp_mean_pred, m_pred, U_pred, Lambda_pred, eta_pred, Ups_pred = pred_dynamics
+
+        # Update belief 
+        bel_pred = bel.replace(
+            pp_mean=pp_mean_pred,
+            mean=m_pred,
+            basis=U_pred,
+            svs=Lambda_pred,
+            eta=eta_pred,
+            Ups=Ups_pred,
+        )
+
+        return bel_pred
