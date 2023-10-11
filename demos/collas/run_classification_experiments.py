@@ -411,11 +411,13 @@ def main(cl_args):
     
     # Initialize model
     mlp_features = cl_args.mlp_features
+    if sum(mlp_features) == 0:
+        mlp_features = []
     if cl_args.model == "cnn":
         model_init_fn = models.initialize_classification_cnn
     else: # cl_args.model == "mlp"
         model_init_fn = partial(models.initialize_classification_mlp,
-                                hidden_dims=cl_args.mlp_features)
+                                hidden_dims=mlp_features)
     input_dim, output_dim = _compute_io_dims(cl_args.problem, cl_args.dataset)
     model_init_fn = partial(model_init_fn, input_dim=input_dim,
                             output_dim=output_dim)
@@ -501,7 +503,7 @@ if __name__ == "__main__":
                         choices=["mlp", "cnn"])
     
     # MLP hidden dimensions
-    parser.add_argument("--mlp_features", type=_check_positive_int, nargs="+",
+    parser.add_argument("--mlp_features", type=_check_nonneg_float, nargs="+",
                         default=[500, 500,])
     
     # Negative log likelihood evaluation method
