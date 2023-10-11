@@ -18,7 +18,7 @@ import demos.collas.hparam_tune as hparam_tune
 import demos.collas.train_utils as train_utils
 
 AGENT_TYPES = ["lofi", "fdekf", "vdekf", "enkf", "sgd-rb", "adam-rb",]
-AGENT_ALL_TYPES = [*AGENT_TYPES, "lofi-it", "fdekf-it", "vdekf-it",
+AGENT_ALL_TYPES = [*AGENT_TYPES, "linear", "lofi-it", "fdekf-it", "vdekf-it",
                    "lofi-grad", "fdekf-ocl", "vdekf-ocl"]
 
 
@@ -136,6 +136,8 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
                 'n_replay': n_iter,
             } for rank in ranks for n_iter in filter_n_iter
         })
+    if "linear" in agent_args:
+        agents["linear"] = {"pbounds": filter_pbounds}
     if "fdekf" in agent_args:
         agents["fdekf"] = {'pbounds': filter_pbounds}
     if "fdekf-it" in agent_args:
@@ -314,8 +316,15 @@ def tune_and_store_hyperparameters(
     for agent_name, agent_params in agents.items():
         print(f"Tuning {agent_name}...")
         pbounds = agent_params.pop("pbounds")
+        if agent_name == "linear":
+            curr_model_init_fn = partial(
+                model_init_fn,
+                hidden_dims=[],
+            )
+        else:
+            curr_model_init_fn = model_init_fn
         optimizer = hparam_tune.create_optimizer(
-            model_init_fn, pbounds, dataset["train"], dataset["val"],
+            curr_model_init_fn, pbounds, dataset["train"], dataset["val"],
             val_callback, agent_name, verbose=verbose, 
             callback_at_end=callback_at_end, n_seeds=n_seeds,
             nll_method=nll_method, classification=True, **agent_params,
@@ -401,6 +410,7 @@ def main(cl_args):
                                cl_args.temp, cl_args.cooling)
     
     # Initialize model
+    mlp_features = cl_args.mlp_features
     if cl_args.model == "cnn":
         model_init_fn = models.initialize_classification_cnn
     else: # cl_args.model == "mlp"
@@ -450,11 +460,18 @@ def main(cl_args):
             agent_kwargs = agents[agent_name]
             if "pbounds" in agent_kwargs:
                 agent_kwargs.pop("pbounds")
-            optimizer_dict = hparam_tune.build_estimator(model_init_fn, hparams,
-                                                        agent_name, 
-                                                        classification=True, 
-                                                        **agent_kwargs)
-            _ = evaluate_and_store_result(output_path, model_init_fn,
+            if agent_name == "linear":
+                curr_model_init_fn = partial(
+                    model_init_fn,
+                    hidden_dims=[],
+                )
+            else:
+                curr_model_init_fn = model_init_fn
+            optimizer_dict = hparam_tune.build_estimator(curr_model_init_fn, 
+                                                         hparams, agent_name, 
+                                                         classification=True, 
+                                                         **agent_kwargs)
+            _ = evaluate_and_store_result(output_path, curr_model_init_fn,
                                           dataset_load_fn, optimizer_dict,
                                           eval_metric["test"], agent_name,
                                           cl_args.problem, cl_args.n_iter,
