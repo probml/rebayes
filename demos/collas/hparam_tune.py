@@ -649,12 +649,16 @@ def create_optimizer(
                 log_init_cov=0.0
             )
     else:
+        curr_method = method
         if "ekf-it" in method:
             bbf = bbf_ekf_it
         elif "ekf-ocl" in method:
             bbf = bbf_ekf_ocl
         elif "ekf" in method:
             bbf = bbf_ekf
+        elif "linear" in method:
+            bbf = bbf_ekf
+            curr_method = "fcekf"
         elif "enkf" in method:
             bbf = bbf_enkf
         elif "lofi-it" in method:
@@ -671,7 +675,7 @@ def create_optimizer(
             callback=callback,
             callback_at_end=callback_at_end,
             n_seeds=n_seeds,
-            method=method,
+            method=curr_method,
             classification=classification,
             **kwargs
         )
@@ -756,7 +760,9 @@ def build_estimator(init_fn, hparams, method, classification=True, **kwargs):
             **hparams,
             **kwargs,
         )
-    elif "ekf" in method:
+    elif "ekf" in method or "linear" in method:
+        if "linear" in method:
+            method = "fcekf"
         init_covariance = hparams.pop("initial_covariance")
         estimator = ekf.RebayesEKF(
             emission_mean_function=emission_mean_fn,
