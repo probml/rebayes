@@ -10,6 +10,7 @@ import jax.numpy as jnp
 from jax.tree_util import tree_map
 import jax.random as jr
 import optax
+from sklearn.kernel_approximation import PolynomialCountSketch
 
 import demos.collas.datasets.dataloaders as dataloaders
 import rebayes.utils.models as models
@@ -311,6 +312,9 @@ def tune_and_store_hyperparameters(
     """
     hparam_path.mkdir(parents=True, exist_ok=True)
     dataset = dataset_load_fn()
+    print(f"X_train shape: {dataset['train'][0].shape}")
+    print(f"X_val shape: {dataset['val'][0].shape}")
+    print(f"X_test shape: {dataset['test'][0].shape}")
     
     hparams = {}
     for agent_name, agent_params in agents.items():
@@ -401,11 +405,29 @@ def main(cl_args):
     # Load dataset
     dataset = dataloaders.clf_datasets[cl_args.problem]
     if cl_args.problem == "stationary" or cl_args.problem == "rotated":
-        dataset_load_fn, kwargs = dataset(ntrain=cl_args.ntrain).values()
+        dataset_fn, kwargs = dataset(ntrain=cl_args.ntrain).values()
     else:
-        dataset_load_fn, kwargs = \
+        dataset_fn, kwargs = \
             dataset(ntrain_per_task=cl_args.ntrain_per_task).values()
-    dataset_load_fn = partial(dataset_load_fn, dataset_type=cl_args.dataset)
+    dataset_fn = partial(dataset_fn, dataset_type=cl_args.dataset)
+    
+    # Approximate polynomial kernel
+    if cl_args.poly_kernel:
+        def dataset_load_fn(*args, **kwargs):
+            dataset = dataset_fn(*args, **kwargs)
+            for key, value in dataset.items():
+                X, *args = value
+                X_flat = X.reshape(X.shape[0], -1)
+                X_transformed = PolynomialCountSketch(
+                    degree=cl_args.kernel_degree,
+                    n_components=cl_args.kernel_n_components,
+                ).fit_transform(X_flat)
+                dataset[key] = (X_transformed, *args)
+
+            return dataset
+    else:
+        dataset_load_fn = dataset_fn
+    
     eval_metric = _eval_metric(cl_args.problem, cl_args.nll_method,
                                cl_args.temp, cl_args.cooling)
     
@@ -414,6 +436,7 @@ def main(cl_args):
     if sum(mlp_features) == 0:
         mlp_features = []
     if cl_args.model == "cnn":
+        assert not cl_args.poly_kernel # CNNs not supported with polynomial kernel
         model_init_fn = models.initialize_classification_cnn
     else: # cl_args.model == "mlp"
         model_init_fn = partial(models.initialize_classification_mlp,
@@ -557,6 +580,15 @@ if __name__ == "__main__":
     
     # Number of random initializations for evaluation
     parser.add_argument("--n_iter", type=int, default=20)
+    
+    # Approximate polynomial kernel
+    parser.add_argument("--poly_kernel", action="store_true")
+    
+    # Kernel degree
+    parser.add_argument("--kernel_degree", type=int, default=2)
+    
+    # Kernel number of components
+    parser.add_argument("--kernel_n_components", type=int, default=10_000)
     
     args = parser.parse_args()
     main(args)
