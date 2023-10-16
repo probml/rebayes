@@ -41,10 +41,10 @@ def _check_nonneg_float(value):
 def _compute_io_dims(problem, dataset_type):
     input_dim, output_dim = 0, 0
     if "mnist" in dataset_type:
-        input_dim = (1, 28, 28, 1)
+        input_dim = (28, 28, 1)
         output_dim = 10
     elif "cifar" in dataset_type:
-        input_dim = (1, 32, 32, 3)
+        input_dim = (32, 32, 3)
         if dataset_type == "cifar10":
             output_dim = 10
         elif dataset_type == "cifar100":
