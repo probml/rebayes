@@ -34,7 +34,7 @@ class CNN(nn.Module):
         x = x.reshape((x.shape[0], -1))  # flatten
         x = nn.Dense(features=128)(x)
         x = self.activation(x)
-        x = nn.Dense(features=self.output_dim)(x)
+        x = nn.Dense(features=self.output_dim)(x).ravel()
         
         return x
     
