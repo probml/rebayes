@@ -7,7 +7,7 @@ from jax import grad, jit, vmap
 from jax.flatten_util import ravel_pytree
 from jax.lax import scan
 import jax.numpy as jnp
-from jaxtyping import Array, Float
+from jaxtyping import Array, Float, Int
 import tensorflow_probability.substrates.jax as tfp
 
 from rebayes.base import (
@@ -472,14 +472,18 @@ class NFEKFBel:
     nobs: int=None
     obs_noise_var: float=None
     
-    def _update_buffer(self, buffer, item):
-        buffer_new = jnp.concatenate([buffer[1:], jnp.expand_dims(item, 0)], axis=0)
+    def _update_buffer(self, step, buffer, item):
+        ix_buffer = step % len(buffer)
+        buffer = buffer.at[ix_buffer].set(item)
+        # buffer_new = jnp.concatenate([buffer[1:], jnp.expand_dims(item, 0)], axis=0)
 
-        return buffer_new
+        return buffer
 
     def apply_io_buffers(self, X, y):
-        buffer_X = self._update_buffer(self.buffer_X, jnp.atleast_1d(X))
-        buffer_y = self._update_buffer(self.buffer_y, jnp.atleast_1d(y))
+        n_count = self.nobs
+        # print(self.buffer_X.shape, self.buffer_y.shape)
+        buffer_X = self._update_buffer(n_count, self.buffer_X, X)
+        buffer_y = self._update_buffer(n_count, self.buffer_y, y)
 
         return self.replace(
             buffer_X=buffer_X,
@@ -691,6 +695,8 @@ class RebayesNFEKF(Rebayes):
         nobs_cond, obs_noise_var_cond = \
             core._ekf_estimate_noise(m_cond, emission_mean_fn, x, y, 
                                      nobs, obs_noise_var, self.adaptive_emission_cov)
+        
+        
         bel_cond = bel.replace(
             mean = m_cond,
             cov = P_cond,

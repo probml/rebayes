@@ -232,14 +232,14 @@ def _ekf_estimate_noise(m, y_cond_mean, u, y, nobs, obs_noise_var, adaptive_vari
         nobs (int): Updated number of observations seen so far.
         obs_noise_var (float): Updated estimate of observation noise.
     """
+    nobs += 1
     if not adaptive_variance:
-        return 0, 0.0
+        return nobs, 0.0
 
     m_Y = lambda w: y_cond_mean(w, u)
     yhat = jnp.atleast_1d(m_Y(m))
     
     sqerr = ((yhat - y).T @ (yhat - y)).squeeze() / yhat.shape[0]
-    nobs += 1
     obs_noise_var = jnp.max(jnp.array([1e-6, obs_noise_var + 1/nobs * (sqerr - obs_noise_var)]))
 
     return nobs, obs_noise_var
