@@ -463,16 +463,35 @@ class RebayesOCLEKF(Rebayes):
 # For online training of posterior-refining normalizing flows
 @chex.dataclass
 class NFEKFBel:
+    buffer_X: chex.Array
+    buffer_y: chex.Array
+    
     mean: chex.Array
     cov: chex.Array
     nf_params: chex.Array # Parameters for normalizing flow
     nobs: int=None
     obs_noise_var: float=None
     
+    def _update_buffer(self, buffer, item):
+        buffer_new = jnp.concatenate([buffer[1:], jnp.expand_dims(item, 0)], axis=0)
+
+        return buffer_new
+
+    def apply_io_buffers(self, X, y):
+        buffer_X = self._update_buffer(self.buffer_X, jnp.atleast_1d(X))
+        buffer_y = self._update_buffer(self.buffer_y, jnp.atleast_1d(y))
+
+        return self.replace(
+            buffer_X=buffer_X,
+            buffer_y=buffer_y,
+        )
+    
 
 class RebayesNFEKF(Rebayes):
     def __init__(
         self,
+        dim_input: int,
+        dim_output: int,
         dynamics_weights_or_function: Union[float, FnStateToState],
         dynamics_covariance: CovMat,
         emission_mean_function: Union[FnStateToEmission, FnStateAndInputToEmission],
@@ -485,9 +504,12 @@ class RebayesNFEKF(Rebayes):
         dynamics_covariance_inflation_factor: float = 0.0,
         method: str="fcekf",
         learning_rate: float=1e-2,
+        buffer_size: int=20,
     ):
         super().__init__(dynamics_covariance, emission_mean_function, 
                          emission_cov_function, emission_dist)
+        self.dim_input = dim_input
+        self.dim_output = dim_output
         self.nf_apply_function = nf_apply_function
         self.dynamics_weights = dynamics_weights_or_function
         self.adaptive_emission_cov = adaptive_emission_cov
@@ -495,6 +517,7 @@ class RebayesNFEKF(Rebayes):
         self.method = method
         self.learning_rate = learning_rate
         self.nf_initial_params = nf_initial_params
+        self.buffer_size = buffer_size
         
         if method == "fcekf":
             if isinstance(self.dynamics_weights, float):
@@ -520,8 +543,18 @@ class RebayesNFEKF(Rebayes):
         P, *_ = initial_mean.shape
         P0 = _process_ekf_cov(initial_covariance, P, self.method)
         
+        # Set up buffers
+        L = self.buffer_size
+        D, C = self.dim_input, self.dim_output
+        if isinstance(D, int):
+            buffer_X = jnp.zeros((L, D))
+        else:
+            buffer_X = jnp.zeros((L, *D))
+        buffer_Y = jnp.zeros((L, C))
         
         bel = NFEKFBel(
+            buffer_X = buffer_X,
+            buffer_y = buffer_Y,
             mean = initial_mean,
             cov = P0,
             nf_params = self.nf_initial_params,
@@ -598,9 +631,11 @@ class RebayesNFEKF(Rebayes):
         x: Float[Array, "input_dim"],
         y: Float[Array, "output_dim"],
     ) -> NFEKFBel:
+        bel = bel.apply_io_buffers(x, y)
+        X_buffer, y_buffer = bel.buffer_X, bel.buffer_y
         nf_params = bel.nf_params
         
-        def post_pred_log_likelihood(nf_params):
+        def post_pred_log_likelihood(nf_params, x, y):
             curr_bel = bel.replace(nf_params=nf_params)
             y_mean = self.predict_obs(curr_bel, x)
             y_cov = self.predict_obs_cov(curr_bel, x)
@@ -608,7 +643,10 @@ class RebayesNFEKF(Rebayes):
             log_prob = jnp.sum(y_dist.log_prob(y))
             
             return log_prob
-        nf_params_cond = nf_params + self.learning_rate * grad(post_pred_log_likelihood)(nf_params)
+        post_pred_ll_fn = lambda nf_params: \
+            jnp.mean(vmap(post_pred_log_likelihood, (None, 0, 0))(nf_params, X_buffer, y_buffer))
+        
+        nf_params_cond = nf_params + self.learning_rate * grad(post_pred_ll_fn)(nf_params)
         bel_cond = bel.replace(nf_params=nf_params_cond)
         
         return bel_cond
