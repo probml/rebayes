@@ -21,6 +21,7 @@ from rebayes.base import (
     Rebayes,
 )
 import rebayes.extended_kalman_filter.ekf_core as core
+import rebayes.utils.normalizing_flows as nf
 
 
 tfd = tfp.distributions
@@ -256,7 +257,7 @@ def init_regression_agent(
 # Reference: KF for Online Classification of Non-Stationary Data
 # (Titsias et al., 2023)
 @chex.dataclass
-class OCLEKFBel(EKFBel):
+class OCLEKFBel:
     mean: chex.Array
     cov: chex.Array
     nobs: int=None
@@ -277,6 +278,7 @@ class RebayesOCLEKF(Rebayes):
         dynamics_covariance_inflation_factor: float = 0.0,
         method: str="fcekf",
         learning_rate: float=1e-2,
+        gamma_ub: float=None,
     ):  
         super().__init__(dynamics_covariance, emission_mean_function, 
                          emission_cov_function, emission_dist)
@@ -285,6 +287,7 @@ class RebayesOCLEKF(Rebayes):
         self.dynamics_covariance_inflation_factor = dynamics_covariance_inflation_factor
         self.method = method
         self.learning_rate = learning_rate
+        self.delta_ub = None if gamma_ub is None else -2.0 * jnp.log(gamma_ub)
         
         self.pred_fn, self.update_fn = core._decay_dynamics_predict, UPDATE_FNS[method]
         if not decay_dynamics_weight:
@@ -348,13 +351,14 @@ class RebayesOCLEKF(Rebayes):
         return P_obs
     
     @partial(jit, static_argnums=(0,))
-    def update_noise_state(
+    def update_hyperparams(
         self,
         bel: OCLEKFBel,
         x: Float[Array, "input_dim"],
         y: Float[Array, "output_dim"],
     ) -> OCLEKFBel:
-        m, P, delta = bel.mean, bel.cov, bel.dynamics_decay_delta
+        m, P, delta, obs_noise_var = \
+            bel.mean, bel.cov, bel.dynamics_decay_delta, bel.obs_noise_var
         dynamics_covariance = _process_ekf_cov(
             self.dynamics_covariance, m.shape[0], self.method
         )
@@ -367,13 +371,13 @@ class RebayesOCLEKF(Rebayes):
             y_mean = self.predict_obs(curr_bel, x)
             y_cov = self.predict_obs_cov(curr_bel, x)
             y_dist = self.emission_dist(y_mean, y_cov)
-            
             log_prob = jnp.sum(y_dist.log_prob(y))
             
             return log_prob
-        
         delta_cond = delta + self.learning_rate * grad(post_pred_log_likelihood)(delta)
         delta_cond = jnp.maximum(delta_cond, 0.0)
+        if self.delta_ub is not None:
+            delta_cond = jnp.minimum(delta_cond, self.delta_ub)
         bel_cond = bel.replace(dynamics_decay_delta=delta_cond)
         
         return bel_cond
@@ -455,3 +459,244 @@ class RebayesOCLEKF(Rebayes):
         
         return yhat_samples
     
+
+# For online training of posterior-refining normalizing flows
+@chex.dataclass
+class NFEKFBel:
+    mean: chex.Array
+    cov: chex.Array
+    nf_params: chex.Array # Parameters for normalizing flow
+    nobs: int=None
+    obs_noise_var: float=None
+    
+
+class RebayesNFEKF(Rebayes):
+    def __init__(
+        self,
+        dynamics_weights_or_function: Union[float, FnStateToState],
+        dynamics_covariance: CovMat,
+        emission_mean_function: Union[FnStateToEmission, FnStateAndInputToEmission],
+        emission_cov_function: Union[FnStateToEmission2, FnStateAndInputToEmission2],
+        nf_initial_params: Float[Array, "nf_state_dim"],
+        nf_apply_function: Callable,
+        emission_dist: EmissionDistFn = \
+            lambda mean, cov: MVN(loc=mean, scale_tril=jnp.linalg.cholesky(cov)),
+        adaptive_emission_cov: bool = False,
+        dynamics_covariance_inflation_factor: float = 0.0,
+        method: str="fcekf",
+        learning_rate: float=1e-2,
+    ):
+        super().__init__(dynamics_covariance, emission_mean_function, 
+                         emission_cov_function, emission_dist)
+        self.nf_apply_function = nf_apply_function
+        self.dynamics_weights = dynamics_weights_or_function
+        self.adaptive_emission_cov = adaptive_emission_cov
+        self.dynamics_covariance_inflation_factor = dynamics_covariance_inflation_factor
+        self.method = method
+        self.learning_rate = learning_rate
+        self.nf_initial_params = nf_initial_params
+        
+        if method == "fcekf":
+            if isinstance(self.dynamics_weights, float):
+                gamma = self.dynamics_weights
+                self.dynamics_weights = lambda x: gamma * x
+            self.base_dist = lambda m, P: MVN(loc=m, scale_tril=jnp.linalg.cholesky(P))
+        elif method in ["fdekf", "vdekf"]:
+            assert isinstance(self.dynamics_weights, float) # Dynamics should be a scalar
+            self.base_dist = lambda m, P: MVD(loc=m, scale_diag=jnp.sqrt(P))
+        else:
+            raise ValueError('unknown method ', method)        
+        
+        self.pred_fn, self.update_fn = PREDICT_FNS[method], UPDATE_FNS[method]
+        self.nobs, self.obs_noise_var = 0, 0.0
+        
+    def init_bel(
+        self,
+        initial_mean: Float[Array, "state_dim"],
+        initial_covariance: CovMat,
+        Xinit: Float[Array, "input_dim"]=None,
+        Yinit: Float[Array, "output_dim"]=None,
+    ) -> NFEKFBel:
+        P, *_ = initial_mean.shape
+        P0 = _process_ekf_cov(initial_covariance, P, self.method)
+        
+        
+        bel = NFEKFBel(
+            mean = initial_mean,
+            cov = P0,
+            nf_params = self.nf_initial_params,
+            nobs = self.nobs,
+            obs_noise_var = self.obs_noise_var,
+        )
+        if Xinit is not None:
+            bel, _ = self.scan(Xinit, Yinit, bel=bel)
+        
+        return bel
+    
+    @partial(jit, static_argnums=(0,))
+    def predict_obs(
+        self, 
+        bel: NFEKFBel, 
+        x: Float[Array, "input_dim"],
+    ) -> Float[Array, "output_dim"]:
+        m = bel.mean
+        bijector = nf.construct_flow(self.nf_apply_function, bel.nf_params)
+        # nvp = tfd.TransformedDistribution(
+        #     distribution=self.base_dist(m, P),
+        #     bijector=bijector
+        # )
+        m_Y = lambda z: self.emission_mean_function(bijector.forward(z), x)
+        y_pred = jnp.atleast_1d(m_Y(m))
+        
+        return y_pred
+    
+    @partial(jit, static_argnums=(0,))
+    def obs_cov(
+        self,
+        bel: NFEKFBel,
+        X: Float[Array, "input_dim"]
+    ) -> Union[Float[Array, "output_dim output_dim"], Any]:
+        """Return R(t)"""
+        y_pred = jnp.atleast_1d(self.predict_obs(bel, X))
+        bijector = nf.construct_flow(self.nf_apply_function, bel.nf_params)
+        C, *_ = y_pred.shape
+        if self.adaptive_emission_covariance:
+            R = bel.obs_noise_var * jnp.eye(C)
+        else:
+            R = jnp.atleast_2d(self.emission_cov_function(bijector.forward(bel.mean), X))
+        
+        return R
+    
+    @partial(jit, static_argnums=(0,4))
+    def predict_obs_cov(
+        self, 
+        bel: NFEKFBel,
+        x: Float[Array, "input_dim"],
+        aleatoric_factor: float = 1.0,
+        apply_fn: Callable = None,
+    ) -> Float[Array, "output_dim output_dim"]:
+        m, P = bel.mean, bel.cov
+        bijector = nf.construct_flow(self.nf_apply_function, bel.nf_params)
+        if apply_fn is None:
+            m_Y = lambda z: self.emission_mean_function(bijector.forward(z), x)
+        else:
+            m_Y = lambda z: apply_fn(bijector.forward(z), x)
+        H =  core._jacrev_2d(m_Y, m)
+        if self.method == 'fcekf':
+            V_epi = H @ P @ H.T
+        else:
+            V_epi = (P * H) @ H.T
+        R = self.obs_cov(bel, x) * aleatoric_factor
+        P_obs = V_epi + R
+        
+        return P_obs
+    
+    @partial(jit, static_argnums=(0,))
+    def update_hyperparams(
+        self,
+        bel: NFEKFBel,
+        x: Float[Array, "input_dim"],
+        y: Float[Array, "output_dim"],
+    ) -> NFEKFBel:
+        nf_params = bel.nf_params
+        
+        def post_pred_log_likelihood(nf_params):
+            curr_bel = bel.replace(nf_params=nf_params)
+            y_mean = self.predict_obs(curr_bel, x)
+            y_cov = self.predict_obs_cov(curr_bel, x)
+            y_dist = self.emission_dist(y_mean, y_cov)
+            log_prob = jnp.sum(y_dist.log_prob(y))
+            
+            return log_prob
+        nf_params_cond = nf_params + self.learning_rate * grad(post_pred_log_likelihood)(nf_params)
+        bel_cond = bel.replace(nf_params=nf_params_cond)
+        
+        return bel_cond
+    
+    @partial(jit, static_argnums=(0,))
+    def predict_state(
+        self, 
+        bel: NFEKFBel,
+    ) -> NFEKFBel:
+        m, P = bel.mean, bel.cov
+        dynamics_covariance = _process_ekf_cov(
+            self.dynamics_covariance, m.shape[0], self.method
+        )
+        m_pred, P_pred = self.pred_fn(m, P, self.dynamics_weights, dynamics_covariance, 
+                                      self.dynamics_covariance_inflation_factor)
+        bel_pred = bel.replace(
+            mean = m_pred,
+            cov = P_pred,
+        )
+        
+        return bel_pred
+
+    @partial(jit, static_argnums=(0,))
+    def update_state(
+        self, 
+        bel: NFEKFBel,
+        x: Float[Array, "input_dim"],
+        y: Float[Array, "output_dim"],
+    ) -> NFEKFBel:
+        m, P, nobs, obs_noise_var, nf_params = \
+            bel.mean, bel.cov, bel.nobs, bel.obs_noise_var, bel.nf_params
+        bijector = nf.construct_flow(self.nf_apply_function, nf_params)
+        emission_mean_fn = lambda z, x: self.emission_mean_function(
+            bijector.forward(z), x
+        )
+        emission_cov_fn = lambda z, x: self.emission_cov_function(
+            bijector.forward(z), x
+        )
+        m_cond, P_cond = self.update_fn(m, P, emission_mean_fn, 
+                                        emission_cov_fn, x, y, 1, 
+                                        self.adaptive_emission_cov, obs_noise_var)
+        nobs_cond, obs_noise_var_cond = \
+            core._ekf_estimate_noise(m_cond, emission_mean_fn, x, y, 
+                                     nobs, obs_noise_var, self.adaptive_emission_cov)
+        bel_cond = bel.replace(
+            mean = m_cond,
+            cov = P_cond,
+            nobs = nobs_cond,
+            obs_noise_var = obs_noise_var_cond
+        )
+        
+        return bel_cond
+    
+    @partial(jit, static_argnums=(0,3))
+    def sample_state(
+        self, 
+        bel: NFEKFBel,
+        key: Array, 
+        n_samples: int=100,
+        temperature: float=1.0,
+    ) -> Float[Array, "n_samples state_dim"]:
+        bel = self.predict_state(bel)
+        shape = (n_samples,)
+        cooled_cov = bel.cov * temperature
+        if self.method != "fcekf":
+            mvn = MVD(loc=bel.mean, scale_diag=jnp.sqrt(cooled_cov))
+        else:
+            mvn = MVN(loc=bel.mean, scale_tril=jnp.linalg.cholesky(cooled_cov))
+        params_sample = mvn.sample(seed=key, sample_shape=shape)
+        
+        return params_sample
+    
+    @partial(jit, static_argnums=(0,4,))
+    def pred_obs_mc(
+        self, 
+        bel: NFEKFBel,
+        key: Array,
+        x: Float[Array, "input_dim"],
+        n_samples: int=1
+    ) -> Float[Array, "n_samples output_dim"]:
+        """
+        Sample observations from the posterior predictive distribution.
+        """
+        params_sample = self.sample_state(bel, key, n_samples)
+        bijector = nf.construct_flow(self.nf_apply_function, bel.nf_params)
+        emission_mean_fn = lambda z, x: self.emission_mean_function(
+            bijector.forward(z), x
+        )
+        yhat_samples = vmap(emission_mean_fn, (0, None))(params_sample, x)
+        
+        return yhat_samples
