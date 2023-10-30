@@ -547,7 +547,7 @@ if __name__ == "__main__":
                         choices=["mlp", "cnn"])
     
     # MLP hidden dimensions
-    parser.add_argument("--mlp_features", type=_check_nonneg_float, nargs="+",
+    parser.add_argument("--mlp_features", type=_check_positive_int, nargs="+",
                         default=[500, 500,])
     
     # Negative log likelihood evaluation method
