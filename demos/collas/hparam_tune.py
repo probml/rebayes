@@ -12,6 +12,7 @@ from rebayes.extended_kalman_filter import enkf
 from rebayes.extended_kalman_filter import replay_ekf
 from rebayes.low_rank_filter import lofi
 from rebayes.sgd_filter import replay_sgd as rsgd
+import rebayes.utils.normalizing_flows as nf
 
 tfd = tfp.distributions
 
@@ -459,6 +460,84 @@ def bbf_ekf_ocl(
     return result
 
 
+def bbf_ekf_nf(
+    log_init_cov,
+    log_1m_dynamics_weights,
+    log_dynamics_cov,
+    log_alpha,
+    log_learning_rate,
+    # Specify before running
+    init_fn,
+    train,
+    test,
+    callback,
+    method="fdekf-nf",
+    callback_at_end=True,
+    n_seeds=5,
+    classification=True,
+    **kwargs,
+):
+    """
+    Black-box function for Bayesian optimization.
+    """
+    X_train, *_, y_train = train
+    X_test, *_, y_test = test
+
+    dynamics_weights = 1 - jnp.exp(log_1m_dynamics_weights).item()
+    dynamics_covariance = jnp.exp(log_dynamics_cov).item()
+    initial_covariance = jnp.exp(log_init_cov).item()
+    alpha = jnp.exp(log_alpha).item()
+    learning_rate = jnp.exp(log_learning_rate).item()
+
+    method_name = method.split("-")[0]
+    model_dict = init_fn(key=0)
+    emission_dist = lambda mean, cov: tfd.OneHotCategorical(probs=mean) \
+        if classification else tfd.Normal(loc=mean, scale=jnp.sqrt(cov))
+        
+    nf_model = nf.NF_MLP()
+    flat_params = model_dict["flat_params"]
+    input_dim = len(flat_params)
+    nfs = nf.init_normalizing_flow(nf_model, input_dim)
+    
+    estimator = ekf.RebayesNFEKF(
+        dynamics_weights_or_function=dynamics_weights,
+        dynamics_covariance=dynamics_covariance,
+        emission_mean_function=model_dict["emission_mean_function"],
+        emission_cov_function=model_dict["emission_cov_function"],
+        nf_initial_params=nfs["params"],
+        nf_apply_function=nfs["apply_fn"],
+        dynamics_covariance_inflation_factor=alpha,
+        emission_dist=emission_dist,
+        learning_rate=learning_rate,
+        method=method_name,
+    )
+
+    test_cb_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test, 
+                      "apply_fn": model_dict["apply_fn"], "key": jr.PRNGKey(0), 
+                      **kwargs}
+    
+    result = []
+    for i in range(n_seeds):
+        model_dict = init_fn(key=i)
+        flat_params = model_dict["flat_params"]
+        if callback_at_end:
+            bel, _ = estimator.scan(flat_params, initial_covariance, 
+                                    X_train, y_train, progress_bar=False)
+            metric = jnp.array(list(callback(bel, **test_cb_kwargs).values()))
+        else:
+            _, metric = estimator.scan(flat_params, initial_covariance, 
+                                       X_train, y_train, progress_bar=False, 
+                                       callback=callback, **test_cb_kwargs)
+            metric = jnp.array(list(metric.values())).mean()
+        result.append(metric)
+    result = jnp.array(result).mean()
+        
+    if jnp.isnan(result) or jnp.isinf(result):
+        result = -1e8
+
+    return result
+
+
 def bbf_enkf(
     log_init_cov,
     log_1m_dynamics_weights,
@@ -654,6 +733,8 @@ def create_optimizer(
             bbf = bbf_ekf_it
         elif "ekf-ocl" in method:
             bbf = bbf_ekf_ocl
+        elif "ekf-nf" in method:
+            bbf = bbf_ekf_nf
         elif "ekf" in method:
             bbf = bbf_ekf
         elif "linear" in method:
@@ -723,7 +804,7 @@ def get_best_params(optimizer, method, nll_method="nll"):
         else:
             hparams["dynamics_weights_or_function"] = dynamics_weights
             
-        if "it" in method or "ocl" in method:
+        if "it" in method or "ocl" in method or "nf" in method:
             hparams["learning_rate"] = jnp.exp(max_params["log_learning_rate"]).item()
 
     return hparams
@@ -757,6 +838,24 @@ def build_estimator(init_fn, hparams, method, classification=True, **kwargs):
             emission_dist=emission_dist,
             method=method_name,
             decay_dynamics_weight=False,
+            **hparams,
+            **kwargs,
+        )
+    elif "ekf-nf" in method:
+        init_covariance = hparams.pop("initial_covariance")
+        method_name = method.split("-")[0]
+        nf_model = nf.NF_MLP()
+        flat_params = model_dict["flat_params"]
+        input_dim = len(flat_params)
+        nfs = nf.init_normalizing_flow(nf_model, input_dim)
+        
+        estimator = ekf.RebayesNFEKF(
+            emission_mean_function=emission_mean_fn,
+            emission_cov_function=emission_cov_fn,
+            emission_dist=emission_dist,
+            nf_initial_params=nfs["params"],
+            nf_apply_function=nfs["apply_fn"],
+            method=method_name,
             **hparams,
             **kwargs,
         )

@@ -20,7 +20,7 @@ import demos.collas.train_utils as train_utils
 
 AGENT_TYPES = ["lofi", "fdekf", "vdekf", "enkf", "sgd-rb", "adam-rb",]
 AGENT_ALL_TYPES = [*AGENT_TYPES, "linear", "lofi-it", "fdekf-it", "vdekf-it",
-                   "lofi-grad", "fdekf-ocl", "vdekf-ocl"]
+                   "lofi-grad", "fdekf-ocl", "vdekf-ocl", "fdekf-nf", "vdekf-nf"]
 
 
 def _check_positive_int(value):
@@ -152,6 +152,10 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
         agents["fdekf-ocl"] = {
             'pbounds': it_filter_pbounds,
         }
+    if "fdekf-nf" in agent_args:
+        agents["fdekf-nf"] = {
+            'pbounds': it_filter_pbounds,
+        }
     if "vdekf" in agent_args:
         agents["vdekf"] = {'pbounds': filter_pbounds}
     if "vdekf-it" in agent_args:
@@ -163,6 +167,10 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
         })
     if "vdekf-ocl" in agent_args:
         agents["vdekf-ocl"] = {
+            'pbounds': it_filter_pbounds,
+        }
+    if "vdekf-nf" in agent_args:
+        agents["vdekf-nf"] = {
             'pbounds': it_filter_pbounds,
         }
     if "enkf" in agent_args:
@@ -312,9 +320,6 @@ def tune_and_store_hyperparameters(
     """
     hparam_path.mkdir(parents=True, exist_ok=True)
     dataset = dataset_load_fn()
-    print(f"X_train shape: {dataset['train'][0].shape}")
-    print(f"X_val shape: {dataset['val'][0].shape}")
-    print(f"X_test shape: {dataset['test'][0].shape}")
     
     hparams = {}
     for agent_name, agent_params in agents.items():
@@ -411,23 +416,6 @@ def main(cl_args):
             dataset(ntrain_per_task=cl_args.ntrain_per_task).values()
     dataset_fn = partial(dataset_fn, dataset_type=cl_args.dataset)
     
-    # Approximate polynomial kernel
-    if cl_args.poly_kernel:
-        def dataset_load_fn(*args, **kwargs):
-            dataset = dataset_fn(*args, **kwargs)
-            for key, value in dataset.items():
-                X, *args = value
-                X_flat = X.reshape(X.shape[0], -1)
-                X_transformed = PolynomialCountSketch(
-                    degree=cl_args.kernel_degree,
-                    n_components=cl_args.kernel_n_components,
-                ).fit_transform(X_flat)
-                dataset[key] = (X_transformed, *args)
-
-            return dataset
-    else:
-        dataset_load_fn = dataset_fn
-    
     eval_metric = _eval_metric(cl_args.problem, cl_args.nll_method,
                                cl_args.temp, cl_args.cooling)
     
@@ -442,6 +430,39 @@ def main(cl_args):
         model_init_fn = partial(models.initialize_classification_mlp,
                                 hidden_dims=mlp_features)
     input_dim, output_dim = _compute_io_dims(cl_args.problem, cl_args.dataset)
+
+    # Approximate polynomial kernel
+    if cl_args.poly_kernel:
+        dataset = dataset_fn()
+        for key, value in dataset.items():
+            X, *args = value
+            X_flat = X.reshape(X.shape[0], -1)
+            X_tr = PolynomialCountSketch(
+                degree=cl_args.kernel_degree,
+                n_components=cl_args.kernel_n_components,
+            ).fit_transform(X_flat)
+            X_tr = (X_tr - X_tr.min()) / (X_tr.max() - X_tr.min())
+            X_tr = jnp.array(X_tr)
+            dataset[key] = (X_tr, *args)
+        def dataset_load_fn(*args, **kwargs):
+            dataset = dataset_fn(*args, **kwargs)
+            for key, value in dataset.items():
+                X, *args = value
+                X_flat = X.reshape(X.shape[0], -1)
+                X_tr = PolynomialCountSketch(
+                    degree=cl_args.kernel_degree,
+                    n_components=cl_args.kernel_n_components,
+                ).fit_transform(X_flat)
+                X_tr = (X_tr - X_tr.min()) / (X_tr.max() - X_tr.min())
+                X_tr = jnp.array(X_tr)
+                dataset[key] = (X_tr, *args)
+
+            return dataset
+        
+        input_dim = cl_args.kernel_n_components
+    else:
+        dataset_load_fn = dataset_fn
+
     model_init_fn = partial(model_init_fn, input_dim=input_dim,
                             output_dim=output_dim)
     
