@@ -467,6 +467,9 @@ def bbf_ekf_nf(
     log_alpha,
     log_learning_rate,
     # Specify before running
+    dim_input,
+    dim_output,
+    buffer_size,
     init_fn,
     train,
     test,
@@ -500,6 +503,9 @@ def bbf_ekf_nf(
     nfs = nf.init_normalizing_flow(nf_model, input_dim)
     
     estimator = ekf.RebayesNFEKF(
+        buffer_size=buffer_size,
+        dim_input=dim_input,
+        dim_output=dim_output,
         dynamics_weights_or_function=dynamics_weights,
         dynamics_covariance=dynamics_covariance,
         emission_mean_function=model_dict["emission_mean_function"],
@@ -856,6 +862,9 @@ def build_estimator(init_fn, hparams, method, classification=True, **kwargs):
             nf_initial_params=nfs["params"],
             nf_apply_function=nfs["apply_fn"],
             method=method_name,
+            buffer_size=kwargs["buffer_size"],
+            dim_input=kwargs["dim_input"],
+            dim_output=kwargs["dim_output"],
             **hparams,
             **kwargs,
         )

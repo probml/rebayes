@@ -135,7 +135,7 @@ class Rebayes(ABC):
         ...
     
     @partial(jit, static_argnums=(0,))
-    def update_noise_state(
+    def update_hyperparams(
         self,
         bel: Belief,
         x: Float[Array, "input_dim"],
@@ -207,7 +207,7 @@ class Rebayes(ABC):
         """Apply filtering to entire sequence of data. Return final belief state and outputs from callback."""
         num_timesteps = X.shape[0]
         def step(bel, t):
-            bel_pred = self.update_noise_state(bel, X[t], Y[t])
+            bel_pred = self.update_hyperparams(bel, X[t], Y[t])
             bel_pred = self.predict_state(bel_pred)
             pred_obs = self.predict_obs(bel, X[t])
             bel = self.update_state(bel_pred, X[t], Y[t])

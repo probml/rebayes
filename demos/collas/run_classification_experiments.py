@@ -153,9 +153,14 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
             'pbounds': it_filter_pbounds,
         }
     if "fdekf-nf" in agent_args:
-        agents["fdekf-nf"] = {
-            'pbounds': it_filter_pbounds,
-        }
+        agents.update({
+            f'fdekf-nf-{rank}': {
+                'pbounds': it_filter_pbounds,
+                'dim_input': input_dim,
+                'dim_output': output_dim,
+                'buffer_size': rank,
+            } for rank in ranks
+        })
     if "vdekf" in agent_args:
         agents["vdekf"] = {'pbounds': filter_pbounds}
     if "vdekf-it" in agent_args:
@@ -170,9 +175,14 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
             'pbounds': it_filter_pbounds,
         }
     if "vdekf-nf" in agent_args:
-        agents["vdekf-nf"] = {
-            'pbounds': it_filter_pbounds,
-        }
+        agents.update({
+            f'vdekf-nf-{rank}': {
+                'pbounds': it_filter_pbounds,
+                'dim_input': input_dim,
+                'dim_output': output_dim,
+                'buffer_size': rank,
+            } for rank in ranks
+        })
     if "enkf" in agent_args:
         agents.update({
             f"enkf-{rank}": {
