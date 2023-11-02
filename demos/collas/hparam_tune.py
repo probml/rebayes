@@ -189,6 +189,8 @@ def bbf_lofi_grad(
     memory_size,
     inflation = "hybrid",
     lofi_method = "diagonal",
+    correction_method="momentum-correction",
+    momentum_weight=0.0,
     callback_at_end=True,
     n_seeds=5,
     classification=True,
@@ -223,6 +225,8 @@ def bbf_lofi_grad(
         memory_size=memory_size,
         inflation=inflation,
         emission_dist=emission_dist,
+        correction_method=correction_method,
+        momentum_weight=momentum_weight,
     )
     
     test_cb_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test,

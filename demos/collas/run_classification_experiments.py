@@ -116,6 +116,8 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
                     'inflation': "hybrid",
                     'lofi_method': "diagonal",
                     'pbounds': filter_pbounds,
+                    'correction_method': "momentum-correction",
+                    'momentum_weight': 0.0,
                 } for rank in ranks
             })
         if lofi_cov_type == "spherical" or lofi_cov_type == "both":
@@ -125,6 +127,8 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
                     'inflation': "hybrid",
                     'lofi_method': "spherical",
                     'pbounds': filter_pbounds,
+                    'correction_method': "momentum-correction",
+                    'momentum_weight': 0.0,
                 } for rank in ranks
             })
     if "lofi-it" in agent_args:
