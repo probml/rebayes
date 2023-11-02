@@ -724,6 +724,7 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
         learning_rate: float = 0.01,
         method: str = "re-sample",
         n_sample: int = 10,
+        momentum_weight: float = 0.9,
     ):
         super().__init__(dynamics_weights, dynamics_covariance, emission_mean_function, 
                          emission_cov_function, emission_dist, adaptive_emission_cov, 
@@ -737,16 +738,7 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
         self.learning_rate = learning_rate
         self.method = method
         self.n_sample = n_sample
-        
-        # Update function
-        if self.method == "re-sample":
-            self.update_fn = core._lofi_diagonal_gradient_resample_condition_on
-        elif self.method == "importance-sample":
-            self.update_fn = core._lofi_diagonal_gradient_importance_condition_on
-        elif self.method == "momentum-correction":
-            self.update_fn = core._lofi_diagonal_gradient_momentum_condition_on
-        else:
-            raise ValueError("Invalid method.")
+        self.momentum_weight = momentum_weight
         
     def init_bel(
         self, 
@@ -804,15 +796,24 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
         x: Float[Array, "input_dim"],
         y: Float[Array, "output_dim"],
     ) -> GradientLoFiBel:
-        m, U, Lambda, Ups, nobs, obs_noise_var = \
-            bel.mean, bel.basis, bel.svs, bel.Ups, bel.nobs, bel.obs_noise_var
+        m, U, Lambda, Ups, nobs, obs_noise_var, momentum = \
+            bel.mean, bel.basis, bel.svs, bel.Ups, bel.nobs, bel.obs_noise_var, bel.momentum
         key = jr.PRNGKey(nobs)
         
-        m_cond, U_cond, Lambda_cond, Ups_cond = \
-            self.update_fn(m, U, Lambda, Ups, self.emission_mean_function,
-                           self.emission_cov_function, x, y, self.emission_dist,
-                           self.log_likelihood, self.n_sample,
-                           self.adaptive_emission_cov, obs_noise_var, key)
+        if self.method == "re-sample":
+            m_cond, U_cond, Lambda_cond, Ups_cond = \
+                core._lofi_diagonal_gradient_resample_condition_on(
+                    m, U, Lambda, Ups, self.emission_mean_function,
+                    self.emission_cov_function, x, y, self.emission_dist,
+                    self.log_likelihood, self.n_sample, key
+                )
+            momentum_cond = momentum
+        elif self.method == "momentum-correction":
+            m_cond, U_cond, Lambda_cond, Ups_cond, momentum_cond = \
+                core._lofi_diagonal_gradient_momentum_condition_on(
+                    m, U, Lambda, Ups, x, y, self.log_likelihood, 
+                    momentum, self.momentum_weight,
+                )
 
         # Estimate emission covariance.
         nobs_est, obs_noise_var_est = \
@@ -826,6 +827,7 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
             Ups=Ups_cond,
             nobs=nobs_est,
             obs_noise_var=obs_noise_var_est,
+            momentum=momentum_cond,
         )
         
         return bel_cond
@@ -833,7 +835,7 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
     
 # OCL (Diagonal) LOFI ----------------------------------------------------------
     
-class RebayesOCLLoFiDiagonal(RebayesLoFiDiagonal):
+class RebayesOCLLoFiDiagonal(Rebayes):
     def __init__(
         self,
         dynamics_weights: CovMat,
@@ -862,7 +864,7 @@ class RebayesOCLLoFiDiagonal(RebayesLoFiDiagonal):
         self.learning_rate = learning_rate
 
     @partial(jit, static_argnums=(0,))
-    def update_noise_state(
+    def update_hyperparams(
         self,
         bel: LoFiBel,
         x: Float[Array, "input_dim"],
@@ -936,3 +938,21 @@ class RebayesOCLLoFiDiagonal(RebayesLoFiDiagonal):
         )
 
         return bel_pred
+
+
+# NF (Diagonal) LOFI ----------------------------------------------------------
+
+# @chex.dataclass
+# class NFLoFiBel:
+#     pp_mean: chex.Array
+#     mean: chex.Array
+#     basis: chex.Array
+#     svs: chex.Array
+#     nf_params: chex.Array
+#     eta: float
+#     gamma: float
+#     q: float
+
+#     Ups: CovMat
+#     nobs: int
+#     obs_noise_var: float

@@ -930,10 +930,7 @@ def _lofi_diagonal_gradient_resample_condition_on(
     emission_dist: Callable,
     log_likelihood: Callable,
     n_sample: int=10,
-    adaptive_variance: bool = False,
-    obs_noise_var: float = 1.0,
     key: int = 0,
-    **kwargs,
 ):
     """Condition step of the gradient low-rank filter (resampling)
     with diagonal covariance matrix.
@@ -947,8 +944,10 @@ def _lofi_diagonal_gradient_resample_condition_on(
         y_cond_cov (Callable): Conditional emission covariance function.
         x (D_in,): Control input.
         y (D_obs,): Emission.
-        adaptive_variance (bool): Whether to use adaptive variance.
-        obs_noise_var (float): Observation noise variance.
+        emission_dist (Callable): Emission distribution.
+        log_likelihood (Callable): Log-likelihood function.
+        n_sample (int): Number of samples.
+        key (int): Random key.
 
     Returns:
         m_cond (D_hid,): Posterior mean.
@@ -962,13 +961,6 @@ def _lofi_diagonal_gradient_resample_condition_on(
     P, L = U.shape
     m_Y = lambda w: y_cond_mean(w, x)
     Cov_Y = lambda w: y_cond_cov(w, x)
-    
-    yhat = jnp.atleast_1d(m_Y(m))
-    C = yhat.shape[0]
-    if adaptive_variance:
-        R = jnp.eye(C) * obs_noise_var
-    else:
-        R = jnp.atleast_2d(Cov_Y(m))
         
     # Sample from observation model
     ys = emission_dist(m_Y(m), Cov_Y(m)).sample(seed=key, sample_shape=(n_sample,))
@@ -993,65 +985,66 @@ def _lofi_diagonal_gradient_resample_condition_on(
     return m_cond, U_cond, Lambda_cond, Ups_cond
 
 
-def _lofi_diagonal_gradient_importance_condition_on(
-    m: Float[Array, "state_dim"],
-    U: Float[Array, "state_dim memory_size"],
-    Lambda: Float[Array, "memory_size"],
-    Ups: Float[Array, "state_dim"],
-    y_cond_mean: Callable,
-    y_cond_cov: Callable,
-    x: Float[Array, "input_dim"],
-    y: Float[Array, "obs_dim"],
-    adaptive_variance: bool = False,
-    obs_noise_var: float = 1.0,
-):
-    """Condition step of the low-rank filter with diagonal covariance matrix.
+# TODO: Implement this
+# def _lofi_diagonal_gradient_importance_condition_on(
+#     m: Float[Array, "state_dim"],
+#     U: Float[Array, "state_dim memory_size"],
+#     Lambda: Float[Array, "memory_size"],
+#     Ups: Float[Array, "state_dim"],
+#     y_cond_mean: Callable,
+#     y_cond_cov: Callable,
+#     x: Float[Array, "input_dim"],
+#     y: Float[Array, "obs_dim"],
+#     adaptive_variance: bool = False,
+#     obs_noise_var: float = 1.0,
+# ):
+#     """Condition step of the low-rank filter with diagonal covariance matrix.
 
-    Args:
-        m (D_hid,): Prior mean.
-        U (D_hid, D_mem,): Prior basis.
-        Lambda (D_mem,): Prior singular values.
-        Ups (D_hid): Prior precision. 
-        y_cond_mean (Callable): Conditional emission mean function.
-        y_cond_cov (Callable): Conditional emission covariance function.
-        x (D_in,): Control input.
-        y (D_obs,): Emission.
-        adaptive_variance (bool): Whether to use adaptive variance.
-        obs_noise_var (float): Observation noise variance.
+#     Args:
+#         m (D_hid,): Prior mean.
+#         U (D_hid, D_mem,): Prior basis.
+#         Lambda (D_mem,): Prior singular values.
+#         Ups (D_hid): Prior precision. 
+#         y_cond_mean (Callable): Conditional emission mean function.
+#         y_cond_cov (Callable): Conditional emission covariance function.
+#         x (D_in,): Control input.
+#         y (D_obs,): Emission.
+#         adaptive_variance (bool): Whether to use adaptive variance.
+#         obs_noise_var (float): Observation noise variance.
 
-    Returns:
-        m_cond (D_hid,): Posterior mean.
-        U_cond (D_hid, D_mem,): Posterior basis.
-        Lambda_cond (D_mem,): Posterior singular values.
-        Ups_cond (D_hid,): Posterior precision.
-    """
-    P, L = U.shape
-    m_Y = lambda w: y_cond_mean(w, x)
-    Cov_Y = lambda w: y_cond_cov(w, x)
+#     Returns:
+#         m_cond (D_hid,): Posterior mean.
+#         U_cond (D_hid, D_mem,): Posterior basis.
+#         Lambda_cond (D_mem,): Posterior singular values.
+#         Ups_cond (D_hid,): Posterior precision.
+#     """
+#     P, L = U.shape
+#     m_Y = lambda w: y_cond_mean(w, x)
+#     Cov_Y = lambda w: y_cond_cov(w, x)
     
-    H = _jacrev_2d(m_Y, m)
-    yhat = jnp.atleast_1d(m_Y(m))
-    C = yhat.shape[0]
+#     H = _jacrev_2d(m_Y, m)
+#     yhat = jnp.atleast_1d(m_Y(m))
+#     C = yhat.shape[0]
     
-    if adaptive_variance:
-        R = jnp.eye(C) * obs_noise_var
-    else:
-        R = jnp.atleast_2d(Cov_Y(m))
-    R_chol = jnp.linalg.cholesky(R)
-    A = jnp.linalg.lstsq(R_chol, jnp.eye(C))[0].T
-    W_tilde = jnp.hstack([Lambda * U, (H.T @ A).reshape(P, -1)])
+#     if adaptive_variance:
+#         R = jnp.eye(C) * obs_noise_var
+#     else:
+#         R = jnp.atleast_2d(Cov_Y(m))
+#     R_chol = jnp.linalg.cholesky(R)
+#     A = jnp.linalg.lstsq(R_chol, jnp.eye(C))[0].T
+#     W_tilde = jnp.hstack([Lambda * U, (H.T @ A).reshape(P, -1)])
     
-    # Update the U matrix
-    u, lamb = _fast_svd(W_tilde)
+#     # Update the U matrix
+#     u, lamb = _fast_svd(W_tilde)
     
-    U_cond, U_extra = u[:, :L], u[:, L:]
-    Lambda_cond, Lambda_extra = lamb[:L], lamb[L:]
-    W_extra = Lambda_extra * U_extra
-    Ups_cond = Ups + jnp.einsum('ij,ij->i', W_extra, W_extra)[:, jnp.newaxis]
+#     U_cond, U_extra = u[:, :L], u[:, L:]
+#     Lambda_cond, Lambda_extra = lamb[:L], lamb[L:]
+#     W_extra = Lambda_extra * U_extra
+#     Ups_cond = Ups + jnp.einsum('ij,ij->i', W_extra, W_extra)[:, jnp.newaxis]
     
-    G = jnp.linalg.pinv(jnp.eye(W_tilde.shape[1]) + W_tilde.T @ (W_tilde/Ups))
-    K = (H.T @ A) @ A.T/Ups - (W_tilde/Ups @ G) @ ((W_tilde/Ups).T @ (H.T @ A) @ A.T)
-    m_cond = m + K @ (y - yhat)
+#     G = jnp.linalg.pinv(jnp.eye(W_tilde.shape[1]) + W_tilde.T @ (W_tilde/Ups))
+#     K = (H.T @ A) @ A.T/Ups - (W_tilde/Ups @ G) @ ((W_tilde/Ups).T @ (H.T @ A) @ A.T)
+#     m_cond = m + K @ (y - yhat)
     
     return m_cond, U_cond, Lambda_cond, Ups_cond
 
@@ -1061,48 +1054,37 @@ def _lofi_diagonal_gradient_momentum_condition_on(
     U: Float[Array, "state_dim memory_size"],
     Lambda: Float[Array, "memory_size"],
     Ups: Float[Array, "state_dim"],
-    y_cond_mean: Callable,
-    y_cond_cov: Callable,
     x: Float[Array, "input_dim"],
     y: Float[Array, "obs_dim"],
-    adaptive_variance: bool = False,
-    obs_noise_var: float = 1.0,
+    log_likelihood: Callable,
+    momentum: Float[Array, "state_dim"],
+    momentum_weight: float = 0.9,
 ):
-    """Condition step of the low-rank filter with diagonal covariance matrix.
+    """Condition step of the gradient low-rank filter (momentum correction)
+    with diagonal covariance matrix.
 
     Args:
         m (D_hid,): Prior mean.
         U (D_hid, D_mem,): Prior basis.
         Lambda (D_mem,): Prior singular values.
         Ups (D_hid): Prior precision. 
-        y_cond_mean (Callable): Conditional emission mean function.
-        y_cond_cov (Callable): Conditional emission covariance function.
         x (D_in,): Control input.
         y (D_obs,): Emission.
-        adaptive_variance (bool): Whether to use adaptive variance.
-        obs_noise_var (float): Observation noise variance.
+        momentum (D_hid,): Momentum vector.
+        momentum_weight (float): Momentum weight.
 
     Returns:
         m_cond (D_hid,): Posterior mean.
         U_cond (D_hid, D_mem,): Posterior basis.
         Lambda_cond (D_mem,): Posterior singular values.
         Ups_cond (D_hid,): Posterior precision.
-    """
+    """    
     P, L = U.shape
-    m_Y = lambda w: y_cond_mean(w, x)
-    Cov_Y = lambda w: y_cond_cov(w, x)
-    
-    H = _jacrev_2d(m_Y, m)
-    yhat = jnp.atleast_1d(m_Y(m))
-    C = yhat.shape[0]
-    
-    if adaptive_variance:
-        R = jnp.eye(C) * obs_noise_var
-    else:
-        R = jnp.atleast_2d(Cov_Y(m))
-    R_chol = jnp.linalg.cholesky(R)
-    A = jnp.linalg.lstsq(R_chol, jnp.eye(C))[0].T
-    W_tilde = jnp.hstack([Lambda * U, (H.T @ A).reshape(P, -1)])
+        
+    # Compute gradient and average
+    grad_fn = lambda y: grad(log_likelihood, argnums=0)(m, x, y)
+    gll = grad_fn(y).reshape(-1, 1)
+    W_tilde = jnp.hstack([Lambda * U, (gll.ravel() - momentum).reshape(P, -1)])
     
     # Update the U matrix
     u, lamb = _fast_svd(W_tilde)
@@ -1113,7 +1095,10 @@ def _lofi_diagonal_gradient_momentum_condition_on(
     Ups_cond = Ups + jnp.einsum('ij,ij->i', W_extra, W_extra)[:, jnp.newaxis]
     
     G = jnp.linalg.pinv(jnp.eye(W_tilde.shape[1]) + W_tilde.T @ (W_tilde/Ups))
-    K = (H.T @ A) @ A.T/Ups - (W_tilde/Ups @ G) @ ((W_tilde/Ups).T @ (H.T @ A) @ A.T)
-    m_cond = m + K @ (y - yhat)
+    K = gll/Ups - (W_tilde/Ups @ G) @ ((W_tilde/Ups).T @ gll)
+    m_cond = m + K.ravel()
     
-    return m_cond, U_cond, Lambda_cond, Ups_cond
+    # Update momentum
+    momentum_cond = momentum + momentum_weight * gll.ravel()
+    
+    return m_cond, U_cond, Lambda_cond, Ups_cond, momentum_cond
