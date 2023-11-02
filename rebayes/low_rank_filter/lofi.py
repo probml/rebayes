@@ -722,7 +722,7 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
         inflation: str = 'bayesian',
         use_svd: bool = True,
         learning_rate: float = 0.01,
-        method: str = "re-sample",
+        correction_method: str = "re-sample",
         n_sample: int = 10,
         momentum_weight: float = 0.9,
     ):
@@ -736,9 +736,12 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
                               self.emission_cov_function(params, x)).log_prob(y)
             )
         self.learning_rate = learning_rate
-        self.method = method
+        self.method = correction_method
         self.n_sample = n_sample
         self.momentum_weight = momentum_weight
+        if self.method not in ["re-sample", "momentum-correction"]:
+            print(self.method)
+            raise ValueError("Method must be either 're-sample' or 'momentum-correction'.")
         
     def init_bel(
         self, 
