@@ -721,7 +721,6 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
         steady_state: bool = False,
         inflation: str = 'bayesian',
         use_svd: bool = True,
-        learning_rate: float = 0.01,
         correction_method: str = "re-sample",
         n_sample: int = 10,
         momentum_weight: float = 0.9,
@@ -735,7 +734,6 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
                 emission_dist(self.emission_mean_function(params, x),
                               self.emission_cov_function(params, x)).log_prob(y)
             )
-        self.learning_rate = learning_rate
         self.method = correction_method
         self.n_sample = n_sample
         self.momentum_weight = momentum_weight
@@ -759,38 +757,6 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
         )
         
         return bel
-    
-    def _update_mean(
-        self,
-        bel: LoFiBel,
-        m_prev: Float[Array, "state_dim"],
-        x: Float[Array, "input_dim"],
-        y: Float[Array, "output_dim"],
-    ) -> GradientLoFiBel:
-        m, Ups, S, T = bel.mean, bel.Ups, bel.S, bel.T
-        gll = -jax.grad(self.log_likelihood, argnums=0)(m, x, y)
-        additive_term = gll/Ups[:,0] - S.T @ (T @ gll)
-        m_cond = m - self.learning_rate * (m - m_prev + additive_term)
-        bel_cond = bel.replace(mean=m_cond)
-        
-        return bel_cond
-    
-    def _update_precision(
-        self,
-        bel: LoFiBel,
-        x: Float[Array, "input_dim"],
-        y: Float[Array, "output_dim"],
-    ) -> GradientLoFiBel:
-        bel_cond = super().update_state(bel, x, y)
-        bel_cond = bel.replace(
-            basis=bel_cond.basis,
-            svs=bel_cond.svs,
-            Ups=bel_cond.Ups,
-            nobs=bel_cond.nobs,
-            obs_noise_var=bel_cond.obs_noise_var,
-        )
-        
-        return bel_cond
     
     @partial(jit, static_argnums=(0,))
     def update_state(
