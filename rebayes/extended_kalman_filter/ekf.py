@@ -351,7 +351,7 @@ class RebayesOCLEKF(Rebayes):
         return P_obs
     
     @partial(jit, static_argnums=(0,))
-    def update_hyperparams(
+    def update_hyperparams_prepred(
         self,
         bel: OCLEKFBel,
         x: Float[Array, "input_dim"],
@@ -629,7 +629,7 @@ class RebayesNFEKF(Rebayes):
         return P_obs
     
     @partial(jit, static_argnums=(0,))
-    def update_hyperparams(
+    def update_hyperparams_postpred(
         self,
         bel: NFEKFBel,
         x: Float[Array, "input_dim"],

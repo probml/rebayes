@@ -833,7 +833,7 @@ class RebayesOCLLoFiDiagonal(Rebayes):
         self.learning_rate = learning_rate
 
     @partial(jit, static_argnums=(0,))
-    def update_hyperparams(
+    def update_hyperparams_prepred(
         self,
         bel: LoFiBel,
         x: Float[Array, "input_dim"],
