@@ -26,9 +26,23 @@ class NF_MLP(nn.Module):
         for _ in range(self.n_layers):
             z = nn.Dense(self.n_units)(z)
             z = nn.relu(z)
-        z = nn.Dense(x.shape[0]*2)(z)       # shape inference
+        z = nn.Dense(
+            x.shape[0]*2,
+            kernel_init=lambda key, shape, dtype: jnp.full(shape, 1e-4, dtype=dtype),
+            bias_init=lambda key, shape, dtype: jnp.full(shape, 1e-4, dtype=dtype)
+        )(z)       # shape inference
 
         return z
+
+def _batch_apply(unflatten_fn, apply_fn, params, x):
+    # Convert x to a batch if it's not already one
+    if len(x.shape) == 1:
+        result = apply_fn(unflatten_fn(params), x)
+    else:
+        result = vmap(apply_fn, (None, 0))(unflatten_fn(params), x)
+        
+    return result
+
 
 def generate_shift_and_log_scale_fn(apply_fn, params):
     def shift_and_log_scale_fn(x, *args, **kwargs):
@@ -75,7 +89,7 @@ def init_normalizing_flow(model, input_dim, n_layers=4, key=0):
         flat_params, unflatten_fn = ravel_pytree(params)
         params_stack.append(flat_params)
         apply_fn = lambda w, x: \
-            model.apply(unflatten_fn(w), x)
+            _batch_apply(unflatten_fn, model.apply, w, x)
         sl_fn = generate_shift_and_log_scale_fn(apply_fn, flat_params)
         bijector = tfb.RealNVP(
             fraction_masked=0.5*(-1)**i,
@@ -87,7 +101,7 @@ def init_normalizing_flow(model, input_dim, n_layers=4, key=0):
     bijector = tfb.Chain(bijectors)
 
     apply_fn = lambda w, x: \
-        model.apply(unflatten_fn(w), x)
+        _batch_apply(unflatten_fn, model.apply, w, x)
 
     result = {
         "params": params_stack,
