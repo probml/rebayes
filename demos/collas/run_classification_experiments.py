@@ -58,7 +58,7 @@ def _compute_io_dims(problem, dataset_type):
 
 def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks, 
                         input_dim, output_dim, problem, 
-                        nll_method, filter_n_iter):
+                        nll_method, filter_n_iter, momentum_weight):
     agents = {}
     sgd_loss_fn = optax.softmax_cross_entropy if output_dim >= 2 \
         else optax.sigmoid_binary_cross_entropy
@@ -117,7 +117,7 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
                     'lofi_method': "diagonal",
                     'pbounds': filter_pbounds,
                     'correction_method': "momentum-correction",
-                    'momentum_weight': 0.0,
+                    'momentum_weight': momentum_weight,
                 } for rank in ranks
             })
         if lofi_cov_type == "spherical" or lofi_cov_type == "both":
@@ -128,7 +128,7 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
                     'lofi_method': "spherical",
                     'pbounds': filter_pbounds,
                     'correction_method': "momentum-correction",
-                    'momentum_weight': 0.0,
+                    'momentum_weight': momentum_weight,
                 } for rank in ranks
             })
     if "lofi-it" in agent_args:
@@ -485,7 +485,8 @@ def main(cl_args):
                                  cl_args.tune_sgd_momentum,
                                  cl_args.ranks, input_dim, output_dim, 
                                  cl_args.problem, cl_args.nll_method,
-                                 cl_args.filter_n_iter)
+                                 cl_args.filter_n_iter,
+                                 cl_args.momentum_weight)
     
     # Set up hyperparameter tuning
     hparam_path = Path(config_path, problem_str,
@@ -624,6 +625,9 @@ if __name__ == "__main__":
     
     # Kernel number of components
     parser.add_argument("--kernel_n_components", type=int, default=10_000)
+    
+    # Momentum Weight for LOFI-grad
+    parser.add_argument("--momentum_weight", type=float, default=0.0)
     
     args = parser.parse_args()
     main(args)
