@@ -12,12 +12,16 @@ import numpy as np
 import optax
 
 
+resnet_kernel_init = nn.initializers.variance_scaling(
+    2.0, mode='fan_out', distribution='normal'
+)
+
 # .8796... is stddev of standard normal truncated to (-2, 2)
 TRUNCATED_STD = 20.0 / np.array(.87962566103423978)
 _jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
 
 
-class CNN(nn.Module):
+class LeNet(nn.Module):
     input_dim: Sequence[int]
     output_dim: int
     activation: nn.Module = nn.relu
@@ -51,6 +55,75 @@ class MLP(nn.Module):
         x = nn.Dense(self.features[-1])(x)
         
         return x
+    
+
+class ResNetBlock(nn.Module):
+    output_dim: int
+    subsample : bool = False  # If True, we apply a stride inside F
+    activation: nn.Module = nn.relu
+
+    @nn.compact
+    def __call__(self, x, train=True):
+        # Network representing F
+        z = nn.Conv(
+            self.output_dim, kernel_size=(3, 3),
+            strides=(1, 1) if not self.subsample else (2, 2),
+            kernel_init=resnet_kernel_init,
+            use_bias=False
+        )(x)
+        z = nn.BatchNorm()(z, use_running_average=not train)
+        z = self.activation(z)
+        z = nn.Conv(
+            self.output_dim, kernel_size=(3, 3),
+            kernel_init=resnet_kernel_init,
+            use_bias=False
+        )(z)
+        z = nn.BatchNorm()(z, use_running_average=not train)
+        if self.subsample:
+            x = nn.Conv(
+                self.output_dim, kernel_size=(1, 1), strides=(2, 2), 
+                kernel_init=resnet_kernel_init
+            )(x)
+        x_out = self.activation(z + x)
+        
+        return x_out
+
+
+class ResNet(nn.Module):
+    input_dim: Sequence[int]
+    output_dim: int
+    hidden_dims: Sequence[int]=(16, 32, 64)
+    num_blocks : tuple = (3, 3, 3)
+    activation: nn.Module = nn.relu
+
+    @nn.compact
+    def __call__(self, x, train=True):
+        x = x.reshape(self.input_dim)
+        # A first convolution on the original image to scale up the channel size
+        x = nn.Conv(
+            self.hidden_dims[0], kernel_size=(3, 3), 
+            kernel_init=resnet_kernel_init, use_bias=False
+        )(x)
+        x = nn.BatchNorm()(x, use_running_average=not train)
+        x = self.activation(x)
+
+        # Creating the ResNet blocks
+        for block_idx, block_count in enumerate(self.num_blocks):
+            for bc in range(block_count):
+                # Subsample the first block of each group, except the very first one.
+                subsample = (bc == 0 and block_idx > 0)
+                # ResNet block
+                x = ResNetBlock(
+                    output_dim=self.hidden_dims[block_idx],
+                    activation=self.activation, subsample=subsample
+                )(x, train=train)
+
+        # Mapping to classification output
+        x = x.mean(axis=(1, 2))
+        x = nn.Dense(self.output_dim)(x).ravel()
+        
+        return x
+
 
 
 # ------------------------------------------------------------------------------
@@ -70,7 +143,8 @@ def _initialize_classification(
     flat_params, unflatten_fn = ravel_pytree(params)
     apply_fn = lambda w, x: \
         model.apply({'params': unflatten_fn(w)}, x,
-                    capture_intermediates=capture_intermediates)
+                    capture_intermediates=capture_intermediates,
+                    mutable=['batch_stats'])[0]
     if output_dim == 1:
         # Binary classification
         sigmoid_fn = lambda w, x: \
@@ -115,12 +189,19 @@ def initialize_classification_cnn(
     output_dim: int = 10,
     homogenize_cov: bool = False,
     capture_intermediates: bool = False,
+    cnn_type="lenet",
 ) -> dict:
     """Initialize a CNN for classification.
     """
     if isinstance(key, int):
         key = jr.PRNGKey(key)
-    model = CNN(input_dim=input_dim, output_dim=output_dim)
+    if cnn_type == "lenet":
+        model_type = LeNet
+    elif cnn_type == "resnet":
+        model_type = ResNet
+    else:
+        raise ValueError(f"Unknown CNN type {cnn_type}")
+    model = model_type(input_dim=input_dim, output_dim=output_dim)
     model_dict = _initialize_classification(key, model, input_dim, 
                                             output_dim, homogenize_cov,
                                             capture_intermediates)
