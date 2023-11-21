@@ -437,9 +437,10 @@ def main(cl_args):
     mlp_features = cl_args.mlp_features
     if sum(mlp_features) == 0:
         mlp_features = []
-    if cl_args.model == "cnn":
+    if cl_args.model == "lenet" or cl_args.model == "resnet":
         assert not cl_args.poly_kernel # CNNs not supported with polynomial kernel
-        model_init_fn = models.initialize_classification_cnn
+        model_init_fn = partial(models.initialize_classification_cnn,
+                                cnn_type=cl_args.model)
     else: # cl_args.model == "mlp"
         model_init_fn = partial(models.initialize_classification_mlp,
                                 hidden_dims=mlp_features)
@@ -479,6 +480,8 @@ def main(cl_args):
 
     model_init_fn = partial(model_init_fn, input_dim=input_dim,
                             output_dim=output_dim)
+    model = model_init_fn()
+    print(f"Number of parameters: {model['flat_params'].shape}")
     
     # Set up agents
     agents = _process_agent_args(cl_args.agents, cl_args.lofi_cov_type,
@@ -559,7 +562,7 @@ if __name__ == "__main__":
     
     # Type of model (mlp or cnn)
     parser.add_argument("--model", type=str, default="mlp",
-                        choices=["mlp", "cnn"])
+                        choices=["mlp", "lenet", "resnet"])
     
     # MLP hidden dimensions
     parser.add_argument("--mlp_features", type=_check_positive_int, nargs="+",
