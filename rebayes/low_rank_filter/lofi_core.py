@@ -928,7 +928,7 @@ def _lofi_diagonal_gradient_resample_condition_on(
     x: Float[Array, "input_dim"],
     y: Float[Array, "obs_dim"],
     emission_dist: Callable,
-    log_likelihood: Callable,
+    loss_fn: Callable,
     n_sample: int=10,
     key: int = 0,
 ):
@@ -945,7 +945,7 @@ def _lofi_diagonal_gradient_resample_condition_on(
         x (D_in,): Control input.
         y (D_obs,): Emission.
         emission_dist (Callable): Emission distribution.
-        log_likelihood (Callable): Log-likelihood function.
+        loss_fn (Callable): Loss function.
         n_sample (int): Number of samples.
         key (int): Random key.
 
@@ -965,7 +965,7 @@ def _lofi_diagonal_gradient_resample_condition_on(
     # Sample from observation model
     ys = emission_dist(m_Y(m), Cov_Y(m)).sample(seed=key, sample_shape=(n_sample,))
     # Compute gradients and average
-    grad_fn = lambda y: grad(log_likelihood, argnums=0)(m, x, y)
+    grad_fn = lambda y: -grad(loss_fn, argnums=0)(m, x, y)
     pseudo_gll = jnp.mean(vmap(grad_fn)(ys), axis=0).reshape(-1, 1)
     gll = grad_fn(y).reshape(-1, 1)
     W_tilde = jnp.hstack([Lambda * U, pseudo_gll.reshape(P, -1)])
@@ -1056,7 +1056,7 @@ def _lofi_diagonal_gradient_momentum_condition_on(
     Ups: Float[Array, "state_dim"],
     x: Float[Array, "input_dim"],
     y: Float[Array, "obs_dim"],
-    log_likelihood: Callable,
+    loss_fn: Callable,
     momentum: Float[Array, "state_dim"],
     momentum_weight: float = 0.9,
 ):
@@ -1070,6 +1070,7 @@ def _lofi_diagonal_gradient_momentum_condition_on(
         Ups (D_hid): Prior precision. 
         x (D_in,): Control input.
         y (D_obs,): Emission.
+        loss_fn (Callable): Loss function.
         momentum (D_hid,): Momentum vector.
         momentum_weight (float): Momentum weight.
 
@@ -1082,7 +1083,7 @@ def _lofi_diagonal_gradient_momentum_condition_on(
     P, L = U.shape
         
     # Compute gradient and average
-    grad_fn = lambda y: grad(log_likelihood, argnums=0)(m, x, y)
+    grad_fn = lambda y: -grad(loss_fn, argnums=0)(m, x, y)
     gll = grad_fn(y).reshape(-1, 1)
     W_tilde = jnp.hstack([Lambda * U, (gll.ravel() - momentum).reshape(P, -1)])
     

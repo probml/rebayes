@@ -715,6 +715,7 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
         emission_cov_function: Union[FnStateToEmission2, FnStateAndInputToEmission2],
         emission_dist: EmissionDistFn = \
             lambda mean, cov: MVN(loc=mean, scale_tril=jnp.linalg.cholesky(cov)),
+        loss_fn: Callable = None,
         adaptive_emission_cov: bool=False,
         dynamics_covariance_inflation_factor: float=0.0,
         memory_size: int = 10,
@@ -729,16 +730,19 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
                          emission_cov_function, emission_dist, adaptive_emission_cov, 
                          dynamics_covariance_inflation_factor, memory_size, steady_state, 
                          inflation, use_svd)
-        self.log_likelihood = lambda params, x, y: \
-            jnp.sum(
-                emission_dist(self.emission_mean_function(params, x),
-                              self.emission_cov_function(params, x)).log_prob(y)
-            )
         self.method = correction_method
+        if loss_fn is None:
+            self.loss_fn = lambda params, x, y: \
+                -jnp.sum(
+                    emission_dist(self.emission_mean_function(params, x),
+                                self.emission_cov_function(params, x)).log_prob(y)
+                )
+        else:
+            assert self.method == "base"
+            self.loss_fn = loss_fn
         self.n_sample = n_sample
         self.momentum_weight = momentum_weight
         if self.method not in ["re-sample", "momentum-correction"]:
-            print(self.method)
             raise ValueError("Method must be either 're-sample' or 'momentum-correction'.")
         
     def init_bel(
@@ -761,7 +765,7 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
     @partial(jit, static_argnums=(0,))
     def update_state(
         self, 
-        bel: LoFiBel,
+        bel: GradientLoFiBel,
         x: Float[Array, "input_dim"],
         y: Float[Array, "output_dim"],
     ) -> GradientLoFiBel:
@@ -774,13 +778,13 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
                 core._lofi_diagonal_gradient_resample_condition_on(
                     m, U, Lambda, Ups, self.emission_mean_function,
                     self.emission_cov_function, x, y, self.emission_dist,
-                    self.log_likelihood, self.n_sample, key
+                    self.loss_fn, self.n_sample, key
                 )
             momentum_cond = momentum
         elif self.method == "momentum-correction":
             m_cond, U_cond, Lambda_cond, Ups_cond, momentum_cond = \
                 core._lofi_diagonal_gradient_momentum_condition_on(
-                    m, U, Lambda, Ups, x, y, self.log_likelihood, 
+                    m, U, Lambda, Ups, x, y, self.loss_fn,
                     momentum, self.momentum_weight,
                 )
 
