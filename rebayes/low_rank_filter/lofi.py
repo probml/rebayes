@@ -739,7 +739,8 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
                 )
         else:
             assert self.method == "base"
-            self.loss_fn = loss_fn
+            self.loss_fn = lambda params, x, y: \
+                loss_fn(params, x, y, self.emission_mean_function)
         self.n_sample = n_sample
         self.momentum_weight = momentum_weight
         if self.method not in ["re-sample", "momentum-correction"]:
