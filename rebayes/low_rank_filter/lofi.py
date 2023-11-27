@@ -738,7 +738,7 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
                                 self.emission_cov_function(params, x)).log_prob(y)
                 )
         else:
-            assert self.method == "base"
+            assert self.method == "momentum-correction"
             self.loss_fn = lambda params, x, y: \
                 loss_fn(params, x, y, self.emission_mean_function)
         self.n_sample = n_sample
