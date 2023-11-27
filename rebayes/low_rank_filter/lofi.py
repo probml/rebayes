@@ -817,6 +817,7 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
         bel: GradientLoFiBel,
         x: Float[Array, "input_dim"],
         y: Float[Array, "output_dim"],
+        progress_bar: bool=False
     ) -> GradientLoFiBel:
         m, U, Lambda, Ups, nobs, obs_noise_var, momentum = \
             bel.mean, bel.basis, bel.svs, bel.Ups, bel.nobs, bel.obs_noise_var, bel.momentum
