@@ -741,6 +741,10 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
             assert self.method == "momentum-correction"
             self.loss_fn = lambda params, x, y: \
                 loss_fn(params, x, y, self.emission_mean_function)
+        self.batch_loss_fn = lambda params, x, y: \
+            jnp.mean(
+                jax.vmap(self.loss_fn, (None, 0, 0))(params, x, y)
+            )
         self.n_sample = n_sample
         self.momentum_weight = momentum_weight
         if self.method not in ["re-sample", "momentum-correction"]:
@@ -793,6 +797,59 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
         nobs_est, obs_noise_var_est = \
             core._lofi_estimate_noise(m_cond, self.emission_mean_function, x, y, 
                                       nobs, obs_noise_var, self.adaptive_emission_cov)
+
+        bel_cond = bel.replace(
+            mean=m_cond,
+            basis=U_cond,
+            svs=Lambda_cond,
+            Ups=Ups_cond,
+            nobs=nobs_est,
+            obs_noise_var=obs_noise_var_est,
+            momentum=momentum_cond,
+        )
+        
+        return bel_cond
+    
+    
+    @partial(jit, static_argnums=(0,))
+    def update_state_batch(
+        self, 
+        bel: GradientLoFiBel,
+        x: Float[Array, "input_dim"],
+        y: Float[Array, "output_dim"],
+    ) -> GradientLoFiBel:
+        m, U, Lambda, Ups, nobs, obs_noise_var, momentum = \
+            bel.mean, bel.basis, bel.svs, bel.Ups, bel.nobs, bel.obs_noise_var, bel.momentum
+        key = jr.PRNGKey(nobs)
+        
+        if self.method == "re-sample":
+            m_cond, U_cond, Lambda_cond, Ups_cond = \
+                core._lofi_diagonal_gradient_resample_condition_on(
+                    m, U, Lambda, Ups, self.emission_mean_function,
+                    self.emission_cov_function, x, y, self.emission_dist,
+                    self.batch_loss_fn, self.n_sample, key
+                )
+            momentum_cond = momentum
+        elif self.method == "momentum-correction":
+            m_cond, U_cond, Lambda_cond, Ups_cond, momentum_cond = \
+                core._lofi_diagonal_gradient_momentum_condition_on(
+                    m, U, Lambda, Ups, x, y, self.batch_loss_fn,
+                    momentum, self.momentum_weight,
+                )
+
+        # Estimate emission covariance.
+        def noise_step(carry, t):
+            nobs, obs_noise_var = carry
+            xx, yy = x[t], y[t]
+            nobs_est, obs_noise_var_est = \
+                core._lofi_estimate_noise(m_cond, self.emission_mean_function, 
+                                          xx, yy, nobs, obs_noise_var, 
+                                          self.adaptive_emission_cov)
+            return (nobs_est, obs_noise_var_est), (nobs_est, obs_noise_var_est)
+        
+        (nobs_est, obs_noise_var_est), _ = jax.lax.scan(
+            noise_step, (nobs, obs_noise_var), jnp.arange(len(x))
+        )
 
         bel_cond = bel.replace(
             mean=m_cond,
