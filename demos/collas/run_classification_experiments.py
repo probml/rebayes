@@ -10,6 +10,7 @@ import jax.numpy as jnp
 from jax.tree_util import tree_map
 import jax.random as jr
 import optax
+from sklearn.kernel_approximation import PolynomialCountSketch
 
 import demos.collas.datasets.dataloaders as dataloaders
 import rebayes.utils.models as models
@@ -17,8 +18,9 @@ import rebayes.utils.callbacks as callbacks
 import demos.collas.hparam_tune as hparam_tune
 import demos.collas.train_utils as train_utils
 
-AGENT_TYPES = ["lofi", "fdekf", "vdekf", "sgd-rb", "adam-rb",]
-AGENT_ITER_TYPES = [*AGENT_TYPES, "lofi-it", "fdekf-it", "vdekf-it"]
+AGENT_TYPES = ["lofi", "fdekf", "vdekf", "enkf", "sgd-rb", "adam-rb",]
+AGENT_ALL_TYPES = [*AGENT_TYPES, "linear", "lofi-it", "fdekf-it", "vdekf-it",
+                   "lofi-grad", "fdekf-ocl", "vdekf-ocl", "fdekf-nf", "vdekf-nf"]
 
 
 def _check_positive_int(value):
@@ -56,7 +58,7 @@ def _compute_io_dims(problem, dataset_type):
 
 def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks, 
                         input_dim, output_dim, problem, 
-                        nll_method, filter_n_iter):
+                        nll_method, filter_n_iter, momentum_weight):
     agents = {}
     sgd_loss_fn = optax.softmax_cross_entropy if output_dim >= 2 \
         else optax.sigmoid_binary_cross_entropy
@@ -106,22 +108,92 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
                     'pbounds': filter_pbounds,
                 } for rank in ranks
             })
+    if "lofi-grad" in agent_args:
+        if lofi_cov_type == "diagonal" or lofi_cov_type == "both":
+            agents.update({
+                f'lofi-{rank}-grad': {
+                    'memory_size': rank,
+                    'inflation': "hybrid",
+                    'lofi_method': "diagonal",
+                    'pbounds': filter_pbounds,
+                    'correction_method': "momentum-correction",
+                    'momentum_weight': momentum_weight,
+                } for rank in ranks
+            })
+        if lofi_cov_type == "spherical" or lofi_cov_type == "both":
+            agents.update({
+                f'lofi-sph-{rank}-grad': {
+                    'memory_size': rank,
+                    'inflation': "hybrid",
+                    'lofi_method': "spherical",
+                    'pbounds': filter_pbounds,
+                    'correction_method': "momentum-correction",
+                    'momentum_weight': momentum_weight,
+                } for rank in ranks
+            })
     if "lofi-it" in agent_args:
-        pass # TODO
+        agents.update({
+            f'lofi-{rank}-it-{n_iter}': {
+                'memory_size': rank,
+                'inflation': "hybrid",
+                'lofi_method': "diagonal",
+                'pbounds': it_filter_pbounds,
+                'n_replay': n_iter,
+            } for rank in ranks for n_iter in filter_n_iter
+        })
+    if "linear" in agent_args:
+        agents["linear"] = {"pbounds": filter_pbounds}
     if "fdekf" in agent_args:
         agents["fdekf"] = {'pbounds': filter_pbounds}
     if "fdekf-it" in agent_args:
-        agents["fdekf-it"] = {
+        agents.update({
+            f"fdekf-it-{n_iter}": {
+                'pbounds': it_filter_pbounds,
+                'n_replay': n_iter,
+            } for n_iter in filter_n_iter
+        })
+    if "fdekf-ocl" in agent_args:
+        agents["fdekf-ocl"] = {
             'pbounds': it_filter_pbounds,
-            'n_replay': filter_n_iter,
         }
+    if "fdekf-nf" in agent_args:
+        agents.update({
+            f'fdekf-nf-{rank}': {
+                'pbounds': it_filter_pbounds,
+                'dim_input': input_dim,
+                'dim_output': output_dim,
+                'buffer_size': rank,
+            } for rank in ranks
+        })
     if "vdekf" in agent_args:
         agents["vdekf"] = {'pbounds': filter_pbounds}
     if "vdekf-it" in agent_args:
-        agents["vdekf-it"] = {
+        agents.update({
+            f"vdekf-it-{n_iter}": {
+                'pbounds': it_filter_pbounds,
+                'n_replay': n_iter,
+            } for n_iter in filter_n_iter
+        })
+    if "vdekf-ocl" in agent_args:
+        agents["vdekf-ocl"] = {
             'pbounds': it_filter_pbounds,
-            'n_replay': filter_n_iter,
         }
+    if "vdekf-nf" in agent_args:
+        agents.update({
+            f'vdekf-nf-{rank}': {
+                'pbounds': it_filter_pbounds,
+                'dim_input': input_dim,
+                'dim_output': output_dim,
+                'buffer_size': rank,
+            } for rank in ranks
+        })
+    if "enkf" in agent_args:
+        agents.update({
+            f"enkf-{rank}": {
+                'pbounds': filter_pbounds,
+                'n_particles': rank,
+            } for rank in ranks
+        })
     if "sgd-rb" in agent_args:
         pbounds = sgd_pbounds.copy()
         if tune_sgd_momentum:
@@ -267,8 +339,15 @@ def tune_and_store_hyperparameters(
     for agent_name, agent_params in agents.items():
         print(f"Tuning {agent_name}...")
         pbounds = agent_params.pop("pbounds")
+        if agent_name == "linear":
+            curr_model_init_fn = partial(
+                model_init_fn,
+                hidden_dims=[],
+            )
+        else:
+            curr_model_init_fn = model_init_fn
         optimizer = hparam_tune.create_optimizer(
-            model_init_fn, pbounds, dataset["train"], dataset["val"],
+            curr_model_init_fn, pbounds, dataset["train"], dataset["val"],
             val_callback, agent_name, verbose=verbose, 
             callback_at_end=callback_at_end, n_seeds=n_seeds,
             nll_method=nll_method, classification=True, **agent_params,
@@ -345,30 +424,72 @@ def main(cl_args):
     # Load dataset
     dataset = dataloaders.clf_datasets[cl_args.problem]
     if cl_args.problem == "stationary" or cl_args.problem == "rotated":
-        dataset_load_fn, kwargs = dataset(ntrain=cl_args.ntrain).values()
+        dataset_fn, kwargs = dataset(ntrain=cl_args.ntrain).values()
     else:
-        dataset_load_fn, kwargs = \
+        dataset_fn, kwargs = \
             dataset(ntrain_per_task=cl_args.ntrain_per_task).values()
-    dataset_load_fn = partial(dataset_load_fn, dataset_type=cl_args.dataset)
+    dataset_fn = partial(dataset_fn, dataset_type=cl_args.dataset)
+    
     eval_metric = _eval_metric(cl_args.problem, cl_args.nll_method,
                                cl_args.temp, cl_args.cooling)
     
     # Initialize model
-    if cl_args.model == "cnn":
-        model_init_fn = models.initialize_classification_cnn
+    mlp_features = cl_args.mlp_features
+    if sum(mlp_features) == 0:
+        mlp_features = []
+    if cl_args.model == "lenet" or cl_args.model == "resnet":
+        assert not cl_args.poly_kernel # CNNs not supported with polynomial kernel
+        model_init_fn = partial(models.initialize_classification_cnn,
+                                cnn_type=cl_args.model)
     else: # cl_args.model == "mlp"
         model_init_fn = partial(models.initialize_classification_mlp,
-                                hidden_dims=cl_args.mlp_features)
+                                hidden_dims=mlp_features)
     input_dim, output_dim = _compute_io_dims(cl_args.problem, cl_args.dataset)
+
+    # Approximate polynomial kernel
+    if cl_args.poly_kernel:
+        dataset = dataset_fn()
+        for key, value in dataset.items():
+            X, *args = value
+            X_flat = X.reshape(X.shape[0], -1)
+            X_tr = PolynomialCountSketch(
+                degree=cl_args.kernel_degree,
+                n_components=cl_args.kernel_n_components,
+            ).fit_transform(X_flat)
+            X_tr = (X_tr - X_tr.min()) / (X_tr.max() - X_tr.min())
+            X_tr = jnp.array(X_tr)
+            dataset[key] = (X_tr, *args)
+        def dataset_load_fn(*args, **kwargs):
+            dataset = dataset_fn(*args, **kwargs)
+            for key, value in dataset.items():
+                X, *args = value
+                X_flat = X.reshape(X.shape[0], -1)
+                X_tr = PolynomialCountSketch(
+                    degree=cl_args.kernel_degree,
+                    n_components=cl_args.kernel_n_components,
+                ).fit_transform(X_flat)
+                X_tr = (X_tr - X_tr.min()) / (X_tr.max() - X_tr.min())
+                X_tr = jnp.array(X_tr)
+                dataset[key] = (X_tr, *args)
+
+            return dataset
+        
+        input_dim = cl_args.kernel_n_components
+    else:
+        dataset_load_fn = dataset_fn
+
     model_init_fn = partial(model_init_fn, input_dim=input_dim,
                             output_dim=output_dim)
+    model = model_init_fn()
+    print(f"Number of parameters: {model['flat_params'].shape}")
     
     # Set up agents
     agents = _process_agent_args(cl_args.agents, cl_args.lofi_cov_type,
                                  cl_args.tune_sgd_momentum,
                                  cl_args.ranks, input_dim, output_dim, 
                                  cl_args.problem, cl_args.nll_method,
-                                 cl_args.filter_n_iter)
+                                 cl_args.filter_n_iter,
+                                 cl_args.momentum_weight)
     
     # Set up hyperparameter tuning
     hparam_path = Path(config_path, problem_str,
@@ -403,15 +524,22 @@ def main(cl_args):
             agent_kwargs = agents[agent_name]
             if "pbounds" in agent_kwargs:
                 agent_kwargs.pop("pbounds")
-            optimizer_dict = hparam_tune.build_estimator(model_init_fn, hparams,
-                                                        agent_name, 
-                                                        classification=True, 
-                                                        **agent_kwargs)
-            _ = evaluate_and_store_result(output_path, model_init_fn,
-                                        dataset_load_fn, optimizer_dict,
-                                        eval_metric["test"], agent_name,
-                                        cl_args.problem, cl_args.n_iter,
-                                        **kwargs)
+            if agent_name == "linear":
+                curr_model_init_fn = partial(
+                    model_init_fn,
+                    hidden_dims=[],
+                )
+            else:
+                curr_model_init_fn = model_init_fn
+            optimizer_dict = hparam_tune.build_estimator(curr_model_init_fn, 
+                                                         hparams, agent_name, 
+                                                         classification=True, 
+                                                         **agent_kwargs)
+            _ = evaluate_and_store_result(output_path, curr_model_init_fn,
+                                          dataset_load_fn, optimizer_dict,
+                                          eval_metric["test"], agent_name,
+                                          cl_args.problem, cl_args.n_iter,
+                                          **kwargs)
     
 
 if __name__ == "__main__":
@@ -434,7 +562,7 @@ if __name__ == "__main__":
     
     # Type of model (mlp or cnn)
     parser.add_argument("--model", type=str, default="mlp",
-                        choices=["mlp", "cnn"])
+                        choices=["mlp", "lenet", "resnet"])
     
     # MLP hidden dimensions
     parser.add_argument("--mlp_features", type=_check_positive_int, nargs="+",
@@ -475,11 +603,12 @@ if __name__ == "__main__":
                         default=[1, 10,])
     
     # Iterative filter number of iterations
-    parser.add_argument("--filter_n_iter", type=_check_positive_int, default=2)
+    parser.add_argument("--filter_n_iter", type=_check_positive_int, nargs="+",
+                        default=[2,])
     
     # List of agents to use
     parser.add_argument("--agents", type=str, nargs="+", default=AGENT_TYPES,
-                        choices=AGENT_TYPES)
+                        choices=AGENT_ALL_TYPES)
     
     # Tune momentum for SGD
     parser.add_argument("--tune_sgd_momentum", action="store_true")
@@ -490,6 +619,18 @@ if __name__ == "__main__":
     
     # Number of random initializations for evaluation
     parser.add_argument("--n_iter", type=int, default=20)
+    
+    # Approximate polynomial kernel
+    parser.add_argument("--poly_kernel", action="store_true")
+    
+    # Kernel degree
+    parser.add_argument("--kernel_degree", type=int, default=2)
+    
+    # Kernel number of components
+    parser.add_argument("--kernel_n_components", type=int, default=10_000)
+    
+    # Momentum Weight for LOFI-grad
+    parser.add_argument("--momentum_weight", type=float, default=0.0)
     
     args = parser.parse_args()
     main(args)

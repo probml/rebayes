@@ -1,7 +1,7 @@
 from functools import partial
 
-from avalanche.benchmarks.classic.cfashion_mnist import SplitFMNIST
-from avalanche.benchmarks.classic.cmnist import SplitMNIST
+# from avalanche.benchmarks.classic.cfashion_mnist import SplitFMNIST
+# from avalanche.benchmarks.classic.cmnist import SplitMNIST
 import numpy as np
 import jax
 from jax import vmap
@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import jax.random as jr
 import tensorflow_datasets as tfds
 
-from rebayes.utils.avalanche import make_avalanche_data
+# from rebayes.utils.avalanche import make_avalanche_data
 
 
 def load_mnist_dataset(fashion=False, n_train=None, n_val=None, n_test=None):

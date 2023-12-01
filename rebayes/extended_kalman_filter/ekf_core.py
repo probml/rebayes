@@ -1,9 +1,10 @@
-from functools import partial
 from jax import jit, lax, jacrev, vmap
 from jax import numpy as jnp
-from jaxtyping import Float, Array
-from tensorflow_probability.substrates.jax.distributions import MultivariateNormalDiag as MVN
-import chex
+import tensorflow_probability.substrates.jax as tfp
+
+tfd = tfp.distributions
+MVN = tfd.MultivariateNormalFullCovariance
+MVD = tfd.MultivariateNormalDiag
 
 
 _jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
@@ -191,6 +192,30 @@ def _diagonal_dynamics_predict(m, P, gamma, Q, alpha):
     return m_pred, P_pred
 
 
+def _decay_dynamics_predict(m, P, gamma, Q, alpha, decoupled=False):
+    """Predict the next state using a non-stationary dynamics model.
+
+    Args:
+        m (D_hid,): Prior mean.
+        P (D_hid,): Prior covariance.
+        gamma (float): Dynamics decay.
+        Q (D_hid): Diagonal dynamics covariance vector.
+        alpha (float): Covariance inflation factor.
+        decoupled (bool): Whether to use decoupled dynamics.
+
+    Returns:
+        m_pred (D_hid,): Predicted mean.
+        P_pred (D_hid,): Predicted covariance diagonal elements.
+    """
+    if decoupled:
+        m_pred = m
+    else:
+        m_pred = gamma * m
+    P_pred = (1 + alpha) * (gamma**2 * P + (1 - gamma**2) * Q)
+    
+    return m_pred, P_pred
+
+
 def _ekf_estimate_noise(m, y_cond_mean, u, y, nobs, obs_noise_var, adaptive_variance=False):
     """Estimate observation noise based on empirical residual errors.
 
@@ -207,14 +232,14 @@ def _ekf_estimate_noise(m, y_cond_mean, u, y, nobs, obs_noise_var, adaptive_vari
         nobs (int): Updated number of observations seen so far.
         obs_noise_var (float): Updated estimate of observation noise.
     """
+    nobs += 1
     if not adaptive_variance:
-        return 0, 0.0
+        return nobs, 0.0
 
     m_Y = lambda w: y_cond_mean(w, u)
     yhat = jnp.atleast_1d(m_Y(m))
     
     sqerr = ((yhat - y).T @ (yhat - y)).squeeze() / yhat.shape[0]
-    nobs += 1
     obs_noise_var = jnp.max(jnp.array([1e-6, obs_noise_var + 1/nobs * (sqerr - obs_noise_var)]))
 
     return nobs, obs_noise_var
@@ -318,3 +343,78 @@ def _swvakf_estimate_noise(Q, q_nu, q_psi, R, r_nu, r_psi, A, B, L_eff, rho, t):
     R_cond = _exclude_first_timestep(t, r_psi_cond / r_nu_cond, R)
 
     return Q_cond, q_nu_cond, q_psi_cond, R_cond, r_nu_cond, r_psi_cond
+
+
+# Ensemble Kalman filter
+def _ensemble_predict(key, ens, gamma, Q):
+    """Predict the next ensemble of states.
+
+    Args:
+        key (Array): JAX PRNG key.
+        ens (D_ens, D_hid,): Prior ensemble of states.
+        gamma (float): Dynamics decay.
+        Q (D_hid,): Diagonal dynamics covariance matrix.
+
+    Returns:
+        ens_pred (D_ens, D_hid,): Predicted ensemble of states.
+    """
+    *_, D_hid = ens.shape
+    ens_pred = gamma * ens
+    # Add noise
+    ens_noise = MVD(
+        loc=jnp.zeros(D_hid,), scale_diag=jnp.sqrt(Q)
+    ).sample(seed=key, sample_shape=ens_pred.shape[0])
+    ens_pred += ens_noise
+    
+    return ens_pred
+
+
+def _ensemble_stochastic_condition_on(
+    key, ens, y_cond_mean, y_cond_cov, u, y, 
+    adaptive_variance=False, obs_noise_var=0.0
+):
+    """Condition on the emission using a stochastic ensemble Kalman filter.
+
+    Args:
+        key (Array): JAX PRNG key.
+        ens (D_ens, D_hid,): Prior ensemble of states.
+        y_cond_mean (Callable): Conditional emission mean function.
+        y_cond_cov (Callable): Conditional emission covariance function.
+        u (D_in,): Control input.
+        y (D_obs,): Emission.
+        adaptive_variance (bool): Whether to use adaptive variance.
+        
+    Returns:
+        ens_cond (D_ens, D_hid,): Posterior ensemble of states.
+    """
+    m_Y = lambda x: y_cond_mean(x, u)
+    Cov_Y = lambda x: y_cond_cov(x, u)
+    prior_mean = jnp.mean(ens, axis=0)
+    if adaptive_variance:
+        R = jnp.atleast_2d(obs_noise_var)
+    else:
+        R = jnp.atleast_2d(Cov_Y(prior_mean))
+    
+    # Compute Kalman gain
+    L = ens.shape[0] # number of ensemble members
+    ens_fwd = vmap(m_Y)(ens).reshape(L, -1)
+    ens_fwd_mean = jnp.mean(ens_fwd, axis=0)
+    ens_fwd_centered = ens_fwd - ens_fwd_mean
+    HPHT = (ens_fwd_centered.T @ ens_fwd_centered) / (L - 1)
+    S = HPHT + R
+    C = ((ens - prior_mean).T @ ens_fwd_centered) / (L - 1)
+    K = jnp.linalg.lstsq(S, C.T)[0].T
+    
+    # Compute perturbed model observations
+    yhat = vmap(m_Y)(ens)
+    *_, D_obs = yhat.shape
+    yhat_noise = MVN(
+        loc=jnp.zeros(D_obs), covariance_matrix=R
+    ).sample(seed=key, sample_shape=yhat.shape[0])
+    yhat += yhat_noise
+    innovations = y - yhat
+
+    update_state = lambda z, e: z + K @ e
+    ens_cond = vmap(update_state)(ens, innovations)
+    
+    return ens_cond

@@ -316,7 +316,7 @@ def mnist_eval_agent(
         keys = jr.split(jr.PRNGKey(i))
         indx = jr.choice(keys[0], len(X_train), (n_steps,))
         X_curr, y_curr = X_train[indx], y_train[indx]
-        init_mean = init_fn(keys[1])["flat_params"]
+        init_mean = /scan(keys[1])["flat_params"]
         _, result = agent.scan(init_mean, init_cov, X_curr, y_curr, 
                                callback=callback, **test_kwargs, bel=bel_init)
         
