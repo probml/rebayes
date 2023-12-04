@@ -574,7 +574,6 @@ def _lofi_diagonal_cov_condition_on(
     else:
         R = jnp.atleast_2d(Cov_Y(m))
     R_chol = jnp.linalg.cholesky(R)
-    print(R_chol.shape, jnp.eye(C).shape)
     A = jnp.linalg.lstsq(R_chol, jnp.eye(C))[0].T
     W_tilde = jnp.hstack([Lambda * U, (H.T @ A).reshape(P, -1)])
     
