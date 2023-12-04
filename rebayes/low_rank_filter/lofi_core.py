@@ -574,6 +574,7 @@ def _lofi_diagonal_cov_condition_on(
     else:
         R = jnp.atleast_2d(Cov_Y(m))
     R_chol = jnp.linalg.cholesky(R)
+    print(R_chol.shape, jnp.eye(C).shape)
     A = jnp.linalg.lstsq(R_chol, jnp.eye(C))[0].T
     W_tilde = jnp.hstack([Lambda * U, (H.T @ A).reshape(P, -1)])
     
@@ -1046,7 +1047,7 @@ def _lofi_diagonal_gradient_resample_condition_on(
 #     K = (H.T @ A) @ A.T/Ups - (W_tilde/Ups @ G) @ ((W_tilde/Ups).T @ (H.T @ A) @ A.T)
 #     m_cond = m + K @ (y - yhat)
     
-    return m_cond, U_cond, Lambda_cond, Ups_cond
+#     return m_cond, U_cond, Lambda_cond, Ups_cond
 
 
 def _lofi_diagonal_gradient_momentum_condition_on(
@@ -1081,7 +1082,7 @@ def _lofi_diagonal_gradient_momentum_condition_on(
         Ups_cond (D_hid,): Posterior precision.
     """    
     P, L = U.shape
-        
+
     # Compute gradient and average
     grad_fn = lambda y: -grad(loss_fn, argnums=0)(m, x, y)
     gll = grad_fn(y).reshape(-1, 1)

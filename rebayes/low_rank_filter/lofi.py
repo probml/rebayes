@@ -745,6 +745,15 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
             jnp.mean(
                 jax.vmap(self.loss_fn, (None, 0, 0))(params, x, y)
             )
+        
+        # def batch_loss_fn(params, x, y):
+        #     losses = jax.vmap(self.loss_fn, (None, 0, 0))(params, x, y)
+        #     loss = jnp.mean(losses)
+            
+        #     return loss
+        
+        # self.batch_loss_fn = batch_loss_fn
+            
         self.n_sample = n_sample
         self.momentum_weight = momentum_weight
         if self.method not in ["re-sample", "momentum-correction"]:
@@ -815,9 +824,8 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
     def update_state_batch(
         self, 
         bel: GradientLoFiBel,
-        x: Float[Array, "input_dim"],
-        y: Float[Array, "output_dim"],
-        progress_bar: bool=False
+        x: Float[Array, "batch_size input_dim"],
+        y: Float[Array, "batch_size output_dim"],
     ) -> GradientLoFiBel:
         m, U, Lambda, Ups, nobs, obs_noise_var, momentum = \
             bel.mean, bel.basis, bel.svs, bel.Ups, bel.nobs, bel.obs_noise_var, bel.momentum
@@ -861,6 +869,19 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
             obs_noise_var=obs_noise_var_est,
             momentum=momentum_cond,
         )
+        
+        return bel_cond
+    
+    @partial(jit, static_argnums=(0, 4))
+    def scan_state_batch(
+        self,
+        bel: GradientLoFiBel, 
+        X: Float[Array, "batch_size input_dim"],
+        Y: Float[Array, "batch_size output_dim"],
+        progress_bar=False
+    ) -> GradientLoFiBel:
+        bel_pred = self.predict_state(bel)
+        bel_cond = self.update_state_batch(bel_pred, X, Y)
         
         return bel_cond
     

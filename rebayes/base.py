@@ -245,7 +245,7 @@ class Rebayes(ABC):
         return bel, outputs
     
     @partial(jit, static_argnums=(0, 4))
-    def update_state_batch(
+    def scan_state_batch(
         self,
         bel: Belief, 
         X: Float[Array, "batch_size input_dim"],
@@ -255,7 +255,7 @@ class Rebayes(ABC):
         bel, _ = self.scan(None, None, X, Y, bel=bel, progress_bar=progress_bar)
         return bel
     
-    def update_state_batch_with_callback(
+    def scan_state_batch_with_callback(
         self,
         i: int,
         bel: Belief, 
@@ -289,14 +289,14 @@ class Rebayes(ABC):
             bel_pre_update = bel
             Xtr, Ytr = batch[0], batch[1]
             if callback_at_end:
-                bel = self.update_state_batch(bel, Xtr, Ytr, progress_bar)
+                bel = self.scan_state_batch(bel, Xtr, Ytr, progress_bar)
                 if callback is None:
                     out = None
                 else:
                     out = callback(i, bel_pre_update, bel, batch, **kwargs)
                     outputs.append(out)
             else:
-                bel, out = self.update_state_batch_with_callback(
+                bel, out = self.scan_state_batch_with_callback(
                     i, bel, Xtr, Ytr, callback, progress_bar, **kwargs
                 )
                 outputs.append(out)
