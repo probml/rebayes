@@ -931,6 +931,7 @@ def _lofi_diagonal_gradient_resample_condition_on(
     loss_fn: Callable,
     n_sample: int=10,
     key: int = 0,
+    gradient_avg: bool = True,
 ):
     """Condition step of the gradient low-rank filter (resampling)
     with diagonal covariance matrix.
@@ -966,9 +967,11 @@ def _lofi_diagonal_gradient_resample_condition_on(
     ys = emission_dist(m_Y(m), Cov_Y(m)).sample(seed=key, sample_shape=(n_sample,))
     # Compute gradients and average
     grad_fn = lambda y: -grad(loss_fn, argnums=0)(m, x, y)
-    pseudo_gll = jnp.mean(vmap(grad_fn)(ys), axis=0).reshape(-1, 1)
+    pseudo_gll = vmap(grad_fn)(ys).T
+    if gradient_avg:
+        pseudo_gll = pseudo_gll / jnp.sqrt(n_sample)
+    W_tilde = jnp.hstack([Lambda * U, pseudo_gll])
     gll = grad_fn(y).reshape(-1, 1)
-    W_tilde = jnp.hstack([Lambda * U, pseudo_gll.reshape(P, -1)])
     
     # Update the U matrix
     u, lamb = _fast_svd(W_tilde)

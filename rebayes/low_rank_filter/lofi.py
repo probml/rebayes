@@ -725,6 +725,7 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
         correction_method: str = "re-sample",
         n_sample: int = 10,
         momentum_weight: float = 0.9,
+        gradient_avg: bool = True,
     ):
         super().__init__(dynamics_weights, dynamics_covariance, emission_mean_function, 
                          emission_cov_function, emission_dist, adaptive_emission_cov, 
@@ -756,6 +757,7 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
             
         self.n_sample = n_sample
         self.momentum_weight = momentum_weight
+        self.gradient_avg = gradient_avg
         if self.method not in ["re-sample", "momentum-correction"]:
             raise ValueError("Method must be either 're-sample' or 'momentum-correction'.")
         
@@ -792,7 +794,7 @@ class RebayesGradientLoFi(RebayesLoFiDiagonal):
                 core._lofi_diagonal_gradient_resample_condition_on(
                     m, U, Lambda, Ups, self.emission_mean_function,
                     self.emission_cov_function, x, y, self.emission_dist,
-                    self.loss_fn, self.n_sample, key
+                    self.loss_fn, self.n_sample, key, self.gradient_avg
                 )
             momentum_cond = momentum
         elif self.method == "momentum-correction":
