@@ -191,6 +191,7 @@ def bbf_lofi_grad(
     lofi_method = "diagonal",
     correction_method="momentum-correction",
     momentum_weight=0.0,
+    gradient_avg=True,
     callback_at_end=True,
     n_seeds=5,
     classification=True,
@@ -227,6 +228,7 @@ def bbf_lofi_grad(
         emission_dist=emission_dist,
         correction_method=correction_method,
         momentum_weight=momentum_weight,
+        gradient_avg=gradient_avg,
     )
     
     test_cb_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test,
