@@ -113,7 +113,7 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
     if "lofi-grad-resample-avg" in agent_args:
         if lofi_cov_type == "diagonal" or lofi_cov_type == "both":
             agents.update({
-                f'lofi-{rank}-resample-avg': {
+                f'lofi-{rank}-grad-resample-avg': {
                     'memory_size': rank,
                     'inflation': "hybrid",
                     'lofi_method': "diagonal",
@@ -124,7 +124,7 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
             })
         if lofi_cov_type == "spherical" or lofi_cov_type == "both":
             agents.update({
-                f'lofi-sph-{rank}-resample-avg': {
+                f'lofi-sph-{rank}-grad-resample-avg': {
                     'memory_size': rank,
                     'inflation': "hybrid",
                     'lofi_method': "spherical",
@@ -136,7 +136,7 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
     if "lofi-grad-resample-sum" in agent_args:
         if lofi_cov_type == "diagonal" or lofi_cov_type == "both":
             agents.update({
-                f'lofi-{rank}-resample-sum': {
+                f'lofi-{rank}-grad-resample-sum': {
                     'memory_size': rank,
                     'inflation': "hybrid",
                     'lofi_method': "diagonal",
@@ -147,7 +147,7 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
             })
         if lofi_cov_type == "spherical" or lofi_cov_type == "both":
             agents.update({
-                f'lofi-sph-{rank}-resample-sum': {
+                f'lofi-sph-{rank}-grad-resample-sum': {
                     'memory_size': rank,
                     'inflation': "hybrid",
                     'lofi_method': "spherical",
@@ -159,7 +159,7 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
     if "lofi-grad-momentum" in agent_args:
         if lofi_cov_type == "diagonal" or lofi_cov_type == "both":
             agents.update({
-                f'lofi-{rank}-momentum': {
+                f'lofi-{rank}-grad-momentum': {
                     'memory_size': rank,
                     'inflation': "hybrid",
                     'lofi_method': "diagonal",
@@ -170,7 +170,7 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
             })
         if lofi_cov_type == "spherical" or lofi_cov_type == "both":
             agents.update({
-                f'lofi-sph-{rank}-momentum': {
+                f'lofi-sph-{rank}-grad-momentum': {
                     'memory_size': rank,
                     'inflation': "hybrid",
                     'lofi_method': "spherical",
