@@ -704,7 +704,11 @@ def bbf_rsgd(
 
 
 def bbf_ivon(
+    log_init_hessian,
     log_learning_rate,
+    log_weight_decay,
+    log_1m_beta_1,
+    log_1m_beta_2,
     # Specify before running
     init_fn,
     train,
@@ -719,17 +723,21 @@ def bbf_ivon(
     X_train, *_, y_train = train
     X_test, *_, y_test = test
     
+    initial_hessian = jnp.exp(log_init_hessian).item()
     learning_rate=jnp.exp(log_learning_rate).item()
+    weight_decay = jnp.exp(log_weight_decay).item()
+    beta_1 = 1 - jnp.exp(log_1m_beta_1).item()
+    beta_2 = 1 - jnp.exp(log_1m_beta_2).item()
     model_dict = init_fn(key=0)
     
     estimator = ivon.RebayesIVON(
         apply_fn=model_dict["apply_fn"],
         loss_fn=loss_fn,
         n_sample=n_sample,
-        beta_1=0.9,
-        beta_2=0.99999,
+        beta_1=beta_1,
+        beta_2=beta_2,
         learning_rate=learning_rate,
-        weight_decay=1e-4,
+        weight_decay=weight_decay,
     )
     
     test_cb_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test, 
@@ -741,11 +749,11 @@ def bbf_ivon(
         model_dict = init_fn(key=i)
         flat_params = model_dict["flat_params"]
         if callback_at_end:
-            bel, _ = estimator.scan(flat_params, 0.01, X_train, 
+            bel, _ = estimator.scan(flat_params, initial_hessian, X_train, 
                                     y_train, progress_bar=False)
             metric = jnp.array(list(callback(bel, **test_cb_kwargs).values()))
         else:
-            _, metric = estimator.scan(flat_params, 0.01, X_train, 
+            _, metric = estimator.scan(flat_params, initial_hessian, X_train, 
                                        y_train, progress_bar=False,
                                        callback=callback, **test_cb_kwargs)
             metric = jnp.array(list(metric.values())).mean()
@@ -865,11 +873,18 @@ def get_best_params(optimizer, method, nll_method="nll"):
             initial_covariance = jnp.exp(max_params["log_init_cov"]).item()
             hparams["initial_covariance"] = initial_covariance
     elif "ivon" in method:
+        initial_hessian = jnp.exp(max_params["log_init_hessian"]).item()
         learning_rate = jnp.exp(max_params["log_learning_rate"]).item()
+        weight_decay = jnp.exp(max_params["log_weight_decay"]).item()
+        beta_1 = 1 - jnp.exp(max_params["log_1m_beta_1"]).item()
+        beta_2 = 1 - jnp.exp(max_params["log_1m_beta_2"]).item()
         
         hparams = {
-            "initial_hessian": 0.01,
+            "initial_hessian": initial_hessian,
             "learning_rate": learning_rate,
+            "weight_decay": weight_decay,
+            "beta_1": beta_1,
+            "beta_2": beta_2,
         }
     else:
         initial_covariance = jnp.exp(max_params["log_init_cov"]).item()
