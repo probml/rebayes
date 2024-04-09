@@ -18,7 +18,7 @@ import rebayes.utils.callbacks as callbacks
 import demos.collas.hparam_tune as hparam_tune
 import demos.collas.train_utils as train_utils
 
-AGENT_TYPES = ["lofi", "fdekf", "vdekf", "enkf", "sgd-rb", "adam-rb",]
+AGENT_TYPES = ["lofi", "fdekf", "vdekf", "enkf", "sgd-rb", "adam-rb", "ivon"]
 AGENT_ALL_TYPES = [*AGENT_TYPES, "linear", "lofi-it", "fdekf-it", "vdekf-it",
                    "lofi-grad-resample-avg", "lofi-grad-resample-sum",
                    "lofi-grad-momentum", "fdekf-ocl", "vdekf-ocl", 
@@ -89,6 +89,13 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
         }
         it_filter_pbounds = filter_pbounds.copy()
         it_filter_pbounds["log_learning_rate"] = (-10.0, 0.0)
+    ivon_pbounds = {
+        "log_learning_rate": (-10.0, 0.0),
+        "log_weight_decay": (-10.0, 0.0),
+        "log_1m_beta_1": (-10.0, 0.0),
+        "log_1m_beta_2": (-10.0, 0.0),
+        "log_init_hessian": (-10.0, 0.0),
+    }
     
     # Create agents
     if "lofi" in agent_args:
@@ -265,6 +272,14 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
                 'dim_output': output_dim,
                 "optimizer": "adam",
                 'pbounds': sgd_pbounds,
+            } for rank in ranks
+        })
+    if "ivon" in agent_args:
+        agents.update({
+            f'ivon-{rank}': {
+                'loss_fn': sgd_loss_fn,
+                'n_sample': rank,
+                'pbounds': ivon_pbounds,
             } for rank in ranks
         })
     

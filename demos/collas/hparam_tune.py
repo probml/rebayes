@@ -10,6 +10,7 @@ import tensorflow_probability.substrates.jax as tfp
 from rebayes.extended_kalman_filter import ekf
 from rebayes.extended_kalman_filter import enkf
 from rebayes.extended_kalman_filter import replay_ekf
+from rebayes.ivon import ivon
 from rebayes.low_rank_filter import lofi
 from rebayes.sgd_filter import replay_sgd as rsgd
 import rebayes.utils.normalizing_flows as nf
@@ -702,6 +703,69 @@ def bbf_rsgd(
     return result
 
 
+def bbf_ivon(
+    log_init_hessian,
+    log_learning_rate,
+    log_weight_decay,
+    log_1m_beta_1,
+    log_1m_beta_2,
+    # Specify before running
+    init_fn,
+    train,
+    test,
+    callback,
+    loss_fn,
+    n_sample,
+    callback_at_end=True,
+    n_seeds=5,
+    **kwargs,
+):
+    X_train, *_, y_train = train
+    X_test, *_, y_test = test
+    
+    initial_hessian = jnp.exp(log_init_hessian).item()
+    learning_rate=jnp.exp(log_learning_rate).item()
+    weight_decay = jnp.exp(log_weight_decay).item()
+    beta_1 = 1 - jnp.exp(log_1m_beta_1).item()
+    beta_2 = 1 - jnp.exp(log_1m_beta_2).item()
+    model_dict = init_fn(key=0)
+    
+    estimator = ivon.RebayesIVON(
+        apply_fn=model_dict["apply_fn"],
+        loss_fn=loss_fn,
+        n_sample=n_sample,
+        beta_1=beta_1,
+        beta_2=beta_2,
+        learning_rate=learning_rate,
+        weight_decay=weight_decay,
+    )
+    
+    test_cb_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test, 
+                      "apply_fn": model_dict["apply_fn"], "key": jr.PRNGKey(0), 
+                      **kwargs}
+    
+    result = []
+    for i in range(n_seeds):
+        model_dict = init_fn(key=i)
+        flat_params = model_dict["flat_params"]
+        if callback_at_end:
+            bel, _ = estimator.scan(flat_params, initial_hessian, X_train, 
+                                    y_train, progress_bar=False)
+            metric = jnp.array(list(callback(bel, **test_cb_kwargs).values()))
+        else:
+            _, metric = estimator.scan(flat_params, initial_hessian, X_train, 
+                                       y_train, progress_bar=False,
+                                       callback=callback, **test_cb_kwargs)
+            metric = jnp.array(list(metric.values())).mean()
+        result.append(metric)
+    result = jnp.array(result).mean()
+    
+    if jnp.isnan(result) or jnp.isinf(result):
+        result = -1e6
+        
+    return result
+
+
 def create_optimizer(
     init_fn,
     bounds,
@@ -739,6 +803,17 @@ def create_optimizer(
                 bbf_partial,
                 log_init_cov=0.0
             )
+    elif "ivon" in method:
+        bbf_partial = partial(
+            bbf_ivon,
+            init_fn=init_fn,
+            train=train,
+            test=test,
+            callback=callback,
+            callback_at_end=callback_at_end,
+            n_seeds=n_seeds,
+            **kwargs
+        )
     else:
         curr_method = method
         if "ekf-it" in method:
@@ -797,6 +872,20 @@ def get_best_params(optimizer, method, nll_method="nll"):
         if nll_method != "nll":
             initial_covariance = jnp.exp(max_params["log_init_cov"]).item()
             hparams["initial_covariance"] = initial_covariance
+    elif "ivon" in method:
+        initial_hessian = jnp.exp(max_params["log_init_hessian"]).item()
+        learning_rate = jnp.exp(max_params["log_learning_rate"]).item()
+        weight_decay = jnp.exp(max_params["log_weight_decay"]).item()
+        beta_1 = 1 - jnp.exp(max_params["log_1m_beta_1"]).item()
+        beta_2 = 1 - jnp.exp(max_params["log_1m_beta_2"]).item()
+        
+        hparams = {
+            "initial_hessian": initial_hessian,
+            "learning_rate": learning_rate,
+            "weight_decay": weight_decay,
+            "beta_1": beta_1,
+            "beta_2": beta_2,
+        }
     else:
         initial_covariance = jnp.exp(max_params["log_init_cov"]).item()
         dynamics_weights = \
@@ -967,8 +1056,16 @@ def build_estimator(init_fn, hparams, method, classification=True, **kwargs):
         init_covariance = 1.0
         if "initial_covariance" in hparams:
             init_covariance = hparams.pop("initial_covariance")
+    elif "ivon" in method:
+        init_covariance = hparams.pop("initial_hessian") # Relabeling for consistency!
+        estimator = ivon.RebayesIVON(
+            apply_fn=apply_fn,
+            loss_fn=kwargs["loss_fn"],
+            n_sample=kwargs["n_sample"],
+            **hparams,
+        )
     else:
-        raise ValueError("method must be either 'ekf', 'lofi' or 'sgd'")
+        raise ValueError("method must be either 'ekf', 'lofi', 'sgd' or 'ivon'")
 
     result = {
         "agent": estimator,
