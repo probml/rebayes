@@ -91,10 +91,6 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
         it_filter_pbounds["log_learning_rate"] = (-10.0, 0.0)
     ivon_pbounds = {
         "log_learning_rate": (-10.0, 0.0),
-        "log_weight_decay": (-10.0, 0.0),
-        "log_1m_beta_1": (-10.0, 0.0),
-        "log_1m_beta_2": (-10.0, 0.0),
-        "log_init_hessian": (-10.0, 0.0),
     }
     
     # Create agents
