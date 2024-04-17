@@ -76,6 +76,7 @@ class RebayesEKF(Rebayes):
         adaptive_emission_cov: bool = False,
         dynamics_covariance_inflation_factor: float = 0.0,
         method: str="fcekf",
+        inverse_free: bool=False,
     ):  
         super().__init__(dynamics_covariance, emission_mean_function, emission_cov_function, emission_dist)
         self.dynamics_weights = dynamics_weights_or_function
@@ -93,6 +94,7 @@ class RebayesEKF(Rebayes):
             raise ValueError('unknown method ', method)        
         self.pred_fn, self.update_fn = PREDICT_FNS[method], UPDATE_FNS[method]
         self.nobs, self.obs_noise_var = 0, 0.0
+        self.inverse_free = inverse_free
 
     def init_bel(
         self,
@@ -174,7 +176,8 @@ class RebayesEKF(Rebayes):
         m, P, nobs, obs_noise_var = bel.mean, bel.cov, bel.nobs, bel.obs_noise_var
         m_cond, P_cond = self.update_fn(m, P, self.emission_mean_function, 
                                         self.emission_cov_function, x, y, 
-                                        1, self.adaptive_emission_cov, obs_noise_var)
+                                        1, self.adaptive_emission_cov, obs_noise_var,
+                                        inverse_free=self.inverse_free)
         nobs_cond, obs_noise_var_cond = \
             core._ekf_estimate_noise(m_cond, self.emission_mean_function, x, y, 
                                      nobs, obs_noise_var, self.adaptive_emission_cov)

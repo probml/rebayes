@@ -18,7 +18,8 @@ import rebayes.utils.callbacks as callbacks
 import demos.collas.hparam_tune as hparam_tune
 import demos.collas.train_utils as train_utils
 
-AGENT_TYPES = ["lofi", "fdekf", "vdekf", "enkf", "sgd-rb", "adam-rb", "ivon"]
+AGENT_TYPES = ["lofi", "fdekf", "vdekf", "vdekf-if", "enkf", "sgd-rb", 
+               "adam-rb", "ivon"]
 AGENT_ALL_TYPES = [*AGENT_TYPES, "linear", "lofi-it", "fdekf-it", "vdekf-it",
                    "lofi-grad-resample-avg", "lofi-grad-resample-sum",
                    "lofi-grad-momentum", "fdekf-ocl", "vdekf-ocl", 
@@ -222,6 +223,8 @@ def _process_agent_args(agent_args, lofi_cov_type, tune_sgd_momentum, ranks,
         })
     if "vdekf" in agent_args:
         agents["vdekf"] = {'pbounds': filter_pbounds}
+    if "vdekf-if" in agent_args:
+        agents["vdekf-if"] = {'pbounds': filter_pbounds}
     if "vdekf-it" in agent_args:
         agents.update({
             f"vdekf-it-{n_iter}": {

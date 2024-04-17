@@ -11,7 +11,9 @@ _jacrev_2d = lambda f, x: jnp.atleast_2d(jacrev(f)(x))
 _exclude_first_timestep = lambda t, A, B: jnp.where(t > 1, A, B)
 
 
-def _full_covariance_condition_on(m, P, y_cond_mean, y_cond_cov, u, y, num_iter, adaptive_variance=False, obs_noise_var=0.0):
+def _full_covariance_condition_on(m, P, y_cond_mean, y_cond_cov, u, y, num_iter, 
+                                  adaptive_variance=False, obs_noise_var=0.0,
+                                  inverse_free=False):
     """Condition on the emission using a full-covariance EKF.
     Note that this method uses `jnp.linalg.lstsq()` to solve the linear system
     to avoid numerical issues with `jnp.linalg.solve()`.
@@ -41,11 +43,16 @@ def _full_covariance_condition_on(m, P, y_cond_mean, y_cond_cov, u, y, num_iter,
         else:
             R = jnp.atleast_2d(Cov_Y(prior_mean))
         H =  _jacrev_2d(m_Y, prior_mean)
-        S = R + (H @ prior_cov @ H.T)
-        C = prior_cov @ H.T
-        K = jnp.linalg.lstsq(S, C.T)[0].T
-        posterior_mean = prior_mean + K @ (y - yhat)
-        posterior_cov = prior_cov - K @ S @ K.T
+        if inverse_free:
+            HTRinv = jnp.linalg.lstsq(R, H)[0].T
+            posterior_mean = prior_mean + prior_cov @ HTRinv @ (y - yhat)
+            posterior_cov = prior_cov - prior_cov @ HTRinv @ H @ prior_cov
+        else:
+            S = R + (H @ prior_cov @ H.T)
+            C = prior_cov @ H.T
+            K = jnp.linalg.lstsq(S, C.T)[0].T
+            posterior_mean = prior_mean + K @ (y - yhat)
+            posterior_cov = prior_cov - K @ S @ K.T
         return (posterior_mean, posterior_cov), _
 
     # Iterate re-linearization over posterior mean and covariance
@@ -54,7 +61,9 @@ def _full_covariance_condition_on(m, P, y_cond_mean, y_cond_cov, u, y, num_iter,
     return mu_cond, Sigma_cond
 
 
-def _fully_decoupled_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, num_iter, adaptive_variance=False, obs_noise_var=0.0):
+def _fully_decoupled_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, 
+                                      num_iter, adaptive_variance=False, 
+                                      obs_noise_var=0.0, inverse_free=False):
     """Condition on the emission using a fully decoupled EKF.
 
     Args:
@@ -82,10 +91,13 @@ def _fully_decoupled_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, 
         else:
             R = jnp.atleast_2d(Cov_Y(prior_mean))
         H =  _jacrev_2d(m_Y, prior_mean)
-        S = R + (vmap(lambda hh, pp: pp * jnp.outer(hh, hh), (1, 0))(H, prior_cov)).sum(axis=0)
-        K = prior_cov[:, None] * jnp.linalg.lstsq(S.T, H)[0].T
-        posterior_mean = prior_mean + K @ (y - yhat)
-        posterior_cov = prior_cov - prior_cov * vmap(lambda kk, hh: kk @ hh, (0, 1))(K, H)
+        if inverse_free:
+            raise NotImplementedError
+        else:
+            S = R + (vmap(lambda hh, pp: pp * jnp.outer(hh, hh), (1, 0))(H, prior_cov)).sum(axis=0)
+            K = prior_cov[:, None] * jnp.linalg.lstsq(S.T, H)[0].T
+            posterior_mean = prior_mean + K @ (y - yhat)
+            posterior_cov = prior_cov - prior_cov * vmap(lambda kk, hh: kk @ hh, (0, 1))(K, H)
         return (posterior_mean, posterior_cov), _
 
     # Iterate re-linearization over posterior mean and covariance
@@ -94,7 +106,9 @@ def _fully_decoupled_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, 
     return mu_cond, Sigma_cond
 
 
-def _variational_diagonal_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u, y, num_iter, adaptive_variance=False, obs_noise_var=0.0):
+def _variational_diagonal_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, 
+                                           u, y, num_iter, adaptive_variance=False, 
+                                           obs_noise_var=0.0, inverse_free=False):
     """Condition on the emission using a variational diagonal EKF.
 
     Args:
@@ -122,10 +136,15 @@ def _variational_diagonal_ekf_condition_on(m, P_diag, y_cond_mean, y_cond_cov, u
         else:
             R = jnp.atleast_2d(Cov_Y(prior_mean))
         H =  _jacrev_2d(m_Y, prior_mean)
-        K = jnp.linalg.lstsq((R + (prior_cov * H) @ H.T).T, prior_cov * H)[0].T
-        R_inv = jnp.linalg.lstsq(R, jnp.eye(R.shape[0]))[0]
-        posterior_cov = 1/(1/prior_cov + ((H.T @ R_inv) * H.T).sum(-1))
-        posterior_mean = prior_mean + K @(y - yhat)
+        if inverse_free:
+            HTRinv = jnp.linalg.lstsq(R, H)[0].T
+            posterior_mean = prior_mean + (prior_cov * HTRinv.T).T @ (y - yhat)
+            posterior_cov = prior_cov - prior_cov**2 * (HTRinv * H.T).sum(-1)
+        else:
+            K = jnp.linalg.lstsq((R + (prior_cov * H) @ H.T).T, prior_cov * H)[0].T
+            R_inv = jnp.linalg.lstsq(R, jnp.eye(R.shape[0]))[0]
+            posterior_cov = 1/(1/prior_cov + ((H.T @ R_inv) * H.T).sum(-1))
+            posterior_mean = prior_mean + K @ (y - yhat)
         return (posterior_mean, posterior_cov), _
 
     # Iterate re-linearization over posterior mean and covariance

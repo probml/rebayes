@@ -272,6 +272,7 @@ def bbf_ekf(
     callback_at_end=True,
     n_seeds=5,
     classification=True,
+    inverse_free=False,
     **kwargs,
 ):
     """
@@ -296,6 +297,7 @@ def bbf_ekf(
         dynamics_covariance_inflation_factor=alpha,
         emission_dist=emission_dist,
         method=method,
+        inverse_free=inverse_free,
     )
 
     test_cb_kwargs = {"agent": estimator, "X_test": X_test, "y_test": y_test, 
@@ -822,6 +824,9 @@ def create_optimizer(
             bbf = bbf_ekf_ocl
         elif "ekf-nf" in method:
             bbf = bbf_ekf_nf
+        elif "vdekf-if" in method:
+            curr_method = "vdekf"
+            bbf = partial(bbf_ekf, inverse_free=True)
         elif "ekf" in method:
             bbf = bbf_ekf
         elif "linear" in method:
@@ -962,6 +967,16 @@ def build_estimator(init_fn, hparams, method, classification=True, **kwargs):
             dim_output=kwargs["dim_output"],
             **hparams,
             **kwargs,
+        )
+    elif "vdekf-if" in method:
+        init_covariance = hparams.pop("initial_covariance")
+        estimator = ekf.RebayesEKF(
+            emission_mean_function=emission_mean_fn,
+            emission_cov_function=emission_cov_fn,
+            emission_dist=emission_dist,
+            method="vdekf",
+            inverse_free=True,
+            **hparams,
         )
     elif "ekf" in method or "linear" in method:
         if "linear" in method:
